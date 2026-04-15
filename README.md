@@ -46,8 +46,8 @@ npm run dev                   # starts Vite on http://localhost:5173
 
 Open http://localhost:5173 and sign in with:
 
-- **Email**: `president@gcig.local`
-- **Password**: `ChangeMe123!`
+- **Email**: set in `server/prisma/seed.js`
+- **Password**: set in `server/prisma/seed.js` — rotate immediately after first login
 
 **Rotate this password immediately** via the Profile page.
 

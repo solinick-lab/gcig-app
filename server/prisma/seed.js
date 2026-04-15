@@ -4,7 +4,7 @@ import bcrypt from 'bcrypt';
 const prisma = new PrismaClient();
 
 async function main() {
-  const email = 'president@gcig.local';
+  const email = 'wseirer@gcschool.org';
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
     console.log(`President account already exists: ${email}`);
@@ -14,7 +14,7 @@ async function main() {
   const passwordHash = await bcrypt.hash('ChangeMe123!', 10);
   const user = await prisma.user.create({
     data: {
-      name: 'Club President',
+      name: 'Thomas Seirer',
       email,
       passwordHash,
       role: 'President',
