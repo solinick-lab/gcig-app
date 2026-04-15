@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  President
+  CIO
+  SeniorPortfolioManager
+  PortfolioManager
+  SeniorAnalyst
+  JuniorAnalyst
+}
+
+enum AttendanceStatus {
+  Present
+  Absent
+  Excused
+}
+
+model User {
+  id           Int          @id @default(autoincrement())
+  name         String
+  email        String       @unique
+  passwordHash String
+  role         Role
+  createdAt    DateTime     @default(now())
+  attendance   Attendance[]
+}
+
+model Pitch {
+  id           Int      @id @default(autoincrement())
+  pitcherName  String
+  ticker       String
+  date         DateTime
+  location     String?
+  slideshowUrl String?
+  createdAt    DateTime @default(now())
+}
+
+model Event {
+  id              Int          @id @default(autoincrement())
+  title           String
+  date            DateTime
+  location        String?
+  description     String?
+  durationMinutes Int          @default(60)
+  recurring       Boolean      @default(false)
+  attendance      Attendance[]
+  createdAt       DateTime     @default(now())
+}
+
+model Holding {
+  id        Int      @id @default(autoincrement())
+  ticker    String
+  shares    Float
+  costBasis Float
+  addedAt   DateTime @default(now())
+}
+
+model Report {
+  id          Int      @id @default(autoincrement())
+  title       String
+  author      String
+  ticker      String?
+  date        DateTime
+  description String?
+  fileUrl     String
+  createdAt   DateTime @default(now())
+}
+
+model Attendance {
+  id      Int              @id @default(autoincrement())
+  userId  Int
+  eventId Int
+  status  AttendanceStatus
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event   Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventId])
+}
+
+model PortfolioSnapshot {
+  id         Int      @id @default(autoincrement())
+  date       DateTime @unique
+  totalValue Float
+}

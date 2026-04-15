@@ -1,0 +1,64 @@
+# Render Blueprint for GCIG
+# https://render.com/docs/blueprint-spec
+#
+# Creates three services at once:
+#   1. gcig-db        — managed PostgreSQL
+#   2. gcig-api       — Node/Express API (server/)
+#   3. gcig-client    — static site (client/)
+#
+# After first apply, set the R2_* secrets in the gcig-api service
+# dashboard, and update CLIENT_ORIGIN + VITE_API_BASE_URL with the
+# real onrender.com URLs once Render assigns them.
+
+databases:
+  - name: gcig-db
+    plan: free
+    postgresMajorVersion: 16
+
+services:
+  - type: web
+    name: gcig-api
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install && npx prisma generate && npx prisma migrate deploy && npm run prisma:seed
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: gcig-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PORT
+        value: "10000"
+      - key: CLIENT_ORIGIN
+        sync: false
+      - key: GCIG_SHEET_ID
+        value: 10b43Ry4YBfY_Uk_8nIlJLjmfNgzzjAm6BjN7UewSdRQ
+      - key: GCIG_SHEET_GID
+        value: "0"
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: R2_PUBLIC_URL
+        sync: false
+
+  - type: web
+    name: gcig-client
+    runtime: static
+    rootDir: client
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

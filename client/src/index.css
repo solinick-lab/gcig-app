@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: #F7F8FB;
+  color: #0D1626;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* react-big-calendar theming to match navy/gold palette */
+.rbc-calendar {
+  font-family: 'Inter', sans-serif;
+}
+.rbc-toolbar button {
+  color: #1B2A4A;
+  border-color: #E8EBF2;
+}
+.rbc-toolbar button.rbc-active,
+.rbc-toolbar button:hover {
+  background-color: #1B2A4A !important;
+  color: white !important;
+  border-color: #1B2A4A !important;
+}
+.rbc-event {
+  background-color: #1B2A4A !important;
+  border: none !important;
+  color: white !important;
+}
+.rbc-event.rbc-selected {
+  background-color: #C9A84C !important;
+  color: #1B2A4A !important;
+}
+.rbc-today {
+  background-color: #F4E9C6 !important;
+}
+.rbc-header {
+  color: #1B2A4A;
+  font-weight: 600;
+}
