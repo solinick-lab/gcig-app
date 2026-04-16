@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
-import { format } from 'date-fns';
+import { useEffect, useMemo, useState } from 'react';
+import { format, subDays, subMonths, subYears, startOfYear } from 'date-fns';
 import {
-  LineChart as RLineChart,
-  Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -14,6 +14,16 @@ import api from '../api/client.js';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
+
+const RANGES = [
+  { key: '1W', label: '1W', days: 7 },
+  { key: '1M', label: '1M', days: 30 },
+  { key: '3M', label: '3M', days: 90 },
+  { key: '6M', label: '6M', days: 180 },
+  { key: 'YTD', label: 'YTD' },
+  { key: '1Y', label: '1Y', days: 365 },
+  { key: 'ALL', label: 'All' },
+];
 
 function fmtMoney(n) {
   if (n == null) return '—';
@@ -61,9 +71,57 @@ export default function Portfolio() {
   const isUp = (totals.totalGainLoss ?? 0) >= 0;
   const holdings = data?.holdings || [];
 
-  const chartData = history.map((s) => ({
-    date: format(new Date(s.date), 'MMM d'),
-    value: Number(s.totalValue.toFixed(2)),
+  const [range, setRange] = useState('6M');
+
+  // Normalize history (with real Date objects) once.
+  const fullHistory = useMemo(
+    () =>
+      history.map((s) => ({
+        date: new Date(s.date),
+        value: Number(s.totalValue.toFixed(2)),
+      })),
+    [history]
+  );
+
+  // Filter by selected range.
+  const chartData = useMemo(() => {
+    if (fullHistory.length === 0) return [];
+    const now = new Date();
+    let cutoff;
+    if (range === 'ALL') return fullHistory;
+    if (range === 'YTD') cutoff = startOfYear(now);
+    else {
+      const r = RANGES.find((x) => x.key === range);
+      cutoff = r?.days ? subDays(now, r.days) : null;
+    }
+    return cutoff ? fullHistory.filter((d) => d.date >= cutoff) : fullHistory;
+  }, [fullHistory, range]);
+
+  // Tight y-axis domain — pad 1% so the line doesn't touch top/bottom.
+  const yDomain = useMemo(() => {
+    if (chartData.length === 0) return [0, 1];
+    const values = chartData.map((d) => d.value);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const pad = (max - min) * 0.05 || max * 0.01;
+    return [Math.floor(min - pad), Math.ceil(max + pad)];
+  }, [chartData]);
+
+  // Change between first and last point in the visible range.
+  const rangeChange = useMemo(() => {
+    if (chartData.length < 2) return null;
+    const start = chartData[0].value;
+    const end = chartData[chartData.length - 1].value;
+    const diff = end - start;
+    const pct = start > 0 ? (diff / start) * 100 : 0;
+    return { diff, pct };
+  }, [chartData]);
+
+  // Build display data with a short date label. For long ranges we thin labels out.
+  const displayData = chartData.map((d) => ({
+    ...d,
+    label: format(d.date, chartData.length > 90 ? 'MMM yyyy' : 'MMM d'),
+    tooltipLabel: format(d.date, 'MMM d, yyyy'),
   }));
 
   return (
@@ -137,35 +195,91 @@ export default function Portfolio() {
       </div>
 
       <div className="mt-6">
-        <Card title="Performance Over Time">
-          {chartData.length > 1 ? (
-            <div style={{ width: '100%', height: 280 }}>
+        <Card>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-navy">Performance Over Time</div>
+              {rangeChange && (
+                <div
+                  className={`mt-1 text-sm font-semibold ${
+                    rangeChange.diff >= 0 ? 'text-emerald-600' : 'text-red-600'
+                  }`}
+                >
+                  {rangeChange.diff >= 0 ? '+' : ''}
+                  {fmtMoney(rangeChange.diff)} ({rangeChange.diff >= 0 ? '+' : ''}
+                  {rangeChange.pct.toFixed(2)}%) <span className="text-navy-400 font-normal">in {RANGES.find((r) => r.key === range)?.label}</span>
+                </div>
+              )}
+            </div>
+            <div className="flex rounded-lg border border-navy-100 bg-white p-0.5">
+              {RANGES.map((r) => (
+                <button
+                  key={r.key}
+                  onClick={() => setRange(r.key)}
+                  className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
+                    range === r.key
+                      ? 'bg-navy text-white'
+                      : 'text-navy-400 hover:text-navy'
+                  }`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {displayData.length > 1 ? (
+            <div style={{ width: '100%', height: 320 }}>
               <ResponsiveContainer>
-                <RLineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E8EBF2" />
-                  <XAxis dataKey="date" stroke="#1B2A4A" fontSize={12} />
+                <AreaChart data={displayData} margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
+                  <defs>
+                    <linearGradient id="navyFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#1B2A4A" stopOpacity={0.25} />
+                      <stop offset="100%" stopColor="#1B2A4A" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid vertical={false} stroke="#E8EBF2" strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="label"
+                    stroke="#8C99BB"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    minTickGap={40}
+                  />
                   <YAxis
-                    stroke="#1B2A4A"
-                    fontSize={12}
+                    stroke="#8C99BB"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    domain={yDomain}
                     tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                    width={55}
                   />
                   <Tooltip
-                    formatter={(v) => fmtMoney(v)}
-                    contentStyle={{ borderRadius: 8, borderColor: '#C9A84C' }}
+                    formatter={(v) => [fmtMoney(v), 'Value']}
+                    labelFormatter={(_, payload) => payload?.[0]?.payload?.tooltipLabel || ''}
+                    contentStyle={{
+                      borderRadius: 8,
+                      borderColor: '#C9A84C',
+                      fontSize: 12,
+                    }}
                   />
-                  <Line
+                  <Area
                     type="monotone"
                     dataKey="value"
                     stroke="#1B2A4A"
                     strokeWidth={2.5}
-                    dot={{ fill: '#C9A84C', r: 3 }}
+                    fill="url(#navyFill)"
+                    dot={false}
+                    activeDot={{ r: 5, fill: '#C9A84C', stroke: '#1B2A4A', strokeWidth: 2 }}
                   />
-                </RLineChart>
+                </AreaChart>
               </ResponsiveContainer>
             </div>
           ) : (
             <div className="py-8 text-center text-sm text-navy-400">
-              Performance history will populate as daily snapshots accrue.
+              Not enough data in this range.
             </div>
           )}
         </Card>
