@@ -32,6 +32,11 @@ const CASH_FLOWS = [
   { date: new Date('2026-01-29T12:00:00Z'), amount: 25000, label: 'Capital infusion' },
 ];
 
+// Annualized risk-free rate used in the Sharpe calculation.
+// Currently set to the 3-month US Treasury yield (~4.25% as of Apr 2026).
+// Update this constant if T-bill rates shift meaningfully.
+const RISK_FREE_RATE = 0.0425;
+
 function fmtMoney(n) {
   if (n == null) return '—';
   return n.toLocaleString('en-US', {
@@ -159,8 +164,10 @@ export default function Portfolio() {
       returns.reduce((s, r) => s + (r - mean) ** 2, 0) / returns.length;
     const std = Math.sqrt(variance);
     if (std === 0) return null;
-    // Annualize using ~252 trading days
-    return (mean * 252) / (std * Math.sqrt(252));
+    // Annualize using ~252 trading days, then subtract the risk-free rate.
+    const annualReturn = mean * 252;
+    const annualStd = std * Math.sqrt(252);
+    return (annualReturn - RISK_FREE_RATE) / annualStd;
   }, [fullHistory]);
 
   // Change between first and last point in the visible range.
@@ -290,7 +297,7 @@ export default function Portfolio() {
                 {sharpe.toFixed(2)}
               </div>
               <div className="mt-1 text-xs text-navy-400">
-                Annualized • Rf = 0
+                Annualized • Rf = {(RISK_FREE_RATE * 100).toFixed(2)}% (3mo T-bill)
               </div>
             </>
           ) : (
