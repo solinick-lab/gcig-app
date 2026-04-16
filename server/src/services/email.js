@@ -53,7 +53,7 @@ export async function sendVerificationCode(toEmail, code) {
   });
 }
 
-export async function sendInviteEmail(toEmail, { name, tempPassword, role, loginUrl }) {
+export async function sendInviteEmail(toEmail, { name, role, inviteUrl }) {
   await getTransporter().sendMail({
     from: from(),
     to: toEmail,
@@ -71,19 +71,18 @@ export async function sendInviteEmail(toEmail, { name, tempPassword, role, login
             Hi ${name},
           </p>
           <p style="color: #1B2A4A; font-size: 14px; margin: 0 0 16px;">
-            You've been added to the Grace Church School Investment Group as a <strong>${role}</strong>. Here are your login credentials:
+            You've been invited to join the Grace Church School Investment Group as a <strong>${role}</strong>. Click below to set your password and activate your account.
           </p>
-          <div style="background: #1B2A4A; border-radius: 8px; padding: 16px; margin: 0 0 16px;">
-            <p style="color: #8C99BB; font-size: 12px; margin: 0 0 4px;">Email</p>
-            <p style="color: white; font-size: 14px; font-weight: 600; margin: 0 0 12px;">${toEmail}</p>
-            <p style="color: #8C99BB; font-size: 12px; margin: 0 0 4px;">Temporary Password</p>
-            <p style="color: #C9A84C; font-size: 18px; font-weight: 700; font-family: monospace; margin: 0;">${tempPassword}</p>
+          <div style="text-align: center; margin: 24px 0;">
+            <a href="${inviteUrl}" style="display: inline-block; background: #C9A84C; color: #1B2A4A; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 32px; border-radius: 8px;">
+              Set Up Your Account
+            </a>
           </div>
-          <a href="${loginUrl}" style="display: inline-block; background: #C9A84C; color: #1B2A4A; font-size: 14px; font-weight: 600; text-decoration: none; padding: 10px 24px; border-radius: 8px;">
-            Sign in to GCIG
-          </a>
           <p style="color: #8C99BB; font-size: 12px; margin: 16px 0 0;">
-            Please change your password after your first login by going to Profile → Change Password.
+            This link expires in 7 days. If the button doesn't work, copy and paste this URL into your browser:
+          </p>
+          <p style="color: #1B2A4A; font-size: 11px; font-family: monospace; word-break: break-all; margin: 8px 0 0;">
+            ${inviteUrl}
           </p>
         </div>
       </div>

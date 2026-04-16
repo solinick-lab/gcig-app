@@ -133,6 +133,16 @@ model PendingVerification {
   createdAt    DateTime @default(now())
 }
 
+model PendingInvite {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String
+  role      Role
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
 model PortfolioSnapshot {
   id         Int      @id @default(autoincrement())
   date       DateTime @unique

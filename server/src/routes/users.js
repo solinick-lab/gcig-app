@@ -31,6 +31,8 @@ router.get('/', async (_req, res) => {
   res.json(users);
 });
 
+// Invite a new member. No account is created yet — just a PendingInvite record
+// and an email with a one-time link where they set their own password.
 router.post('/', requireAdmin, async (req, res) => {
   const { name, email, role } = req.body || {};
   if (!name || !email || !role) {
@@ -39,45 +41,61 @@ router.post('/', requireAdmin, async (req, res) => {
   if (!ROLES.includes(role)) {
     return res.status(400).json({ error: 'Invalid role' });
   }
-  const tempPassword = generateTempPassword();
-  const passwordHash = await bcrypt.hash(tempPassword, 10);
-  try {
-    const user = await prisma.user.create({
-      data: { name, email: email.toLowerCase(), role, passwordHash },
-      select: { id: true, name: true, email: true, role: true, createdAt: true },
-    });
+  const normalized = String(email).trim().toLowerCase();
 
-    // Send invite email with credentials. Non-fatal — if email fails,
-    // the account is still created and the temp password is shown to the President.
-    let emailSent = false;
-    try {
-      const loginUrl = process.env.CLIENT_ORIGIN || 'https://gcig-client.onrender.com';
-      const ROLE_LABELS = {
-        President: 'President',
-        CIO: 'CIO',
-        SeniorPortfolioManager: 'Senior Portfolio Manager',
-        PortfolioManager: 'Portfolio Manager',
-        SeniorAnalyst: 'Senior Analyst',
-        JuniorAnalyst: 'Junior Analyst',
-      };
-      await sendInviteEmail(user.email, {
-        name: user.name,
-        tempPassword,
-        role: ROLE_LABELS[user.role] || user.role,
-        loginUrl,
-      });
-      emailSent = true;
-    } catch (emailErr) {
-      console.error('Invite email failed:', emailErr.message);
-    }
-
-    res.status(201).json({ user, tempPassword, emailSent });
-  } catch (err) {
-    if (err.code === 'P2002') {
-      return res.status(409).json({ error: 'Email already in use' });
-    }
-    throw err;
+  // Reject if a real account already exists for this email.
+  const existingUser = await prisma.user.findUnique({ where: { email: normalized } });
+  if (existingUser) {
+    return res.status(409).json({ error: 'An account with that email already exists' });
   }
+
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+  // Upsert so re-inviting the same email just generates a fresh token.
+  await prisma.pendingInvite.upsert({
+    where: { email: normalized },
+    update: { name: String(name).trim(), role, token, expiresAt },
+    create: {
+      email: normalized,
+      name: String(name).trim(),
+      role,
+      token,
+      expiresAt,
+    },
+  });
+
+  const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+  const inviteUrl = `${clientOrigin}/accept-invite?token=${token}`;
+
+  const ROLE_LABELS = {
+    President: 'President',
+    CIO: 'CIO',
+    SeniorPortfolioManager: 'Senior Portfolio Manager',
+    PortfolioManager: 'Portfolio Manager',
+    SeniorAnalyst: 'Senior Analyst',
+    JuniorAnalyst: 'Junior Analyst',
+  };
+
+  let emailSent = false;
+  try {
+    await sendInviteEmail(normalized, {
+      name: String(name).trim(),
+      role: ROLE_LABELS[role] || role,
+      inviteUrl,
+    });
+    emailSent = true;
+  } catch (emailErr) {
+    console.error('Invite email failed:', emailErr.message);
+  }
+
+  res.status(201).json({
+    email: normalized,
+    name: String(name).trim(),
+    role,
+    inviteUrl,
+    emailSent,
+  });
 });
 
 router.put('/:id', requireAdmin, async (req, res) => {

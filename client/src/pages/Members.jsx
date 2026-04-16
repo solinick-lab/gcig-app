@@ -34,8 +34,8 @@ export default function Members() {
     e.preventDefault();
     const { data } = await api.post('/users', form);
     setTempPassword({
-      email: data.user.email,
-      password: data.tempPassword,
+      email: data.email,
+      inviteUrl: data.inviteUrl,
       emailSent: data.emailSent,
     });
     setForm({ name: '', email: '', role: 'JuniorAnalyst' });
@@ -173,7 +173,7 @@ export default function Members() {
           setTempPassword(null);
           setModalOpen(false);
         }}
-        title="Member Invited"
+        title="Invite Sent"
       >
         {tempPassword && (
           <div className="space-y-3">
@@ -183,37 +183,28 @@ export default function Members() {
                   Invite email sent to {tempPassword.email}
                 </div>
                 <div className="mt-1 text-xs text-emerald-700">
-                  They'll receive their login credentials and a link to sign in.
+                  They'll receive a link to set their password and sign in. Link expires in 7 days.
                 </div>
               </div>
             ) : (
               <div className="rounded-lg bg-gold-100 border border-gold-300 px-4 py-3">
                 <div className="text-sm font-semibold text-gold-800">
-                  Email could not be sent — share credentials manually
+                  Email could not be sent — share the invite link manually
                 </div>
               </div>
             )}
             <p className="text-xs text-navy-400">
-              Backup — credentials shown once:
+              Invite link (valid 7 days):
             </p>
-            <div className="rounded-lg bg-navy-50 p-4 font-mono text-sm">
-              <div>
-                <span className="text-navy-400">email: </span>
-                <span className="font-bold text-navy">{tempPassword.email}</span>
-              </div>
-              <div>
-                <span className="text-navy-400">password: </span>
-                <span className="font-bold text-navy">{tempPassword.password}</span>
-              </div>
+            <div className="rounded-lg bg-navy-50 p-3 font-mono text-xs break-all text-navy">
+              {tempPassword.inviteUrl}
             </div>
             <Button
               onClick={() => {
-                navigator.clipboard.writeText(
-                  `email: ${tempPassword.email}\npassword: ${tempPassword.password}`
-                );
+                navigator.clipboard.writeText(tempPassword.inviteUrl);
               }}
             >
-              Copy to clipboard
+              Copy invite link
             </Button>
           </div>
         )}

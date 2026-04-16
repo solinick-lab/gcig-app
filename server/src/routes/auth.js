@@ -142,6 +142,69 @@ router.post('/resend-code', async (req, res) => {
   res.json({ message: 'New code sent', email: normalized });
 });
 
+// Fetch invite metadata by token (used by AcceptInvite page to display name/role).
+router.get('/invite/:token', async (req, res) => {
+  const invite = await prisma.pendingInvite.findUnique({
+    where: { token: req.params.token },
+  });
+  if (!invite) {
+    return res.status(404).json({ error: 'Invalid or used invite link' });
+  }
+  if (new Date() > invite.expiresAt) {
+    return res.status(400).json({ error: 'This invite has expired. Ask the President to re-send.' });
+  }
+  res.json({ email: invite.email, name: invite.name, role: invite.role });
+});
+
+// Accept an invite — invitee picks their password, account is created, JWT returned.
+router.post('/accept-invite', async (req, res) => {
+  const { token, password } = req.body || {};
+  if (!token || !password) {
+    return res.status(400).json({ error: 'Token and password required' });
+  }
+  if (password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  }
+
+  const invite = await prisma.pendingInvite.findUnique({ where: { token } });
+  if (!invite) {
+    return res.status(400).json({ error: 'Invalid or used invite link' });
+  }
+  if (new Date() > invite.expiresAt) {
+    return res.status(400).json({ error: 'This invite has expired. Ask the President to re-send.' });
+  }
+
+  // Guard against a real account being created between invite send + accept.
+  const existingUser = await prisma.user.findUnique({
+    where: { email: invite.email },
+  });
+  if (existingUser) {
+    await prisma.pendingInvite.delete({ where: { id: invite.id } });
+    return res.status(409).json({ error: 'An account with that email already exists' });
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const user = await prisma.user.create({
+    data: {
+      name: invite.name,
+      email: invite.email,
+      role: invite.role,
+      passwordHash,
+    },
+  });
+  await prisma.pendingInvite.delete({ where: { id: invite.id } });
+
+  const jwtToken = jwt.sign(
+    { id: user.id, role: user.role },
+    process.env.JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+  res.status(201).json({
+    token: jwtToken,
+    user: { id: user.id, name: user.name, email: user.email, role: user.role },
+  });
+});
+
 router.post('/login', async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) {
