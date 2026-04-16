@@ -20,7 +20,7 @@ function emptyForm() {
     ticker: '',
     date: '',
     location: '',
-    slideshow: null,
+    slideshowUrl: '',
   };
 }
 
@@ -61,7 +61,7 @@ export default function Pitches() {
       ticker: pitch.ticker,
       date: new Date(pitch.date).toISOString().slice(0, 16),
       location: pitch.location || '',
-      slideshow: null,
+      slideshowUrl: pitch.slideshowUrl || '',
     });
     setModalOpen(true);
     setSelected(null);
@@ -72,17 +72,18 @@ export default function Pitches() {
     setError('');
     setSubmitting(true);
     try {
-      const fd = new FormData();
-      fd.append('pitcherName', form.pitcherName);
-      fd.append('ticker', form.ticker);
-      fd.append('date', new Date(form.date).toISOString());
-      if (form.location) fd.append('location', form.location);
-      if (form.slideshow) fd.append('slideshow', form.slideshow);
+      const body = {
+        pitcherName: form.pitcherName,
+        ticker: form.ticker,
+        date: new Date(form.date).toISOString(),
+        location: form.location || null,
+        slideshowUrl: form.slideshowUrl || null,
+      };
 
       if (form.id) {
-        await api.put(`/pitches/${form.id}`, fd);
+        await api.put(`/pitches/${form.id}`, body);
       } else {
-        await api.post('/pitches', fd);
+        await api.post('/pitches', body);
       }
       setModalOpen(false);
       load();
@@ -209,12 +210,13 @@ export default function Pitches() {
             onChange={(v) => setForm({ ...form, location: v })}
           />
           <div>
-            <label className="block text-sm font-medium text-navy">Slideshow (PDF/PPTX)</label>
+            <label className="block text-sm font-medium text-navy">Slideshow Link (Google Slides, etc.)</label>
             <input
-              type="file"
-              accept=".pdf,.ppt,.pptx"
-              onChange={(e) => setForm({ ...form, slideshow: e.target.files[0] })}
-              className="mt-1 w-full text-sm"
+              type="url"
+              value={form.slideshowUrl}
+              onChange={(e) => setForm({ ...form, slideshowUrl: e.target.value })}
+              placeholder="https://docs.google.com/presentation/d/..."
+              className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
             />
           </div>
           {error && (
