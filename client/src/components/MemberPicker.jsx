@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, UserPlus } from 'lucide-react';
+import { ROLE_LABELS } from './RoleBadge.jsx';
 
 /**
  * Multi-select member picker with autocomplete.
@@ -80,11 +81,13 @@ export default function MemberPicker({ users, value, onChange }) {
               <button
                 type="button"
                 onClick={() => addUser(u)}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-navy-50"
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-navy-50"
               >
-                <UserPlus className="h-4 w-4 text-gold" />
-                <span className="font-medium text-navy">{u.name}</span>
-                <span className="ml-auto text-xs text-navy-400">{u.role}</span>
+                <UserPlus className="h-4 w-4 shrink-0 text-gold" />
+                <span className="flex-1 truncate font-medium text-navy">{u.name}</span>
+                <span className="shrink-0 text-xs text-navy-400 whitespace-nowrap">
+                  {ROLE_LABELS[u.role] || u.role}
+                </span>
               </button>
             </li>
           ))}

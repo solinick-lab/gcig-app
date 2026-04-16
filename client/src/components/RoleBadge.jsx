@@ -6,8 +6,8 @@ const ROLE_LABELS = {
   SeniorAnalyst: 'Senior Analyst',
   Analyst: 'Analyst',
   JuniorAnalyst: 'Junior Analyst',
-  AdvisoryBoardMember: 'Advisory Board',
-  FacultyAdvisory: 'Faculty',
+  AdvisoryBoardMember: 'Advisory Board Member',
+  FacultyAdvisory: 'Faculty Advisor',
 };
 
 const VARIANTS = {
