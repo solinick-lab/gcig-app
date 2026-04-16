@@ -3,6 +3,7 @@ import bcrypt from 'bcrypt';
 import crypto from 'node:crypto';
 import prisma from '../db.js';
 import { verifyJwt, requireAdmin } from '../middleware/auth.js';
+import { sendInviteEmail } from '../services/email.js';
 
 const router = Router();
 
@@ -45,8 +46,32 @@ router.post('/', requireAdmin, async (req, res) => {
       data: { name, email: email.toLowerCase(), role, passwordHash },
       select: { id: true, name: true, email: true, role: true, createdAt: true },
     });
-    // Temp password returned ONCE — President shares out-of-band.
-    res.status(201).json({ user, tempPassword });
+
+    // Send invite email with credentials. Non-fatal — if email fails,
+    // the account is still created and the temp password is shown to the President.
+    let emailSent = false;
+    try {
+      const loginUrl = process.env.CLIENT_ORIGIN || 'https://gcig-client.onrender.com';
+      const ROLE_LABELS = {
+        President: 'President',
+        CIO: 'CIO',
+        SeniorPortfolioManager: 'Senior Portfolio Manager',
+        PortfolioManager: 'Portfolio Manager',
+        SeniorAnalyst: 'Senior Analyst',
+        JuniorAnalyst: 'Junior Analyst',
+      };
+      await sendInviteEmail(user.email, {
+        name: user.name,
+        tempPassword,
+        role: ROLE_LABELS[user.role] || user.role,
+        loginUrl,
+      });
+      emailSent = true;
+    } catch (emailErr) {
+      console.error('Invite email failed:', emailErr.message);
+    }
+
+    res.status(201).json({ user, tempPassword, emailSent });
   } catch (err) {
     if (err.code === 'P2002') {
       return res.status(409).json({ error: 'Email already in use' });

@@ -33,7 +33,11 @@ export default function Members() {
   async function handleCreate(e) {
     e.preventDefault();
     const { data } = await api.post('/users', form);
-    setTempPassword({ email: data.user.email, password: data.tempPassword });
+    setTempPassword({
+      email: data.user.email,
+      password: data.tempPassword,
+      emailSent: data.emailSent,
+    });
     setForm({ name: '', email: '', role: 'JuniorAnalyst' });
     load();
   }
@@ -169,13 +173,28 @@ export default function Members() {
           setTempPassword(null);
           setModalOpen(false);
         }}
-        title="Temporary Password"
+        title="Member Invited"
       >
         {tempPassword && (
           <div className="space-y-3">
-            <p className="text-sm text-navy">
-              Share these credentials with <strong>{tempPassword.email}</strong>. This is
-              the only time the password will be shown.
+            {tempPassword.emailSent ? (
+              <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3">
+                <div className="text-sm font-semibold text-emerald-800">
+                  Invite email sent to {tempPassword.email}
+                </div>
+                <div className="mt-1 text-xs text-emerald-700">
+                  They'll receive their login credentials and a link to sign in.
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-lg bg-gold-100 border border-gold-300 px-4 py-3">
+                <div className="text-sm font-semibold text-gold-800">
+                  Email could not be sent — share credentials manually
+                </div>
+              </div>
+            )}
+            <p className="text-xs text-navy-400">
+              Backup — credentials shown once:
             </p>
             <div className="rounded-lg bg-navy-50 p-4 font-mono text-sm">
               <div>
