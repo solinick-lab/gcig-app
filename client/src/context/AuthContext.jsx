@@ -40,10 +40,20 @@ export function AuthProvider({ children }) {
 
   async function signup(name, email, password) {
     const res = await api.post('/auth/signup', { name, email, password });
+    return res.data; // { message, email } — no token yet, needs verification
+  }
+
+  async function verify(email, code) {
+    const res = await api.post('/auth/verify', { email, code });
     localStorage.setItem('gcig_token', res.data.token);
     localStorage.setItem('gcig_user', JSON.stringify(res.data.user));
     setUser(res.data.user);
     return res.data.user;
+  }
+
+  async function resendCode(email) {
+    const res = await api.post('/auth/resend-code', { email });
+    return res.data;
   }
 
   function logout() {
@@ -55,7 +65,7 @@ export function AuthProvider({ children }) {
   const isAdmin = user?.role === 'President';
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout, isAdmin }}>
+    <AuthContext.Provider value={{ user, loading, login, signup, verify, resendCode, logout, isAdmin }}>
       {children}
     </AuthContext.Provider>
   );

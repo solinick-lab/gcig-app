@@ -1,14 +1,21 @@
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
+import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import prisma from '../db.js';
 import { verifyJwt } from '../middleware/auth.js';
+import { sendVerificationCode } from '../services/email.js';
 
 const router = Router();
 
-// Domain that may self-sign-up. Everything else must be invited by the President.
 const ALLOWED_SIGNUP_DOMAIN = '@gcschool.org';
+const CODE_EXPIRY_MINUTES = 10;
 
+function generateCode() {
+  return crypto.randomInt(100000, 999999).toString();
+}
+
+// Step 1: User submits name/email/password → server sends a 6-digit code.
 router.post('/signup', async (req, res) => {
   const { name, email, password } = req.body || {};
   if (!name || !email || !password) {
@@ -30,15 +37,69 @@ router.post('/signup', async (req, res) => {
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
-  const user = await prisma.user.create({
-    data: {
+  const code = generateCode();
+  const expiresAt = new Date(Date.now() + CODE_EXPIRY_MINUTES * 60 * 1000);
+
+  // Upsert so re-signups before verification just refresh the code.
+  await prisma.pendingVerification.upsert({
+    where: { email: normalized },
+    update: { name: String(name).trim(), passwordHash, code, expiresAt },
+    create: {
       name: String(name).trim(),
       email: normalized,
       passwordHash,
-      // Lowest privilege by default. President can promote via Members page.
+      code,
+      expiresAt,
+    },
+  });
+
+  try {
+    await sendVerificationCode(normalized, code);
+  } catch (err) {
+    console.error('Failed to send verification email:', err.message);
+    return res.status(500).json({ error: 'Failed to send verification email. Try again.' });
+  }
+
+  res.json({ message: 'Verification code sent', email: normalized });
+});
+
+// Step 2: User submits the code → server creates the real account + returns JWT.
+router.post('/verify', async (req, res) => {
+  const { email, code } = req.body || {};
+  if (!email || !code) {
+    return res.status(400).json({ error: 'Email and code required' });
+  }
+  const normalized = String(email).trim().toLowerCase();
+  const pending = await prisma.pendingVerification.findUnique({
+    where: { email: normalized },
+  });
+
+  if (!pending) {
+    return res.status(400).json({ error: 'No pending signup for this email. Start over.' });
+  }
+  if (pending.code !== String(code).trim()) {
+    return res.status(400).json({ error: 'Incorrect code' });
+  }
+  if (new Date() > pending.expiresAt) {
+    return res.status(400).json({ error: 'Code expired. Click "Resend" to get a new one.' });
+  }
+
+  // Double-check no one registered while the code was pending.
+  const existingUser = await prisma.user.findUnique({ where: { email: normalized } });
+  if (existingUser) {
+    await prisma.pendingVerification.delete({ where: { email: normalized } });
+    return res.status(409).json({ error: 'An account with that email already exists' });
+  }
+
+  const user = await prisma.user.create({
+    data: {
+      name: pending.name,
+      email: normalized,
+      passwordHash: pending.passwordHash,
       role: 'JuniorAnalyst',
     },
   });
+  await prisma.pendingVerification.delete({ where: { email: normalized } });
 
   const token = jwt.sign(
     { id: user.id, role: user.role },
@@ -49,6 +110,36 @@ router.post('/signup', async (req, res) => {
     token,
     user: { id: user.id, name: user.name, email: user.email, role: user.role },
   });
+});
+
+// Resend a fresh code (same pending signup, new code + expiry).
+router.post('/resend-code', async (req, res) => {
+  const { email } = req.body || {};
+  if (!email) return res.status(400).json({ error: 'Email required' });
+  const normalized = String(email).trim().toLowerCase();
+
+  const pending = await prisma.pendingVerification.findUnique({
+    where: { email: normalized },
+  });
+  if (!pending) {
+    return res.status(400).json({ error: 'No pending signup for this email. Start over.' });
+  }
+
+  const code = generateCode();
+  const expiresAt = new Date(Date.now() + CODE_EXPIRY_MINUTES * 60 * 1000);
+  await prisma.pendingVerification.update({
+    where: { email: normalized },
+    data: { code, expiresAt },
+  });
+
+  try {
+    await sendVerificationCode(normalized, code);
+  } catch (err) {
+    console.error('Failed to resend verification email:', err.message);
+    return res.status(500).json({ error: 'Failed to send email. Try again.' });
+  }
+
+  res.json({ message: 'New code sent', email: normalized });
 });
 
 router.post('/login', async (req, res) => {

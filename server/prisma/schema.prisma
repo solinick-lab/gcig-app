@@ -123,6 +123,16 @@ model Attendance {
   @@unique([userId, eventId])
 }
 
+model PendingVerification {
+  id           Int      @id @default(autoincrement())
+  name         String
+  email        String   @unique
+  passwordHash String
+  code         String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+}
+
 model PortfolioSnapshot {
   id         Int      @id @default(autoincrement())
   date       DateTime @unique
