@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import crypto from 'node:crypto';
 import prisma from '../db.js';
-import { verifyJwt, requireAdmin } from '../middleware/auth.js';
+import { verifyJwt, requireAdmin, ROLE_RANK } from '../middleware/auth.js';
 import { sendInviteEmail } from '../services/email.js';
 
 const router = Router();
@@ -135,6 +135,63 @@ router.put('/:id', requireAdmin, async (req, res) => {
     select: { id: true, name: true, email: true, role: true, createdAt: true },
   });
   res.json(user);
+});
+
+// Change a user's primary role.
+//   - President: can change anyone's role to anything.
+//   - Industry leader: can change roles of members in industries they lead,
+//     but only if target's current rank AND new rank are both strictly below
+//     the leader's own rank.
+//   - Everyone else: forbidden.
+router.put('/:id/role', async (req, res) => {
+  const targetId = Number(req.params.id);
+  const { role: newRole } = req.body || {};
+  if (!newRole || !ROLES.includes(newRole)) {
+    return res.status(400).json({ error: 'Invalid role' });
+  }
+
+  const target = await prisma.user.findUnique({ where: { id: targetId } });
+  if (!target) return res.status(404).json({ error: 'User not found' });
+
+  // President: no restrictions.
+  if (req.user.role === 'President') {
+    const updated = await prisma.user.update({
+      where: { id: targetId },
+      data: { role: newRole },
+      select: { id: true, name: true, email: true, role: true, extraRoles: true },
+    });
+    return res.json(updated);
+  }
+
+  // Must lead an industry that contains the target.
+  const sharedIndustry = await prisma.industry.findFirst({
+    where: {
+      leaderId: req.user.id,
+      members: { some: { userId: targetId } },
+    },
+  });
+  if (!sharedIndustry) {
+    return res.status(403).json({
+      error: "You can only change roles of members in industries you lead",
+    });
+  }
+
+  const callerRank = ROLE_RANK[req.user.role] ?? 0;
+  const currentRank = ROLE_RANK[target.role] ?? 0;
+  const newRank = ROLE_RANK[newRole] ?? 0;
+  if (currentRank >= callerRank) {
+    return res.status(403).json({ error: 'Target is at or above your rank' });
+  }
+  if (newRank >= callerRank) {
+    return res.status(403).json({ error: "You can't assign a role at or above your own rank" });
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: targetId },
+    data: { role: newRole },
+    select: { id: true, name: true, email: true, role: true, extraRoles: true },
+  });
+  res.json(updated);
 });
 
 // Set the entire extra roles array (replaces existing).

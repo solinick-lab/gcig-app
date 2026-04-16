@@ -6,9 +6,35 @@ import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
 import Modal from '../components/Modal.jsx';
-import RoleBadge from '../components/RoleBadge.jsx';
+import RoleBadge, { ROLE_LABELS } from '../components/RoleBadge.jsx';
 
 const LEADER_ROLES = new Set(['President', 'CIO', 'SeniorPortfolioManager', 'PortfolioManager']);
+
+// Must match the server's ROLE_RANK — used to decide which roles a leader
+// can assign to members in their industry.
+const ROLE_RANK = {
+  President: 10,
+  CIO: 9,
+  SeniorPortfolioManager: 8,
+  PortfolioManager: 7,
+  SeniorAnalyst: 6,
+  Analyst: 5,
+  JuniorAnalyst: 4,
+  AdvisoryBoardMember: 3,
+  FacultyAdvisory: 3,
+};
+
+const ALL_ROLES = [
+  'President',
+  'CIO',
+  'SeniorPortfolioManager',
+  'PortfolioManager',
+  'SeniorAnalyst',
+  'Analyst',
+  'JuniorAnalyst',
+  'AdvisoryBoardMember',
+  'FacultyAdvisory',
+];
 
 export default function Industries() {
   const { user, isAdmin } = useAuth();
@@ -75,6 +101,18 @@ export default function Industries() {
     const fresh = await api.get('/industries');
     const refreshed = fresh.data.find((i) => i.id === industryId);
     setMemberModal(refreshed || null);
+  }
+
+  async function handleChangeMemberRole(userId, newRole) {
+    try {
+      await api.put(`/users/${userId}/role`, { role: newRole });
+      load();
+      const fresh = await api.get('/industries');
+      const refreshed = fresh.data.find((i) => i.id === memberModal.id);
+      setMemberModal(refreshed || null);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to change role');
+    }
   }
 
   return (
@@ -221,65 +259,141 @@ export default function Industries() {
         title={memberModal ? `Members of ${memberModal.name}` : ''}
       >
         {memberModal && (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-sm font-medium text-navy">Add Member</label>
-              <div className="mt-1 flex gap-2">
-                <select
-                  value={addUserId}
-                  onChange={(e) => setAddUserId(e.target.value)}
-                  className="flex-1 rounded-lg border border-navy-100 px-3 py-2 text-sm"
-                >
-                  <option value="">Select a member…</option>
-                  {users
-                    .filter((u) => !memberModal.members.some((m) => m.id === u.id))
-                    .map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name}
-                      </option>
-                    ))}
-                </select>
-                <Button
-                  onClick={() => handleAddMember(memberModal.id, addUserId)}
-                  disabled={!addUserId}
-                >
-                  Add
-                </Button>
-              </div>
-            </div>
+          <MemberModalBody
+            industry={memberModal}
+            users={users}
+            isAdmin={isAdmin}
+            currentUser={user}
+            addUserId={addUserId}
+            setAddUserId={setAddUserId}
+            onAdd={handleAddMember}
+            onRemove={handleRemoveMember}
+            onChangeRole={handleChangeMemberRole}
+          />
+        )}
+      </Modal>
+    </>
+  );
+}
 
-            <div className="mt-4">
-              <div className="text-xs font-semibold uppercase text-navy-400">
-                Current Members
-              </div>
-              {memberModal.members.length === 0 ? (
-                <div className="mt-2 text-sm text-navy-400">No members yet.</div>
-              ) : (
-                <ul className="mt-2 space-y-2">
-                  {memberModal.members.map((m) => (
-                    <li
-                      key={m.id}
-                      className="flex items-center justify-between gap-2 rounded-lg border border-navy-100 px-3 py-2"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-navy">{m.name}</span>
-                        <RoleBadge role={m.role} />
-                      </div>
+function MemberModalBody({
+  industry,
+  users,
+  isAdmin,
+  currentUser,
+  addUserId,
+  setAddUserId,
+  onAdd,
+  onRemove,
+  onChangeRole,
+}) {
+  const isLeader = currentUser?.id === industry.leader?.id;
+  const canAddRemove = isAdmin;
+  const canChangeRoles = isAdmin || isLeader;
+
+  // Leader: can only assign roles strictly below their own rank.
+  const callerRank = isAdmin
+    ? Infinity
+    : ROLE_RANK[currentUser?.role] ?? 0;
+  const assignableRoles = ALL_ROLES.filter((r) => ROLE_RANK[r] < callerRank);
+
+  return (
+    <div className="space-y-4">
+      {canAddRemove && (
+        <div>
+          <label className="block text-sm font-medium text-navy">Add Member</label>
+          <div className="mt-1 flex gap-2">
+            <select
+              value={addUserId}
+              onChange={(e) => setAddUserId(e.target.value)}
+              className="flex-1 rounded-lg border border-navy-100 px-3 py-2 text-sm"
+            >
+              <option value="">Select a member…</option>
+              {users
+                .filter((u) => !industry.members.some((m) => m.id === u.id))
+                .map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+            </select>
+            <Button onClick={() => onAdd(industry.id, addUserId)} disabled={!addUserId}>
+              Add
+            </Button>
+          </div>
+          <p className="mt-1 text-xs text-navy-400">
+            New members are auto-promoted to one rank below the leader.
+          </p>
+        </div>
+      )}
+
+      <div>
+        <div className="text-xs font-semibold uppercase text-navy-400">
+          Current Members
+        </div>
+        {industry.members.length === 0 ? (
+          <div className="mt-2 text-sm text-navy-400">No members yet.</div>
+        ) : (
+          <ul className="mt-2 space-y-2">
+            {industry.members.map((m) => {
+              const memberRank = ROLE_RANK[m.role] ?? 0;
+              const leaderCanManageThisMember =
+                isLeader && memberRank < callerRank;
+              const canEditRole = isAdmin || leaderCanManageThisMember;
+              const isLeaderOfIndustry = m.id === industry.leader?.id;
+              return (
+                <li
+                  key={m.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-navy-100 px-3 py-2"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="font-semibold text-navy">{m.name}</span>
+                    {isLeaderOfIndustry && (
+                      <Crown className="h-3 w-3 text-gold" />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {canEditRole && !isLeaderOfIndustry ? (
+                      <select
+                        value={m.role}
+                        onChange={(e) => onChangeRole(m.id, e.target.value)}
+                        className="rounded-md border border-navy-100 px-2 py-1 text-xs"
+                      >
+                        {/* Always include the current role so it's a valid option */}
+                        {!assignableRoles.includes(m.role) && (
+                          <option value={m.role}>{ROLE_LABELS[m.role]}</option>
+                        )}
+                        {assignableRoles.map((r) => (
+                          <option key={r} value={r}>
+                            {ROLE_LABELS[r]}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <RoleBadge role={m.role} />
+                    )}
+                    {canAddRemove && !isLeaderOfIndustry && (
                       <button
-                        onClick={() => handleRemoveMember(memberModal.id, m.id)}
+                        onClick={() => onRemove(industry.id, m.id)}
                         className="rounded p-1 text-red-600 hover:bg-red-50"
                         aria-label="Remove"
                       >
                         <X className="h-4 w-4" />
                       </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         )}
-      </Modal>
-    </>
+        {!canAddRemove && canChangeRoles && (
+          <p className="mt-3 text-xs text-navy-400">
+            You can adjust roles of members below your rank. Only the President
+            can add or remove members from an industry.
+          </p>
+        )}
+      </div>
+    </div>
   );
 }

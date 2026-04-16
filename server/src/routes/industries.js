@@ -5,16 +5,6 @@ import { verifyJwt, requireAdmin, ROLE_RANK, roleForRank } from '../middleware/a
 const router = Router();
 router.use(verifyJwt);
 
-// President or industry leader can manage membership.
-async function canManageIndustry(req, industryId) {
-  if (req.user.role === 'President') return true;
-  const industry = await prisma.industry.findUnique({
-    where: { id: industryId },
-    select: { leaderId: true },
-  });
-  return industry && industry.leaderId === req.user.id;
-}
-
 // Promote `userId` to one rank below `leaderRole`, but never demote.
 async function applyLeaderRankAdjust(userId, leaderRole) {
   if (!leaderRole) return;
@@ -114,41 +104,12 @@ router.delete('/:id', requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Leader rank check: returns {ok, reason}
-async function checkLeaderCanManage(req, industryId, targetUserId) {
-  if (req.user.role === 'President') return { ok: true };
-  const industry = await prisma.industry.findUnique({
-    where: { id: industryId },
-    include: { leader: { select: { id: true, role: true } } },
-  });
-  if (!industry?.leader || industry.leader.id !== req.user.id) {
-    return { ok: false, reason: 'Only the industry leader or President can manage members' };
-  }
-  // Leader can only touch members ranked strictly below them.
-  const target = await prisma.user.findUnique({
-    where: { id: targetUserId },
-    select: { role: true },
-  });
-  if (!target) return { ok: false, reason: 'User not found' };
-  const leaderRank = ROLE_RANK[industry.leader.role] ?? 0;
-  const targetRank = ROLE_RANK[target.role] ?? 0;
-  if (targetRank >= leaderRank) {
-    return {
-      ok: false,
-      reason: 'You can only manage members ranked below you',
-    };
-  }
-  return { ok: true };
-}
-
-router.post('/:id/members', async (req, res) => {
+// Only President can add/remove members. Industry leaders manage roles only.
+router.post('/:id/members', requireAdmin, async (req, res) => {
   const industryId = Number(req.params.id);
   const { userId } = req.body || {};
   if (!userId) return res.status(400).json({ error: 'userId required' });
   const memberId = Number(userId);
-
-  const check = await checkLeaderCanManage(req, industryId, memberId);
-  if (!check.ok) return res.status(403).json({ error: check.reason });
 
   await prisma.userIndustry.upsert({
     where: { userId_industryId: { userId: memberId, industryId } },
@@ -156,7 +117,8 @@ router.post('/:id/members', async (req, res) => {
     create: { userId: memberId, industryId },
   });
 
-  // Auto-promote (never demote) to one rank below the leader.
+  // Auto-promote (never demote) to one rank below the leader — convenience
+  // when the President drops a new member in.
   const industry = await prisma.industry.findUnique({
     where: { id: industryId },
     include: { leader: { select: { role: true } } },
@@ -168,13 +130,9 @@ router.post('/:id/members', async (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete('/:id/members/:userId', async (req, res) => {
+router.delete('/:id/members/:userId', requireAdmin, async (req, res) => {
   const industryId = Number(req.params.id);
   const userId = Number(req.params.userId);
-
-  const check = await checkLeaderCanManage(req, industryId, userId);
-  if (!check.ok) return res.status(403).json({ error: check.reason });
-
   await prisma.userIndustry.delete({
     where: { userId_industryId: { userId, industryId } },
   });
