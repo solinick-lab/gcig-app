@@ -25,6 +25,13 @@ const RANGES = [
   { key: 'ALL', label: 'All' },
 ];
 
+// Capital infusions/withdrawals — subtracted from performance calcs so the
+// return % reflects actual market movement, not money added.
+// Positive = money in, negative = money out.
+const CASH_FLOWS = [
+  { date: new Date('2026-01-29T12:00:00Z'), amount: 25000, label: 'Capital infusion' },
+];
+
 function fmtMoney(n) {
   if (n == null) return '—';
   return n.toLocaleString('en-US', {
@@ -108,13 +115,19 @@ export default function Portfolio() {
   }, [chartData]);
 
   // Change between first and last point in the visible range.
+  // Cash flows that occur strictly after the start date get subtracted, so the
+  // percent reflects market performance rather than money added.
   const rangeChange = useMemo(() => {
     if (chartData.length < 2) return null;
-    const start = chartData[0].value;
-    const end = chartData[chartData.length - 1].value;
-    const diff = end - start;
-    const pct = start > 0 ? (diff / start) * 100 : 0;
-    return { diff, pct };
+    const start = chartData[0];
+    const end = chartData[chartData.length - 1];
+    const cashFlowInRange = CASH_FLOWS.filter(
+      (cf) => cf.date > start.date && cf.date <= end.date
+    ).reduce((sum, cf) => sum + cf.amount, 0);
+    const rawDiff = end.value - start.value;
+    const diff = rawDiff - cashFlowInRange;
+    const pct = start.value > 0 ? (diff / start.value) * 100 : 0;
+    return { diff, pct, cashFlowInRange };
   }, [chartData]);
 
   // Build display data with a short date label. For long ranges we thin labels out.
@@ -200,15 +213,25 @@ export default function Portfolio() {
             <div>
               <div className="text-sm font-semibold text-navy">Performance Over Time</div>
               {rangeChange && (
-                <div
-                  className={`mt-1 text-sm font-semibold ${
-                    rangeChange.diff >= 0 ? 'text-emerald-600' : 'text-red-600'
-                  }`}
-                >
-                  {rangeChange.diff >= 0 ? '+' : ''}
-                  {fmtMoney(rangeChange.diff)} ({rangeChange.diff >= 0 ? '+' : ''}
-                  {rangeChange.pct.toFixed(2)}%) <span className="text-navy-400 font-normal">in {RANGES.find((r) => r.key === range)?.label}</span>
-                </div>
+                <>
+                  <div
+                    className={`mt-1 text-sm font-semibold ${
+                      rangeChange.diff >= 0 ? 'text-emerald-600' : 'text-red-600'
+                    }`}
+                  >
+                    {rangeChange.diff >= 0 ? '+' : ''}
+                    {fmtMoney(rangeChange.diff)} ({rangeChange.diff >= 0 ? '+' : ''}
+                    {rangeChange.pct.toFixed(2)}%){' '}
+                    <span className="text-navy-400 font-normal">
+                      in {RANGES.find((r) => r.key === range)?.label}
+                    </span>
+                  </div>
+                  {rangeChange.cashFlowInRange > 0 && (
+                    <div className="mt-0.5 text-[11px] text-navy-400">
+                      Excludes {fmtMoney(rangeChange.cashFlowInRange)} capital infusion
+                    </div>
+                  )}
+                </>
               )}
             </div>
             <div className="flex rounded-lg border border-navy-100 bg-white p-0.5">
