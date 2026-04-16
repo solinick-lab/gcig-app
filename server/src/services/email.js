@@ -1,24 +1,33 @@
-import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 
-let resend = null;
+let transporter = null;
 
-function getResend() {
-  if (!resend) {
-    if (!process.env.RESEND_API_KEY) {
-      throw new Error('RESEND_API_KEY is not set in .env');
+function getTransporter() {
+  if (!transporter) {
+    if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
+      throw new Error('GMAIL_USER and GMAIL_APP_PASSWORD must be set in .env');
     }
-    resend = new Resend(process.env.RESEND_API_KEY);
+    transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_APP_PASSWORD,
+      },
+    });
   }
-  return resend;
+  return transporter;
 }
 
-const FROM =
-  process.env.RESEND_FROM_EMAIL || 'GCIG <onboarding@resend.dev>';
+const FROM_NAME = 'GCIG';
+
+function from() {
+  return `${FROM_NAME} <${process.env.GMAIL_USER}>`;
+}
 
 export async function sendVerificationCode(toEmail, code) {
-  const { error } = await getResend().emails.send({
-    from: FROM,
-    to: [toEmail],
+  await getTransporter().sendMail({
+    from: from(),
+    to: toEmail,
     subject: `GCIG Verification Code: ${code}`,
     html: `
       <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
@@ -42,17 +51,12 @@ export async function sendVerificationCode(toEmail, code) {
       </div>
     `,
   });
-
-  if (error) {
-    console.error('Resend email error:', error);
-    throw new Error(`Failed to send verification email: ${error.message}`);
-  }
 }
 
 export async function sendInviteEmail(toEmail, { name, tempPassword, role, loginUrl }) {
-  const { error } = await getResend().emails.send({
-    from: FROM,
-    to: [toEmail],
+  await getTransporter().sendMail({
+    from: from(),
+    to: toEmail,
     subject: `You've been invited to GCIG`,
     html: `
       <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
@@ -85,9 +89,4 @@ export async function sendInviteEmail(toEmail, { name, tempPassword, role, login
       </div>
     `,
   });
-
-  if (error) {
-    console.error('Resend invite email error:', error);
-    throw new Error(`Failed to send invite email: ${error.message}`);
-  }
 }
