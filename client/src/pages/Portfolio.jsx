@@ -114,6 +114,55 @@ export default function Portfolio() {
     return [Math.floor(min - pad), Math.ceil(max + pad)];
   }, [chartData]);
 
+  // Daily change: today's live value vs. most recent non-weekend snapshot.
+  const dailyChange = useMemo(() => {
+    if (!data || fullHistory.length < 2) return null;
+    const today = data.totals?.totalValue;
+    if (today == null) return null;
+    // Walk back to the most recent snapshot that isn't today and isn't a weekend.
+    const todayIso = new Date().toISOString().slice(0, 10);
+    for (let i = fullHistory.length - 1; i >= 0; i--) {
+      const snap = fullHistory[i];
+      const snapIso = snap.date.toISOString().slice(0, 10);
+      if (snapIso === todayIso) continue;
+      const day = snap.date.getDay();
+      if (day === 0 || day === 6) continue;
+      const diff = today - snap.value;
+      const pct = snap.value > 0 ? (diff / snap.value) * 100 : 0;
+      return { diff, pct };
+    }
+    return null;
+  }, [data, fullHistory]);
+
+  // Annualized Sharpe ratio (risk-free rate = 0).
+  // Excludes weekends and adjusts for known cash flows so the return %
+  // reflects actual market movement.
+  const sharpe = useMemo(() => {
+    if (fullHistory.length < 20) return null;
+    const returns = [];
+    for (let i = 1; i < fullHistory.length; i++) {
+      const prev = fullHistory[i - 1];
+      const curr = fullHistory[i];
+      const day = curr.date.getDay();
+      if (day === 0 || day === 6) continue;
+      // Subtract any cash flow that happened on this day from curr's value.
+      const cfOnDay = CASH_FLOWS.filter(
+        (cf) => cf.date.toISOString().slice(0, 10) === curr.date.toISOString().slice(0, 10)
+      ).reduce((s, cf) => s + cf.amount, 0);
+      const adjusted = curr.value - cfOnDay;
+      if (prev.value <= 0) continue;
+      returns.push((adjusted - prev.value) / prev.value);
+    }
+    if (returns.length < 10) return null;
+    const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+    const variance =
+      returns.reduce((s, r) => s + (r - mean) ** 2, 0) / returns.length;
+    const std = Math.sqrt(variance);
+    if (std === 0) return null;
+    // Annualize using ~252 trading days
+    return (mean * 252) / (std * Math.sqrt(252));
+  }, [fullHistory]);
+
   // Change between first and last point in the visible range.
   // Cash flows that occur strictly after the start date get subtracted, so the
   // percent reflects market performance rather than money added.
@@ -174,7 +223,7 @@ export default function Portfolio() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <div className="text-xs uppercase tracking-wider text-navy-400">Total Value</div>
           <div className="mt-2 text-3xl font-bold text-navy">
@@ -182,10 +231,32 @@ export default function Portfolio() {
           </div>
         </Card>
         <Card>
-          <div className="text-xs uppercase tracking-wider text-navy-400">Total Cost Basis</div>
-          <div className="mt-2 text-3xl font-bold text-navy">
-            {fmtMoney(totals.totalCost)}
-          </div>
+          <div className="text-xs uppercase tracking-wider text-navy-400">Daily Change</div>
+          {dailyChange ? (
+            <>
+              <div
+                className={`mt-2 flex items-center gap-2 text-3xl font-bold ${
+                  dailyChange.diff >= 0 ? 'text-emerald-600' : 'text-red-600'
+                }`}
+              >
+                {dailyChange.diff >= 0 ? (
+                  <TrendingUp className="h-7 w-7" />
+                ) : (
+                  <TrendingDown className="h-7 w-7" />
+                )}
+                {fmtMoney(dailyChange.diff)}
+              </div>
+              <div
+                className={`mt-1 text-sm font-semibold ${
+                  dailyChange.diff >= 0 ? 'text-emerald-600' : 'text-red-600'
+                }`}
+              >
+                {fmtPct(dailyChange.pct)}
+              </div>
+            </>
+          ) : (
+            <div className="mt-2 text-3xl font-bold text-navy-400">—</div>
+          )}
         </Card>
         <Card>
           <div className="text-xs uppercase tracking-wider text-navy-400">Total Gain/Loss</div>
@@ -204,6 +275,27 @@ export default function Portfolio() {
           >
             {fmtPct(totals.totalGainLossPct)}
           </div>
+        </Card>
+        <Card>
+          <div className="text-xs uppercase tracking-wider text-navy-400">
+            Sharpe Ratio
+          </div>
+          {sharpe != null ? (
+            <>
+              <div
+                className={`mt-2 text-3xl font-bold ${
+                  sharpe >= 1 ? 'text-emerald-600' : sharpe >= 0 ? 'text-navy' : 'text-red-600'
+                }`}
+              >
+                {sharpe.toFixed(2)}
+              </div>
+              <div className="mt-1 text-xs text-navy-400">
+                Annualized • Rf = 0
+              </div>
+            </>
+          ) : (
+            <div className="mt-2 text-3xl font-bold text-navy-400">—</div>
+          )}
         </Card>
       </div>
 
