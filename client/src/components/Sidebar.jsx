@@ -33,20 +33,19 @@ export default function Sidebar({ onNavigate }) {
 
   return (
     <aside className="flex h-full w-64 flex-col bg-navy text-white">
-      <div className="flex flex-col items-center gap-3 px-6 py-6 border-b border-navy-500/50">
-        <img
-          src="/grace-logo.png"
-          alt="Grace Church School"
-          className="h-14 w-auto"
-          onError={(e) => {
-            e.currentTarget.style.display = 'none';
-          }}
-        />
-        <div className="text-center">
-          <div className="text-lg font-bold tracking-tight">GCIG</div>
-          <div className="text-[10px] uppercase tracking-wider text-gold">
-            Grace Church School Investment Group
-          </div>
+      <div className="flex flex-col items-center gap-3 px-5 py-6 border-b border-navy-500/50">
+        <div className="rounded-lg bg-white px-3 py-2">
+          <img
+            src="/grace-logo.png"
+            alt="Grace Church School"
+            className="h-10 w-auto"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none';
+            }}
+          />
+        </div>
+        <div className="text-center text-[11px] uppercase tracking-[0.15em] text-gold font-semibold">
+          Investment Group
         </div>
       </div>
 

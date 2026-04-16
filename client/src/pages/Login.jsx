@@ -119,17 +119,18 @@ export default function Login() {
     <div className="flex min-h-full items-center justify-center bg-gradient-to-br from-navy via-navy-700 to-navy-800 p-4">
       <div className="w-full max-w-md">
         <div className="mb-6 flex flex-col items-center text-center">
-          <img
-            src="/grace-logo.png"
-            alt="Grace Church School"
-            className="h-20 w-auto"
-            onError={(e) => {
-              e.currentTarget.style.display = 'none';
-            }}
-          />
-          <h1 className="mt-4 text-2xl font-bold text-white">GCIG</h1>
-          <p className="mt-1 text-xs uppercase tracking-wider text-gold">
-            Grace Church School Investment Group
+          <div className="rounded-xl bg-white px-6 py-4">
+            <img
+              src="/grace-logo.png"
+              alt="Grace Church School"
+              className="h-14 w-auto"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
+          </div>
+          <p className="mt-4 text-xs uppercase tracking-[0.2em] text-gold font-semibold">
+            Investment Group
           </p>
         </div>
 

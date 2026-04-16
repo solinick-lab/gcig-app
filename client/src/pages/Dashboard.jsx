@@ -25,7 +25,7 @@ export default function Dashboard() {
     <>
       <PageHeader
         title={`Welcome, ${user?.name?.split(' ')[0] || ''}`}
-        subtitle="Here's what's happening at GCIG today."
+        subtitle="Here's what's happening at the Investment Group today."
         actions={<RoleBadge role={user?.role} className="text-sm" />}
       />
 

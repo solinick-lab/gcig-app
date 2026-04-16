@@ -40,7 +40,7 @@ export default function Layout() {
           >
             {drawerOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
-          <div className="font-bold tracking-tight">GCIG</div>
+          <div className="text-sm font-semibold tracking-[0.15em] uppercase text-gold">Investment Group</div>
           <div className="w-7" />
         </div>
 
