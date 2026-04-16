@@ -30,15 +30,18 @@ export function requireAdmin(req, res, next) {
   next();
 }
 
-// Portfolio Manager and above can create/edit pitches.
-// Hierarchy: President > CIO > SeniorPortfolioManager > PortfolioManager > SeniorAnalyst > JuniorAnalyst
+// Permission hierarchy (higher number = more power).
+// Advisory/Faculty roles are observers — low rank.
 const ROLE_RANK = {
-  President: 6,
-  CIO: 5,
-  SeniorPortfolioManager: 4,
-  PortfolioManager: 3,
-  SeniorAnalyst: 2,
-  JuniorAnalyst: 1,
+  President: 10,
+  CIO: 9,
+  SeniorPortfolioManager: 8,
+  PortfolioManager: 7,
+  SeniorAnalyst: 6,
+  Analyst: 5,
+  JuniorAnalyst: 4,
+  AdvisoryBoardMember: 3,
+  FacultyAdvisory: 3,
 };
 
 export function requireRole(minRole) {

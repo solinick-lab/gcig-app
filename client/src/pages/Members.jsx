@@ -13,7 +13,10 @@ const ROLES = [
   'SeniorPortfolioManager',
   'PortfolioManager',
   'SeniorAnalyst',
+  'Analyst',
   'JuniorAnalyst',
+  'AdvisoryBoardMember',
+  'FacultyAdvisory',
 ];
 
 export default function Members() {
@@ -77,16 +80,19 @@ export default function Members() {
             <thead>
               <tr className="border-b border-navy-100 text-left text-xs uppercase text-navy-400">
                 <th className="py-2 pr-4">Name</th>
-                <th className="py-2 pr-4">Email</th>
                 <th className="py-2 pr-4">Role</th>
+                <th className="py-2 pr-4">Extra Roles</th>
+                <th className="py-2 pr-4">Industries</th>
                 <th className="py-2 pr-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-navy-50">
               {users.map((u) => (
                 <tr key={u.id}>
-                  <td className="py-3 pr-4 font-semibold text-navy">{u.name}</td>
-                  <td className="py-3 pr-4 text-navy-400">{u.email}</td>
+                  <td className="py-3 pr-4">
+                    <div className="font-semibold text-navy">{u.name}</div>
+                    <div className="text-xs text-navy-400">{u.email}</div>
+                  </td>
                   <td className="py-3 pr-4">
                     <select
                       value={u.role}
@@ -99,6 +105,25 @@ export default function Members() {
                         </option>
                       ))}
                     </select>
+                  </td>
+                  <td className="py-3 pr-4">
+                    <ExtraRoleEditor user={u} onChange={load} />
+                  </td>
+                  <td className="py-3 pr-4">
+                    {u.industries && u.industries.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {u.industries.map((ind) => (
+                          <span
+                            key={ind.id}
+                            className="rounded-full bg-navy-50 px-2 py-0.5 text-[10px] font-semibold text-navy"
+                          >
+                            {ind.name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-navy-400">—</span>
+                    )}
                   </td>
                   <td className="py-3 pr-4 text-right">
                     <button
@@ -210,5 +235,83 @@ export default function Members() {
         )}
       </Modal>
     </>
+  );
+}
+
+function ExtraRoleEditor({ user, onChange }) {
+  const [editing, setEditing] = useState(false);
+  const [selected, setSelected] = useState(user.extraRoles || []);
+
+  async function save() {
+    await api.put(`/users/${user.id}/extra-roles`, { extraRoles: selected });
+    setEditing(false);
+    onChange();
+  }
+
+  function toggle(role) {
+    setSelected((s) => (s.includes(role) ? s.filter((x) => x !== role) : [...s, role]));
+  }
+
+  if (!editing) {
+    return (
+      <div className="flex flex-wrap items-center gap-1">
+        {(user.extraRoles || []).map((r) => (
+          <span
+            key={r}
+            className="rounded-full border border-navy-100 bg-white px-2 py-0.5 text-[10px] font-semibold text-navy"
+          >
+            {ROLE_LABELS[r] || r}
+          </span>
+        ))}
+        <button
+          onClick={() => {
+            setSelected(user.extraRoles || []);
+            setEditing(true);
+          }}
+          className="text-[10px] font-semibold text-gold-700 underline"
+        >
+          {user.extraRoles && user.extraRoles.length > 0 ? 'Edit' : '+ Add'}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap gap-1">
+        {ROLES.filter((r) => r !== user.role).map((r) => (
+          <label
+            key={r}
+            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold cursor-pointer ${
+              selected.includes(r)
+                ? 'bg-navy text-white border-navy'
+                : 'bg-white text-navy border-navy-100'
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={selected.includes(r)}
+              onChange={() => toggle(r)}
+              className="sr-only"
+            />
+            {ROLE_LABELS[r] || r}
+          </label>
+        ))}
+      </div>
+      <div className="flex gap-1">
+        <button
+          onClick={save}
+          className="rounded bg-navy px-2 py-1 text-[10px] font-semibold text-white"
+        >
+          Save
+        </button>
+        <button
+          onClick={() => setEditing(false)}
+          className="rounded border border-navy-100 px-2 py-1 text-[10px] font-semibold text-navy"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }

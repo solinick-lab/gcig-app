@@ -13,7 +13,10 @@ enum Role {
   SeniorPortfolioManager
   PortfolioManager
   SeniorAnalyst
+  Analyst
   JuniorAnalyst
+  AdvisoryBoardMember
+  FacultyAdvisory
 }
 
 enum AttendanceStatus {
@@ -34,10 +37,43 @@ model User {
   email           String           @unique
   passwordHash    String
   role            Role
+  extraRoles      Role[]           @default([])
   createdAt       DateTime         @default(now())
   attendance      Attendance[]
   createdSessions VotingSession[]  @relation("SessionCreator")
   ballots         Ballot[]
+  industries      UserIndustry[]
+  ledIndustries   Industry[]       @relation("IndustryLeader")
+  pitchPresenters PitchPresenter[]
+}
+
+model Industry {
+  id        Int            @id @default(autoincrement())
+  name      String         @unique
+  leaderId  Int?
+  leader    User?          @relation("IndustryLeader", fields: [leaderId], references: [id], onDelete: SetNull)
+  members   UserIndustry[]
+  createdAt DateTime       @default(now())
+}
+
+model UserIndustry {
+  userId     Int
+  industryId Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  industry   Industry @relation(fields: [industryId], references: [id], onDelete: Cascade)
+
+  @@id([userId, industryId])
+}
+
+model PitchPresenter {
+  pitchId    Int
+  userId     Int
+  assignedAt DateTime @default(now())
+  seenAt     DateTime?
+  pitch      Pitch    @relation(fields: [pitchId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([pitchId, userId])
 }
 
 model Pitch {
@@ -49,6 +85,7 @@ model Pitch {
   slideshowUrl    String?
   createdAt       DateTime         @default(now())
   votingSessions  VotingSession[]
+  presenters      PitchPresenter[]
 }
 
 model VotingSession {

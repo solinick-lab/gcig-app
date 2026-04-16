@@ -9,6 +9,7 @@ import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
 import Modal from '../components/Modal.jsx';
+import MemberPicker from '../components/MemberPicker.jsx';
 
 const PITCH_ROLES = ['President', 'CIO', 'SeniorPortfolioManager', 'PortfolioManager'];
 
@@ -23,6 +24,7 @@ function emptyForm() {
     date: '',
     location: '',
     slideshowUrl: '',
+    presenterIds: [],
   };
 }
 
@@ -34,6 +36,7 @@ export default function Pitches() {
   const canEdit = PITCH_ROLES.includes(user?.role);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [users, setUsers] = useState([]);
   const [selected, setSelected] = useState(null);
 
   async function load() {
@@ -41,9 +44,15 @@ export default function Pitches() {
     setPitches(data);
   }
 
+  async function loadUsers() {
+    const { data } = await api.get('/users');
+    setUsers(data);
+  }
+
   useEffect(() => {
     load();
-  }, []);
+    if (canEdit) loadUsers();
+  }, [canEdit]);
 
   const events = pitches.map((p) => ({
     id: p.id,
@@ -66,6 +75,7 @@ export default function Pitches() {
       date: new Date(pitch.date).toISOString().slice(0, 16),
       location: pitch.location || '',
       slideshowUrl: pitch.slideshowUrl || '',
+      presenterIds: (pitch.presenters || []).map((p) => p.id),
     });
     setModalOpen(true);
     setSelected(null);
@@ -76,12 +86,20 @@ export default function Pitches() {
     setError('');
     setSubmitting(true);
     try {
+      // Derive pitcherName from selected presenters if the free-text field is blank.
+      const presenterNames = users
+        .filter((u) => form.presenterIds.includes(u.id))
+        .map((u) => u.name);
+      const pitcherName =
+        form.pitcherName?.trim() || presenterNames.join(', ') || 'TBD';
+
       const body = {
-        pitcherName: form.pitcherName,
+        pitcherName,
         ticker: form.ticker,
         date: new Date(form.date).toISOString(),
         location: form.location || null,
         slideshowUrl: form.slideshowUrl || null,
+        presenterIds: form.presenterIds,
       };
 
       if (form.id) {
@@ -144,8 +162,21 @@ export default function Pitches() {
               <div className="text-xl font-bold text-navy">{selected.ticker}</div>
             </div>
             <div>
-              <div className="text-xs uppercase text-navy-400">Pitcher</div>
-              <div className="font-semibold text-navy">{selected.pitcherName}</div>
+              <div className="text-xs uppercase text-navy-400">Presenters</div>
+              {selected.presenters && selected.presenters.length > 0 ? (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {selected.presenters.map((p) => (
+                    <span
+                      key={p.id}
+                      className="rounded-full bg-navy-50 px-2 py-0.5 text-xs font-semibold text-navy"
+                    >
+                      {p.name}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="font-semibold text-navy">{selected.pitcherName}</div>
+              )}
             </div>
             <div>
               <div className="text-xs uppercase text-navy-400">Date</div>
@@ -189,11 +220,25 @@ export default function Pitches() {
         title={form.id ? 'Edit Pitch' : 'Add Pitch'}
       >
         <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-navy">
+              Presenters (members)
+            </label>
+            <div className="mt-1">
+              <MemberPicker
+                users={users}
+                value={form.presenterIds}
+                onChange={(ids) => setForm({ ...form, presenterIds: ids })}
+              />
+            </div>
+            <p className="mt-1 text-xs text-navy-400">
+              Each selected member gets an email and an in-app popup.
+            </p>
+          </div>
           <Field
-            label="Pitcher Name"
+            label="Additional names (if any — optional)"
             value={form.pitcherName}
             onChange={(v) => setForm({ ...form, pitcherName: v })}
-            required
           />
           <Field
             label="Ticker"

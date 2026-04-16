@@ -11,6 +11,7 @@ import {
   UserCircle,
   LogOut,
   Vote,
+  Building2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import RoleBadge from './RoleBadge.jsx';
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { to: '/archive', label: 'Pitch Archive', icon: FileText },
   { to: '/portfolio', label: 'Portfolio', icon: LineChart },
   { to: '/votes', label: 'Voting', icon: Vote },
+  { to: '/industries', label: 'Industries', icon: Building2 },
   { to: '/reports', label: 'Research Reports', icon: BookOpen },
   { to: '/attendance', label: 'Attendance', icon: ClipboardCheck },
   { to: '/members', label: 'Members', icon: Users, adminOnly: true },

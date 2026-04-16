@@ -14,6 +14,7 @@ import Attendance from './pages/Attendance.jsx';
 import Members from './pages/Members.jsx';
 import Profile from './pages/Profile.jsx';
 import Votes from './pages/Votes.jsx';
+import Industries from './pages/Industries.jsx';
 
 export default function App() {
   const { loading } = useAuth();
@@ -43,6 +44,7 @@ export default function App() {
         <Route path="archive" element={<PreviousPitches />} />
         <Route path="portfolio" element={<Portfolio />} />
         <Route path="votes" element={<Votes />} />
+        <Route path="industries" element={<Industries />} />
         <Route path="reports" element={<Reports />} />
         <Route path="attendance" element={<Attendance />} />
         <Route path="members" element={<Members />} />

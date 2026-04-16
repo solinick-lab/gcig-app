@@ -13,7 +13,10 @@ const ROLES = [
   'SeniorPortfolioManager',
   'PortfolioManager',
   'SeniorAnalyst',
+  'Analyst',
   'JuniorAnalyst',
+  'AdvisoryBoardMember',
+  'FacultyAdvisory',
 ];
 
 function generateTempPassword() {
@@ -25,10 +28,25 @@ router.use(verifyJwt);
 // All authed users can list members (shown on attendance sheet)
 router.get('/', async (_req, res) => {
   const users = await prisma.user.findMany({
-    select: { id: true, name: true, email: true, role: true, createdAt: true },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      extraRoles: true,
+      createdAt: true,
+      industries: {
+        include: { industry: { select: { id: true, name: true } } },
+      },
+    },
     orderBy: { name: 'asc' },
   });
-  res.json(users);
+  // Flatten industries for easier client use.
+  const shaped = users.map((u) => ({
+    ...u,
+    industries: u.industries.map((ui) => ui.industry),
+  }));
+  res.json(shaped);
 });
 
 // Invite a new member. No account is created yet — just a PendingInvite record
@@ -74,7 +92,10 @@ router.post('/', requireAdmin, async (req, res) => {
     SeniorPortfolioManager: 'Senior Portfolio Manager',
     PortfolioManager: 'Portfolio Manager',
     SeniorAnalyst: 'Senior Analyst',
+    Analyst: 'Analyst',
     JuniorAnalyst: 'Junior Analyst',
+    AdvisoryBoardMember: 'Advisory Board Member',
+    FacultyAdvisory: 'Faculty Advisor',
   };
 
   let emailSent = false;
@@ -112,6 +133,24 @@ router.put('/:id', requireAdmin, async (req, res) => {
       ...(role !== undefined ? { role } : {}),
     },
     select: { id: true, name: true, email: true, role: true, createdAt: true },
+  });
+  res.json(user);
+});
+
+// Set the entire extra roles array (replaces existing).
+router.put('/:id/extra-roles', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const { extraRoles } = req.body || {};
+  if (!Array.isArray(extraRoles)) {
+    return res.status(400).json({ error: 'extraRoles must be an array' });
+  }
+  const invalid = extraRoles.find((r) => !ROLES.includes(r));
+  if (invalid) return res.status(400).json({ error: `Invalid role: ${invalid}` });
+
+  const user = await prisma.user.update({
+    where: { id },
+    data: { extraRoles },
+    select: { id: true, name: true, email: true, role: true, extraRoles: true },
   });
   res.json(user);
 });

@@ -4,7 +4,10 @@ const ROLE_LABELS = {
   SeniorPortfolioManager: 'Sr. Portfolio Manager',
   PortfolioManager: 'Portfolio Manager',
   SeniorAnalyst: 'Senior Analyst',
+  Analyst: 'Analyst',
   JuniorAnalyst: 'Junior Analyst',
+  AdvisoryBoardMember: 'Advisory Board',
+  FacultyAdvisory: 'Faculty',
 };
 
 const VARIANTS = {
@@ -13,7 +16,10 @@ const VARIANTS = {
   SeniorPortfolioManager: 'bg-gold-300 text-navy border-gold-300',
   PortfolioManager: 'bg-navy-50 text-navy border-navy-100',
   SeniorAnalyst: 'bg-white text-navy border-navy-100',
+  Analyst: 'bg-white text-navy-500 border-navy-100',
   JuniorAnalyst: 'bg-white text-navy-500 border-navy-100',
+  AdvisoryBoardMember: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  FacultyAdvisory: 'bg-purple-50 text-purple-800 border-purple-200',
 };
 
 export default function RoleBadge({ role, className = '' }) {

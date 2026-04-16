@@ -53,6 +53,58 @@ export async function sendVerificationCode(toEmail, code) {
   });
 }
 
+export async function sendPitchAssignmentEmail(
+  toEmail,
+  { name, ticker, pitcherDisplay, date, location, dashboardUrl }
+) {
+  const dateStr = new Date(date).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  await getTransporter().sendMail({
+    from: from(),
+    to: toEmail,
+    subject: `You've been added to the ${ticker} pitch`,
+    html: `
+      <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h1 style="color: #1B2A4A; font-size: 24px; margin: 0;">GCIG</h1>
+          <p style="color: #C9A84C; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; margin: 4px 0 0;">
+            Grace Church School Investment Group
+          </p>
+        </div>
+        <div style="background: #F7F8FB; border-radius: 12px; padding: 24px;">
+          <p style="color: #1B2A4A; font-size: 14px; margin: 0 0 8px;">Hi ${name},</p>
+          <p style="color: #1B2A4A; font-size: 14px; margin: 0 0 16px;">
+            You've been added as a presenter on the <strong>${ticker}</strong> pitch.
+          </p>
+          <div style="background: #1B2A4A; border-radius: 8px; padding: 16px; margin: 0 0 16px;">
+            <p style="color: #8C99BB; font-size: 12px; margin: 0 0 4px;">Ticker</p>
+            <p style="color: #C9A84C; font-size: 20px; font-weight: 700; margin: 0 0 12px;">${ticker}</p>
+            <p style="color: #8C99BB; font-size: 12px; margin: 0 0 4px;">Presenters</p>
+            <p style="color: white; font-size: 13px; margin: 0 0 12px;">${pitcherDisplay}</p>
+            <p style="color: #8C99BB; font-size: 12px; margin: 0 0 4px;">When</p>
+            <p style="color: white; font-size: 13px; margin: 0 0 ${location ? '12px' : '0'};">${dateStr}</p>
+            ${
+              location
+                ? `<p style="color: #8C99BB; font-size: 12px; margin: 0 0 4px;">Location</p>
+                   <p style="color: white; font-size: 13px; margin: 0;">${location}</p>`
+                : ''
+            }
+          </div>
+          <a href="${dashboardUrl}" style="display: inline-block; background: #C9A84C; color: #1B2A4A; font-size: 14px; font-weight: 600; text-decoration: none; padding: 10px 24px; border-radius: 8px;">
+            Open GCIG
+          </a>
+        </div>
+      </div>
+    `,
+  });
+}
+
 export async function sendInviteEmail(toEmail, { name, role, inviteUrl }) {
   await getTransporter().sendMail({
     from: from(),
