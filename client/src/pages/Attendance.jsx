@@ -98,14 +98,25 @@ function AdminAttendance() {
     load();
   }, []);
 
-  // Sort events newest first so the most recent meeting is the leftmost column.
-  const sortedEvents = useMemo(() => {
-    return [...data.events].sort(
-      (a, b) => new Date(b.date) - new Date(a.date)
+  // Pin the "Current" meeting: the next upcoming one (or today).
+  // Fallback to the most recent past meeting if nothing upcoming exists.
+  // Then sort everything else newest-first after the current one.
+  const { sortedEvents, currentEventId } = useMemo(() => {
+    const now = new Date();
+    const all = [...data.events].sort(
+      (a, b) => new Date(a.date) - new Date(b.date)
     );
+    const upcoming = all.find((e) => new Date(e.date) >= now);
+    const currentId = upcoming?.id ?? all[all.length - 1]?.id ?? null;
+    const rest = all
+      .filter((e) => e.id !== currentId)
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+    const current = all.find((e) => e.id === currentId);
+    const ordered = current ? [current, ...rest] : rest;
+    return { sortedEvents: ordered, currentEventId: currentId };
   }, [data.events]);
 
-  // Show only the most recent 2 by default; expand to all with "Show Past"
+  // Show only the current + 1 past by default; expand to all with "Show Past"
   const visibleEvents = showPast ? sortedEvents : sortedEvents.slice(0, 2);
 
   const recordMap = useMemo(() => {
@@ -170,18 +181,16 @@ function AdminAttendance() {
                 <thead>
                   <tr className="border-b border-navy-100 text-left text-xs uppercase text-navy-400">
                     <th className="sticky left-0 z-10 bg-white py-2 pr-4">Member</th>
-                    {visibleEvents.map((e, i) => {
-                      const isNewest = i === 0;
+                    {visibleEvents.map((e) => {
+                      const isCurrent = e.id === currentEventId;
                       return (
                         <th
                           key={e.id}
                           className={`py-2 px-3 text-center ${
-                            isNewest
-                              ? 'bg-gold-100 rounded-t-lg'
-                              : ''
+                            isCurrent ? 'bg-gold-100 rounded-t-lg' : ''
                           }`}
                         >
-                          {isNewest && (
+                          {isCurrent && (
                             <div className="mb-1 rounded-full bg-gold px-2 py-0.5 text-[10px] font-bold uppercase text-navy inline-block">
                               Current
                             </div>
@@ -204,14 +213,14 @@ function AdminAttendance() {
                           <RoleBadge role={u.role} />
                         </div>
                       </td>
-                      {visibleEvents.map((e, i) => {
-                        const isNewest = i === 0;
+                      {visibleEvents.map((e) => {
+                        const isCurrent = e.id === currentEventId;
                         const status = recordMap.get(`${u.id}:${e.id}`) || '';
                         return (
                           <td
                             key={e.id}
                             className={`py-3 px-3 text-center ${
-                              isNewest ? 'bg-gold-100/40' : ''
+                              isCurrent ? 'bg-gold-100/40' : ''
                             }`}
                           >
                             <select
