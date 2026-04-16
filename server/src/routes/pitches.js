@@ -122,18 +122,24 @@ async function notifyUsers(pitch, userIds, clientOrigin) {
       : presenterNames || pitch.pitcherName || 'TBD';
 
   await Promise.all(
-    users.map((u) =>
-      sendPitchAssignmentEmail(u.email, {
-        name: u.name,
-        ticker: pitch.ticker,
-        pitcherDisplay,
-        date: pitch.date,
-        location: pitch.location,
-        dashboardUrl: clientOrigin,
-      }).catch((err) =>
-        console.error(`Pitch assignment email to ${u.email} failed:`, err.message)
-      )
-    )
+    users.map(async (u) => {
+      try {
+        await sendPitchAssignmentEmail(u.email, {
+          name: u.name,
+          ticker: pitch.ticker,
+          pitcherDisplay,
+          date: pitch.date,
+          location: pitch.location,
+          dashboardUrl: clientOrigin,
+        });
+        console.log(`[pitch ${pitch.id}] email sent to ${u.email}`);
+      } catch (err) {
+        console.error(
+          `[pitch ${pitch.id}] email to ${u.email} FAILED:`,
+          err.message || err
+        );
+      }
+    })
   );
 }
 
@@ -160,7 +166,9 @@ router.post('/', canEditPitches, async (req, res) => {
   });
 
   // Notify everyone who should know: explicit presenters + all members of
-  // the assigned industry (deduped, excluding the creator).
+  // the assigned industry (deduped). The creator is included so they get
+  // a confirmation copy — useful for both verifying delivery and giving the
+  // President a record of what they scheduled.
   const recipientIds = new Set(ids);
   if (pitch.industryId) {
     const podMembers = await prisma.userIndustry.findMany({
@@ -169,7 +177,9 @@ router.post('/', canEditPitches, async (req, res) => {
     });
     for (const m of podMembers) recipientIds.add(m.userId);
   }
-  recipientIds.delete(req.user.id); // don't email yourself
+  console.log(
+    `[pitch ${pitch.id}] notifying ${recipientIds.size} recipient(s) for ${pitch.ticker}`
+  );
 
   notifyUsers(
     pitch,
@@ -258,7 +268,9 @@ router.put('/:id', canEditPitches, async (req, res) => {
       if (!previouslyNotified.has(m.userId)) toNotify.add(m.userId);
     }
   }
-  toNotify.delete(req.user.id);
+  console.log(
+    `[pitch ${pitch.id}] edit — notifying ${toNotify.size} new recipient(s)`
+  );
 
   if (toNotify.size > 0) {
     // Create PitchPresenter rows so the in-app popup fires on next page load.
