@@ -31,17 +31,18 @@ export function requireAdmin(req, res, next) {
 }
 
 // Permission hierarchy (higher number = more power).
-// Advisory/Faculty roles are observers — low rank.
+// Advisory Board Members and Faculty Advisors sit directly below Presidents
+// as senior observers — outranked only by the executive tier.
 export const ROLE_RANK = {
-  President: 10,
-  CIO: 9,
-  SeniorPortfolioManager: 8,
-  PortfolioManager: 7,
-  SeniorAnalyst: 6,
-  Analyst: 5,
-  JuniorAnalyst: 4,
-  AdvisoryBoardMember: 3,
-  FacultyAdvisory: 3,
+  President: 20,
+  AdvisoryBoardMember: 19,
+  FacultyAdvisory: 19,
+  CIO: 15,
+  SeniorPortfolioManager: 14,
+  PortfolioManager: 13,
+  SeniorAnalyst: 12,
+  Analyst: 11,
+  JuniorAnalyst: 10,
 };
 
 // Look up the role string for a given numeric rank. Returns null if no match.
