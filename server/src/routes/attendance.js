@@ -6,17 +6,25 @@ import { verifyJwt, requireAdmin } from '../middleware/auth.js';
 const router = Router();
 router.use(verifyJwt);
 
-// Full matrix — President only
+// Full matrix — President only.
+// Only show events from 3 months ago through 2 weeks from now —
+// no one needs to mark attendance for meetings months in the future.
 router.get('/', requireAdmin, async (_req, res) => {
+  const now = new Date();
+  const from = new Date(now);
+  from.setMonth(from.getMonth() - 3);
+  const to = new Date(now);
+  to.setDate(to.getDate() + 14);
+
   const [users, events, records] = await Promise.all([
     prisma.user.findMany({
       select: { id: true, name: true, role: true },
       orderBy: { name: 'asc' },
     }),
     prisma.event.findMany({
+      where: { date: { gte: from, lte: to } },
       select: { id: true, title: true, date: true },
-      orderBy: { date: 'desc' },
-      take: 100,
+      orderBy: { date: 'asc' },
     }),
     prisma.attendance.findMany(),
   ]);
@@ -73,12 +81,19 @@ router.post('/', requireAdmin, async (req, res) => {
 });
 
 router.get('/export.csv', requireAdmin, async (_req, res) => {
+  const now = new Date();
+  const from = new Date(now);
+  from.setMonth(from.getMonth() - 3);
+  const to = new Date(now);
+  to.setDate(to.getDate() + 14);
+
   const [users, events, records] = await Promise.all([
     prisma.user.findMany({
       select: { id: true, name: true, role: true },
       orderBy: { name: 'asc' },
     }),
     prisma.event.findMany({
+      where: { date: { gte: from, lte: to } },
       select: { id: true, title: true, date: true },
       orderBy: { date: 'asc' },
     }),
