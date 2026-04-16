@@ -238,15 +238,47 @@ router.put('/:id', canEditPitches, async (req, res) => {
     include: pitchInclude(),
   });
 
-  if (newPresenterIds.length > 0) {
+  // Figure out everyone to notify:
+  //   - new explicit presenters (from the presenterIds diff above)
+  //   - pod members of a NEWLY-ATTACHED industry (when industryId changed
+  //     from null/other to a real value)
+  // Deduped, excluding the editor themselves and anyone already on the pitch
+  // (they were notified when originally added).
+  const toNotify = new Set(newPresenterIds);
+  const industryChanged =
+    industryId !== undefined &&
+    (pitch.industryId || null) !== (existing.industryId || null);
+  if (industryChanged && pitch.industryId) {
+    const podMembers = await prisma.userIndustry.findMany({
+      where: { industryId: pitch.industryId },
+      select: { userId: true },
+    });
+    const previouslyNotified = new Set(existing.presenters.map((p) => p.userId));
+    for (const m of podMembers) {
+      if (!previouslyNotified.has(m.userId)) toNotify.add(m.userId);
+    }
+  }
+  toNotify.delete(req.user.id);
+
+  if (toNotify.size > 0) {
+    // Create PitchPresenter rows so the in-app popup fires on next page load.
+    await prisma.pitchPresenter.createMany({
+      data: [...toNotify].map((userId) => ({ pitchId: id, userId })),
+      skipDuplicates: true,
+    });
     notifyUsers(
       pitch,
-      newPresenterIds,
+      [...toNotify],
       process.env.CLIENT_ORIGIN || 'https://gcig-client.onrender.com'
     ).catch(() => {});
   }
 
-  res.json(shapePitch(pitch));
+  // Re-fetch so the response includes the newly-added pod members.
+  const fresh = await prisma.pitch.findUnique({
+    where: { id },
+    include: pitchInclude(),
+  });
+  res.json(shapePitch(fresh));
 });
 
 router.delete('/:id', canEditPitches, async (req, res) => {
