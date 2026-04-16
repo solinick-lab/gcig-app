@@ -29,3 +29,25 @@ export function requireAdmin(req, res, next) {
   }
   next();
 }
+
+// Portfolio Manager and above can create/edit pitches.
+// Hierarchy: President > CIO > SeniorPortfolioManager > PortfolioManager > SeniorAnalyst > JuniorAnalyst
+const ROLE_RANK = {
+  President: 6,
+  CIO: 5,
+  SeniorPortfolioManager: 4,
+  PortfolioManager: 3,
+  SeniorAnalyst: 2,
+  JuniorAnalyst: 1,
+};
+
+export function requireRole(minRole) {
+  const minRank = ROLE_RANK[minRole] || 0;
+  return (req, res, next) => {
+    const rank = ROLE_RANK[req.user?.role] || 0;
+    if (rank < minRank) {
+      return res.status(403).json({ error: `${minRole} role or higher required` });
+    }
+    next();
+  };
+}

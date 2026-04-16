@@ -4,11 +4,13 @@ import { format, parse, startOfWeek, getDay } from 'date-fns';
 import enUS from 'date-fns/locale/en-US';
 import { Plus } from 'lucide-react';
 import api from '../api/client.js';
+import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
 import Modal from '../components/Modal.jsx';
-import AdminOnly from '../components/AdminOnly.jsx';
+
+const PITCH_ROLES = ['President', 'CIO', 'SeniorPortfolioManager', 'PortfolioManager'];
 
 const locales = { 'en-US': enUS };
 const localizer = dateFnsLocalizer({ format, parse, startOfWeek, getDay, locales });
@@ -28,6 +30,8 @@ export default function Pitches() {
   const [pitches, setPitches] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState(emptyForm());
+  const { user } = useAuth();
+  const canEdit = PITCH_ROLES.includes(user?.role);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [selected, setSelected] = useState(null);
@@ -107,12 +111,12 @@ export default function Pitches() {
         title="Upcoming Pitches"
         subtitle="Scheduled stock pitch presentations."
         actions={
-          <AdminOnly>
+          canEdit && (
             <Button onClick={openCreate} variant="gold">
               <Plus className="h-4 w-4" />
               Add Pitch
             </Button>
-          </AdminOnly>
+          )
         }
       />
 
@@ -165,7 +169,7 @@ export default function Pitches() {
                 View slideshow →
               </a>
             )}
-            <AdminOnly>
+            {canEdit && (
               <div className="flex gap-2 pt-3 border-t border-navy-50">
                 <Button variant="outline" onClick={() => openEdit(selected)}>
                   Edit
@@ -174,7 +178,7 @@ export default function Pitches() {
                   Delete
                 </Button>
               </div>
-            </AdminOnly>
+            )}
           </div>
         )}
       </Modal>

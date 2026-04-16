@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import prisma from '../db.js';
-import { verifyJwt, requireAdmin } from '../middleware/auth.js';
+import { verifyJwt, requireRole } from '../middleware/auth.js';
+
+const canEditPitches = requireRole('PortfolioManager');
 
 const router = Router();
 router.use(verifyJwt);
@@ -17,7 +19,7 @@ router.get('/:id', async (req, res) => {
   res.json(pitch);
 });
 
-router.post('/', requireAdmin, async (req, res) => {
+router.post('/', canEditPitches, async (req, res) => {
   const { pitcherName, ticker, date, location, slideshowUrl } = req.body;
   if (!pitcherName || !ticker || !date) {
     return res.status(400).json({ error: 'pitcherName, ticker, date required' });
@@ -34,7 +36,7 @@ router.post('/', requireAdmin, async (req, res) => {
   res.status(201).json(pitch);
 });
 
-router.put('/:id', requireAdmin, async (req, res) => {
+router.put('/:id', canEditPitches, async (req, res) => {
   const id = Number(req.params.id);
   const existing = await prisma.pitch.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: 'Not found' });
@@ -51,7 +53,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
   res.json(pitch);
 });
 
-router.delete('/:id', requireAdmin, async (req, res) => {
+router.delete('/:id', canEditPitches, async (req, res) => {
   const id = Number(req.params.id);
   const existing = await prisma.pitch.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: 'Not found' });
