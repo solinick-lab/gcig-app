@@ -38,9 +38,21 @@ app.use(
   })
 );
 
+// Comma-separated list of allowed client origins. Set CLIENT_ORIGIN to e.g.
+//   https://thegriffinfund.org,https://www.thegriffinfund.org,https://gcig-client.onrender.com
+const ALLOWED_ORIGINS = (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 app.use(
   cors({
-    origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+    origin: (origin, cb) => {
+      // Requests with no Origin header (server-to-server, curl) pass through.
+      if (!origin) return cb(null, true);
+      if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      return cb(new Error(`CORS blocked: ${origin}`));
+    },
     credentials: true,
   })
 );
