@@ -12,6 +12,7 @@ import Modal from '../components/Modal.jsx';
 import MemberPicker from '../components/MemberPicker.jsx';
 
 const PITCH_ROLES = ['President', 'CIO', 'SeniorPortfolioManager', 'PortfolioManager'];
+const CROSS_POD_ROLES = new Set(['President', 'CIO', 'SeniorPortfolioManager']);
 
 const locales = { 'en-US': enUS };
 const localizer = dateFnsLocalizer({ format, parse, startOfWeek, getDay, locales });
@@ -275,9 +276,9 @@ export default function Pitches() {
               {industries
                 .filter(
                   (i) =>
-                    // Presidents see every industry; everyone else only sees
-                    // industries they lead.
-                    user?.role === 'President' || i.leader?.id === user?.id
+                    // Presidents, CIOs, SPMs see every industry. Everyone else
+                    // (PMs) only sees industries they lead.
+                    CROSS_POD_ROLES.has(user?.role) || i.leader?.id === user?.id
                 )
                 .map((i) => (
                   <option key={i.id} value={i.id}>
@@ -287,7 +288,7 @@ export default function Pitches() {
                 ))}
             </select>
             <p className="mt-1 text-xs text-navy-400">
-              {user?.role === 'President'
+              {CROSS_POD_ROLES.has(user?.role)
                 ? 'Everyone in the selected pod gets an email and in-app popup.'
                 : 'You can only schedule pitches for industries you lead.'}
             </p>

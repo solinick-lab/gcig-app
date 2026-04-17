@@ -143,10 +143,13 @@ async function notifyUsers(pitch, userIds, clientOrigin) {
   );
 }
 
-// Non-Presidents can only attach a pitch to an industry they lead.
+// Cross-pod scheduling privileges. Presidents, CIOs, and SPMs can schedule
+// for any industry; Portfolio Managers can only schedule for their own pod.
+const CROSS_POD_ROLES = new Set(['President', 'CIO', 'SeniorPortfolioManager']);
+
 async function assertCanUseIndustry(req, industryId) {
   if (!industryId) return; // individual pitch — always OK
-  if (req.user.role === 'President') return;
+  if (CROSS_POD_ROLES.has(req.user.role)) return;
   const industry = await prisma.industry.findUnique({
     where: { id: Number(industryId) },
     select: { leaderId: true },
@@ -233,12 +236,17 @@ router.put('/:id', canEditPitches, async (req, res) => {
 
   const { pitcherName, ticker, date, location, slideshowUrl, presenterIds, industryId } = req.body;
 
-  // Non-Presidents cannot edit a pitch that belongs to an industry they don't lead,
-  // and cannot reassign it to an industry they don't lead.
-  if (req.user.role !== 'President') {
-    const targetIndustry = industryId !== undefined ? industryId : existing.industryId;
+  // Portfolio Managers can only edit pitches that belong to their own pod,
+  // and can't reassign a pitch to another pod. President/CIO/SPM may edit
+  // any pitch.
+  if (!CROSS_POD_ROLES.has(req.user.role)) {
+    const targetIndustry =
+      industryId !== undefined ? industryId : existing.industryId;
     try {
       await assertCanUseIndustry(req, targetIndustry);
+      // Also verify they lead the CURRENT industry (so they can't edit a
+      // pitch that belongs to someone else's pod).
+      await assertCanUseIndustry(req, existing.industryId);
     } catch (err) {
       return res.status(err.status || 500).json({ error: err.message });
     }
