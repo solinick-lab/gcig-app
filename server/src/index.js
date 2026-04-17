@@ -1,8 +1,10 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { generalLimiter } from './middleware/rateLimit.js';
 
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
@@ -14,12 +16,16 @@ import attendanceRoutes from './routes/attendance.js';
 import dashboardRoutes from './routes/dashboard.js';
 import voteRoutes from './routes/votes.js';
 import industryRoutes from './routes/industries.js';
+import auditRoutes from './routes/audit.js';
 import { ensureRecurringMeetings } from './services/recurringMeetings.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
+// Trust Render's proxy so express-rate-limit + req.ip use the real client IP.
+app.set('trust proxy', 1);
 
 app.use(
   cors({
@@ -28,6 +34,8 @@ app.use(
   })
 );
 app.use(express.json({ limit: '2mb' }));
+app.use(cookieParser());
+app.use('/api', generalLimiter);
 
 // Serve uploaded files (PDF, PPTX)
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
@@ -44,6 +52,7 @@ app.use('/api/attendance', attendanceRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/votes', voteRoutes);
 app.use('/api/industries', industryRoutes);
+app.use('/api/audit', auditRoutes);
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {

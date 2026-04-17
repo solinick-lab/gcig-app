@@ -3,20 +3,31 @@ import bcrypt from 'bcrypt';
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import prisma from '../db.js';
-import { verifyJwt } from '../middleware/auth.js';
-import { sendVerificationCode } from '../services/email.js';
+import {
+  verifyJwt,
+  issueJwt,
+  clearSessionCookie,
+} from '../middleware/auth.js';
+import { authLimiter, codeLimiter } from '../middleware/rateLimit.js';
+import { sendVerificationCode, sendPasswordResetEmail } from '../services/email.js';
+import { auditReq } from '../services/audit.js';
 
 const router = Router();
 
 const ALLOWED_SIGNUP_DOMAIN = '@gcschool.org';
 const CODE_EXPIRY_MINUTES = 10;
+const RESET_EXPIRY_MINUTES = 30;
 
 function generateCode() {
   return crypto.randomInt(100000, 999999).toString();
 }
+function generateToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
 
-// Step 1: User submits name/email/password → server sends a 6-digit code.
-router.post('/signup', async (req, res) => {
+// ── Signup (2-step with email verification) ──────────────────────────
+
+router.post('/signup', authLimiter, async (req, res) => {
   const { name, email, password } = req.body || {};
   if (!name || !email || !password) {
     return res.status(400).json({ error: 'Name, email, and password required' });
@@ -40,7 +51,6 @@ router.post('/signup', async (req, res) => {
   const code = generateCode();
   const expiresAt = new Date(Date.now() + CODE_EXPIRY_MINUTES * 60 * 1000);
 
-  // Upsert so re-signups before verification just refresh the code.
   await prisma.pendingVerification.upsert({
     where: { email: normalized },
     update: { name: String(name).trim(), passwordHash, code, expiresAt },
@@ -60,11 +70,11 @@ router.post('/signup', async (req, res) => {
     return res.status(500).json({ error: 'Failed to send verification email. Try again.' });
   }
 
+  await auditReq(req, 'signup.code_sent', 'user', null, { email: normalized });
   res.json({ message: 'Verification code sent', email: normalized });
 });
 
-// Step 2: User submits the code → server creates the real account + returns JWT.
-router.post('/verify', async (req, res) => {
+router.post('/verify', codeLimiter, async (req, res) => {
   const { email, code } = req.body || {};
   if (!email || !code) {
     return res.status(400).json({ error: 'Email and code required' });
@@ -84,7 +94,6 @@ router.post('/verify', async (req, res) => {
     return res.status(400).json({ error: 'Code expired. Click "Resend" to get a new one.' });
   }
 
-  // Double-check no one registered while the code was pending.
   const existingUser = await prisma.user.findUnique({ where: { email: normalized } });
   if (existingUser) {
     await prisma.pendingVerification.delete({ where: { email: normalized } });
@@ -101,19 +110,19 @@ router.post('/verify', async (req, res) => {
   });
   await prisma.pendingVerification.delete({ where: { email: normalized } });
 
-  const token = jwt.sign(
-    { id: user.id, role: user.role },
-    process.env.JWT_SECRET,
-    { expiresIn: '7d' }
+  issueJwt(res, user);
+  await auditReq(
+    { ...req, user: { id: user.id, name: user.name, role: user.role } },
+    'signup.completed',
+    'user',
+    user.id
   );
   res.status(201).json({
-    token,
     user: { id: user.id, name: user.name, email: user.email, role: user.role },
   });
 });
 
-// Resend a fresh code (same pending signup, new code + expiry).
-router.post('/resend-code', async (req, res) => {
+router.post('/resend-code', codeLimiter, async (req, res) => {
   const { email } = req.body || {};
   if (!email) return res.status(400).json({ error: 'Email required' });
   const normalized = String(email).trim().toLowerCase();
@@ -142,7 +151,8 @@ router.post('/resend-code', async (req, res) => {
   res.json({ message: 'New code sent', email: normalized });
 });
 
-// Fetch invite metadata by token (used by AcceptInvite page to display name/role).
+// ── Invite acceptance ────────────────────────────────────────────────
+
 router.get('/invite/:token', async (req, res) => {
   const invite = await prisma.pendingInvite.findUnique({
     where: { token: req.params.token },
@@ -156,8 +166,7 @@ router.get('/invite/:token', async (req, res) => {
   res.json({ email: invite.email, name: invite.name, role: invite.role });
 });
 
-// Accept an invite — invitee picks their password, account is created, JWT returned.
-router.post('/accept-invite', async (req, res) => {
+router.post('/accept-invite', authLimiter, async (req, res) => {
   const { token, password } = req.body || {};
   if (!token || !password) {
     return res.status(400).json({ error: 'Token and password required' });
@@ -174,7 +183,6 @@ router.post('/accept-invite', async (req, res) => {
     return res.status(400).json({ error: 'This invite has expired. Ask the President to re-send.' });
   }
 
-  // Guard against a real account being created between invite send + accept.
   const existingUser = await prisma.user.findUnique({
     where: { email: invite.email },
   });
@@ -194,38 +202,143 @@ router.post('/accept-invite', async (req, res) => {
   });
   await prisma.pendingInvite.delete({ where: { id: invite.id } });
 
-  const jwtToken = jwt.sign(
-    { id: user.id, role: user.role },
-    process.env.JWT_SECRET,
-    { expiresIn: '7d' }
+  issueJwt(res, user);
+  await auditReq(
+    { ...req, user: { id: user.id, name: user.name, role: user.role } },
+    'invite.accepted',
+    'user',
+    user.id
   );
   res.status(201).json({
-    token: jwtToken,
     user: { id: user.id, name: user.name, email: user.email, role: user.role },
   });
 });
 
-router.post('/login', async (req, res) => {
+// ── Login / logout ───────────────────────────────────────────────────
+
+router.post('/login', authLimiter, async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password required' });
   }
   const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-  if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-
+  if (!user) {
+    await auditReq(req, 'login.failed', 'user', null, { email, reason: 'no_user' });
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
   const ok = await bcrypt.compare(password, user.passwordHash);
-  if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
-
-  const token = jwt.sign(
-    { id: user.id, role: user.role },
-    process.env.JWT_SECRET,
-    { expiresIn: '7d' }
+  if (!ok) {
+    await auditReq(req, 'login.failed', 'user', user.id, { email, reason: 'bad_password' });
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+  issueJwt(res, user);
+  await auditReq(
+    { ...req, user: { id: user.id, name: user.name, role: user.role } },
+    'login.success',
+    'user',
+    user.id
   );
   res.json({
-    token,
     user: { id: user.id, name: user.name, email: user.email, role: user.role },
   });
 });
+
+router.post('/logout', async (req, res) => {
+  clearSessionCookie(res);
+  res.json({ ok: true });
+});
+
+router.post('/logout-everywhere', verifyJwt, async (req, res) => {
+  // Bumping tokenVersion invalidates every outstanding JWT for this user.
+  await prisma.user.update({
+    where: { id: req.user.id },
+    data: { tokenVersion: { increment: 1 } },
+  });
+  clearSessionCookie(res);
+  await auditReq(req, 'session.logout_everywhere', 'user', req.user.id);
+  res.json({ ok: true });
+});
+
+// ── Self-service password reset ──────────────────────────────────────
+
+router.post('/forgot-password', authLimiter, async (req, res) => {
+  const { email } = req.body || {};
+  if (!email) return res.status(400).json({ error: 'Email required' });
+  const normalized = String(email).trim().toLowerCase();
+
+  // Always return success to avoid disclosing which emails exist.
+  const user = await prisma.user.findUnique({ where: { email: normalized } });
+  if (!user) {
+    await auditReq(req, 'password_reset.requested', 'user', null, { email: normalized, hit: false });
+    return res.json({ ok: true });
+  }
+
+  const token = generateToken();
+  const expiresAt = new Date(Date.now() + RESET_EXPIRY_MINUTES * 60 * 1000);
+  await prisma.passwordReset.create({
+    data: { email: normalized, token, expiresAt },
+  });
+
+  const clientOrigin = process.env.CLIENT_ORIGIN || 'https://gcig-client.onrender.com';
+  const resetUrl = `${clientOrigin}/reset-password?token=${token}`;
+
+  try {
+    await sendPasswordResetEmail(normalized, { name: user.name, resetUrl });
+  } catch (err) {
+    console.error('Password reset email failed:', err.message);
+  }
+
+  await auditReq(req, 'password_reset.requested', 'user', user.id, { email: normalized, hit: true });
+  res.json({ ok: true });
+});
+
+router.get('/reset/:token', async (req, res) => {
+  const row = await prisma.passwordReset.findUnique({
+    where: { token: req.params.token },
+  });
+  if (!row || new Date() > row.expiresAt) {
+    return res.status(400).json({ error: 'This reset link is invalid or expired.' });
+  }
+  res.json({ email: row.email });
+});
+
+router.post('/reset/:token', authLimiter, async (req, res) => {
+  const { password } = req.body || {};
+  if (!password || password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  }
+  const row = await prisma.passwordReset.findUnique({
+    where: { token: req.params.token },
+  });
+  if (!row || new Date() > row.expiresAt) {
+    return res.status(400).json({ error: 'This reset link is invalid or expired.' });
+  }
+
+  const user = await prisma.user.findUnique({ where: { email: row.email } });
+  if (!user) {
+    await prisma.passwordReset.delete({ where: { id: row.id } });
+    return res.status(400).json({ error: 'Account no longer exists.' });
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  // Rotate tokenVersion so any existing sessions (including a stolen one)
+  // are invalidated immediately.
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { passwordHash, tokenVersion: { increment: 1 } },
+  });
+  await prisma.passwordReset.delete({ where: { id: row.id } });
+
+  await auditReq(
+    { ...req, user: { id: user.id, name: user.name } },
+    'password_reset.completed',
+    'user',
+    user.id
+  );
+  res.json({ ok: true });
+});
+
+// ── Current user / password change ───────────────────────────────────
 
 router.get('/me', verifyJwt, async (req, res) => {
   const user = await prisma.user.findUnique({
@@ -246,7 +359,13 @@ router.post('/change-password', verifyJwt, async (req, res) => {
   if (!ok) return res.status(401).json({ error: 'Current password incorrect' });
 
   const passwordHash = await bcrypt.hash(newPassword, 10);
-  await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { passwordHash, tokenVersion: { increment: 1 } },
+  });
+  // Re-issue a fresh cookie so the user stays logged in on this device.
+  issueJwt(res, { ...user, tokenVersion: (user.tokenVersion ?? 0) + 1 });
+  await auditReq(req, 'password_changed', 'user', user.id);
   res.json({ ok: true });
 });
 

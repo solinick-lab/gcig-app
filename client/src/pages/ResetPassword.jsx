@@ -1,46 +1,36 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams, useNavigate, Navigate } from 'react-router-dom';
+import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import api from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import Button from '../components/Button.jsx';
 
-const ROLE_LABELS = {
-  President: 'President',
-  CIO: 'CIO',
-  SeniorPortfolioManager: 'Senior Portfolio Manager',
-  PortfolioManager: 'Portfolio Manager',
-  SeniorAnalyst: 'Senior Analyst',
-  JuniorAnalyst: 'Junior Analyst',
-};
-
-export default function AcceptInvite() {
-  const [searchParams] = useSearchParams();
+export default function ResetPassword() {
+  const [params] = useSearchParams();
+  const token = params.get('token');
   const navigate = useNavigate();
-  const token = searchParams.get('token');
-  const { user } = useAuth();
+  const { resetPassword } = useAuth();
 
-  const [invite, setInvite] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState('');
+  const [validating, setValidating] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState(false);
 
   useEffect(() => {
     if (!token) {
-      setLoadError('No invite token in URL');
-      setLoading(false);
+      setLoadError('No reset token in URL');
+      setValidating(false);
       return;
     }
     api
-      .get(`/auth/invite/${token}`)
-      .then(({ data }) => setInvite(data))
-      .catch((err) => setLoadError(err.response?.data?.error || 'Invalid invite link'))
-      .finally(() => setLoading(false));
+      .get(`/auth/reset/${token}`)
+      .then(({ data }) => setEmail(data.email))
+      .catch((err) => setLoadError(err.response?.data?.error || 'Invalid reset link'))
+      .finally(() => setValidating(false));
   }, [token]);
-
-  if (user) return <Navigate to="/" replace />;
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -55,11 +45,11 @@ export default function AcceptInvite() {
     }
     setSubmitting(true);
     try {
-      await api.post('/auth/accept-invite', { token, password });
-      // Hard reload so AuthContext picks up the new session cookie.
-      window.location.href = '/';
+      await resetPassword(token, password);
+      setDone(true);
+      setTimeout(() => navigate('/login'), 2000);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to set up account');
+      setError(err.response?.data?.error || 'Reset failed');
     } finally {
       setSubmitting(false);
     }
@@ -74,9 +64,7 @@ export default function AcceptInvite() {
               src="/grace-logo.png"
               alt="Grace Church School"
               className="h-14 w-auto"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
             />
           </div>
           <p className="mt-4 text-xs uppercase tracking-[0.2em] text-gold font-semibold">
@@ -85,55 +73,48 @@ export default function AcceptInvite() {
         </div>
 
         <div className="rounded-xl bg-white p-8 shadow-xl">
-          {loading ? (
-            <div className="text-center text-navy-400">Checking your invite…</div>
+          {validating ? (
+            <div className="text-center text-navy-400">Checking your reset link…</div>
           ) : loadError ? (
             <>
-              <h2 className="text-lg font-semibold text-red-700">Invite not valid</h2>
+              <h2 className="text-lg font-semibold text-red-700">Link not valid</h2>
               <p className="mt-2 text-sm text-navy-400">{loadError}</p>
-              <Button
-                variant="outline"
-                onClick={() => navigate('/login')}
-                className="mt-6 w-full"
-              >
-                Go to sign in
-              </Button>
+              <Link to="/forgot-password" className="mt-6 inline-block text-sm font-semibold text-gold-700 underline">
+                Request a new reset link
+              </Link>
             </>
-          ) : invite ? (
+          ) : done ? (
+            <div className="text-center">
+              <h2 className="text-lg font-semibold text-emerald-700">Password updated</h2>
+              <p className="mt-2 text-sm text-navy-400">Redirecting to sign in…</p>
+            </div>
+          ) : (
             <>
-              <h2 className="text-lg font-semibold text-navy">Set up your account</h2>
+              <h2 className="text-lg font-semibold text-navy">Set a new password</h2>
               <p className="mt-1 text-sm text-navy-400">
-                You've been invited as <strong>{ROLE_LABELS[invite.role] || invite.role}</strong>.
+                For <strong>{email}</strong>
               </p>
-
-              <div className="mt-4 rounded-lg bg-navy-50 px-3 py-2">
-                <div className="text-xs text-navy-400">Name</div>
-                <div className="font-semibold text-navy">{invite.name}</div>
-                <div className="mt-2 text-xs text-navy-400">Email</div>
-                <div className="text-navy">{invite.email}</div>
-              </div>
-
               <form onSubmit={handleSubmit} className="mt-6 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-navy">Choose a password</label>
+                  <label className="block text-sm font-medium text-navy">New password</label>
                   <input
                     type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
                     required
                     minLength={8}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
                   />
                   <p className="mt-1 text-xs text-navy-400">Minimum 8 characters.</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-navy">Confirm password</label>
+                  <label className="block text-sm font-medium text-navy">Confirm</label>
                   <input
                     type="password"
-                    value={confirm}
-                    onChange={(e) => setConfirm(e.target.value)}
                     required
                     minLength={8}
+                    value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
                   />
                 </div>
@@ -143,11 +124,11 @@ export default function AcceptInvite() {
                   </div>
                 )}
                 <Button type="submit" disabled={submitting} className="w-full">
-                  {submitting ? 'Creating account…' : 'Create account'}
+                  {submitting ? 'Updating…' : 'Update password'}
                 </Button>
               </form>
             </>
-          ) : null}
+          )}
         </div>
       </div>
     </div>

@@ -1,22 +1,63 @@
 import jwt from 'jsonwebtoken';
 import prisma from '../db.js';
 
+export const COOKIE_NAME = 'gcig_session';
+
+// Cookie options: always httpOnly, always secure in prod, sameSite=none so the
+// cross-origin client (gcig-client → gcig-api) can send it along.
+export function cookieOptions() {
+  const prod = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
+  return {
+    httpOnly: true,
+    secure: prod,
+    sameSite: prod ? 'none' : 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7d
+    path: '/',
+  };
+}
+
+export function issueJwt(res, user) {
+  const token = jwt.sign(
+    { id: user.id, role: user.role, v: user.tokenVersion ?? 0 },
+    process.env.JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+  res.cookie(COOKIE_NAME, token, cookieOptions());
+  return token;
+}
+
+export function clearSessionCookie(res) {
+  res.clearCookie(COOKIE_NAME, { ...cookieOptions(), maxAge: 0 });
+}
+
 export async function verifyJwt(req, res, next) {
-  const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) {
+  // Prefer the cookie (set at login). Fall back to Authorization header for
+  // clients that still send it (e.g. tools / legacy sessions).
+  let token = req.cookies?.[COOKIE_NAME];
+  if (!token) {
+    const header = req.headers.authorization;
+    if (header && header.startsWith('Bearer ')) {
+      token = header.slice(7);
+    }
+  }
+  if (!token) {
     return res.status(401).json({ error: 'Missing token' });
   }
-  const token = header.slice(7);
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
-    // Always fetch the current role from the DB so role changes
-    // take effect immediately without requiring a re-login.
+    // Always fetch the current role AND tokenVersion from the DB.
+    // If the user rotated their tokenVersion (e.g. via logout-everywhere),
+    // all old JWTs are immediately invalid.
     const user = await prisma.user.findUnique({
       where: { id: payload.id },
-      select: { id: true, role: true },
+      select: { id: true, name: true, role: true, tokenVersion: true },
     });
     if (!user) return res.status(401).json({ error: 'User not found' });
-    req.user = { id: user.id, role: user.role };
+    if ((payload.v ?? 0) !== (user.tokenVersion ?? 0)) {
+      clearSessionCookie(res);
+      return res.status(401).json({ error: 'Session revoked, please sign in again' });
+    }
+    req.user = { id: user.id, name: user.name, role: user.role };
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token' });

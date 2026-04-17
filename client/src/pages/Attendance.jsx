@@ -141,9 +141,8 @@ function AdminAttendance() {
   }
 
   async function downloadCsv() {
-    const token = localStorage.getItem('gcig_token');
     const res = await fetch(`${API_BASE}/attendance/export.csv`, {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: 'include',
     });
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);

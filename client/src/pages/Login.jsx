@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import Button from '../components/Button.jsx';
 
@@ -280,6 +280,16 @@ export default function Login() {
                     ? 'Sign in'
                     : 'Send verification code'}
                 </Button>
+                {mode === 'login' && (
+                  <div className="text-center">
+                    <Link
+                      to="/forgot-password"
+                      className="text-xs font-semibold text-navy-400 underline"
+                    >
+                      Forgot password?
+                    </Link>
+                  </div>
+                )}
               </form>
             </>
           )}

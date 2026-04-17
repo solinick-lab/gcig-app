@@ -8,7 +8,7 @@ import RoleBadge from '../components/RoleBadge.jsx';
 import Button from '../components/Button.jsx';
 
 export default function Profile() {
-  const { user } = useAuth();
+  const { user, logoutEverywhere } = useAuth();
   const [stats, setStats] = useState(null);
   const [form, setForm] = useState({ currentPassword: '', newPassword: '' });
   const [message, setMessage] = useState('');
@@ -128,6 +128,27 @@ export default function Profile() {
             )}
             <Button type="submit">Update Password</Button>
           </form>
+        </Card>
+      </div>
+
+      <div className="mt-6">
+        <Card title="Session Security">
+          <p className="text-sm text-navy-400">
+            If you suspect your account has been accessed from another device,
+            sign out of all sessions immediately. You'll need to sign in again
+            on every device.
+          </p>
+          <Button
+            variant="danger"
+            className="mt-4"
+            onClick={async () => {
+              if (!confirm('Sign out of every device you are logged in on?')) return;
+              await logoutEverywhere();
+              window.location.href = '/login';
+            }}
+          >
+            Sign out everywhere
+          </Button>
         </Card>
       </div>
     </>

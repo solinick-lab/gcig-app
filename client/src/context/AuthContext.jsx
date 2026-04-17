@@ -4,49 +4,32 @@ import api from '../api/client.js';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    const raw = localStorage.getItem('gcig_user');
-    return raw ? JSON.parse(raw) : null;
-  });
-  const [loading, setLoading] = useState(!!localStorage.getItem('gcig_token'));
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
+  // On mount, ask the server who we are. If the session cookie is valid it
+  // responds with the user. Otherwise we stay logged out.
   useEffect(() => {
-    const token = localStorage.getItem('gcig_token');
-    if (!token) {
-      setLoading(false);
-      return;
-    }
     api
       .get('/auth/me')
-      .then((res) => {
-        setUser(res.data);
-        localStorage.setItem('gcig_user', JSON.stringify(res.data));
-      })
-      .catch(() => {
-        localStorage.removeItem('gcig_token');
-        localStorage.removeItem('gcig_user');
-        setUser(null);
-      })
+      .then((res) => setUser(res.data))
+      .catch(() => setUser(null))
       .finally(() => setLoading(false));
   }, []);
 
   async function login(email, password) {
     const res = await api.post('/auth/login', { email, password });
-    localStorage.setItem('gcig_token', res.data.token);
-    localStorage.setItem('gcig_user', JSON.stringify(res.data.user));
     setUser(res.data.user);
     return res.data.user;
   }
 
   async function signup(name, email, password) {
     const res = await api.post('/auth/signup', { name, email, password });
-    return res.data; // { message, email } — no token yet, needs verification
+    return res.data; // { message, email } — no cookie yet, needs verification
   }
 
   async function verify(email, code) {
     const res = await api.post('/auth/verify', { email, code });
-    localStorage.setItem('gcig_token', res.data.token);
-    localStorage.setItem('gcig_user', JSON.stringify(res.data.user));
     setUser(res.data.user);
     return res.data.user;
   }
@@ -56,9 +39,25 @@ export function AuthProvider({ children }) {
     return res.data;
   }
 
-  function logout() {
-    localStorage.removeItem('gcig_token');
-    localStorage.removeItem('gcig_user');
+  async function forgotPassword(email) {
+    await api.post('/auth/forgot-password', { email });
+  }
+
+  async function resetPassword(token, password) {
+    await api.post(`/auth/reset/${token}`, { password });
+  }
+
+  async function logout() {
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      /* ignore */
+    }
+    setUser(null);
+  }
+
+  async function logoutEverywhere() {
+    await api.post('/auth/logout-everywhere');
     setUser(null);
   }
 
@@ -66,7 +65,22 @@ export function AuthProvider({ children }) {
   const isExecutive = user?.role === 'President' || user?.role === 'CIO';
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, verify, resendCode, logout, isAdmin, isExecutive }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        login,
+        signup,
+        verify,
+        resendCode,
+        forgotPassword,
+        resetPassword,
+        logout,
+        logoutEverywhere,
+        isAdmin,
+        isExecutive,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

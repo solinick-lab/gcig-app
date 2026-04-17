@@ -12,6 +12,7 @@ import {
   LogOut,
   Vote,
   Building2,
+  ShieldAlert,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import RoleBadge from './RoleBadge.jsx';
@@ -27,6 +28,7 @@ const NAV_ITEMS = [
   { to: '/reports', label: 'Research Reports', icon: BookOpen },
   { to: '/attendance', label: 'Attendance', icon: ClipboardCheck },
   { to: '/members', label: 'Members', icon: Users, executiveOnly: true },
+  { to: '/audit', label: 'Audit Log', icon: ShieldAlert, adminOnly: true },
   { to: '/profile', label: 'Profile', icon: UserCircle },
 ];
 

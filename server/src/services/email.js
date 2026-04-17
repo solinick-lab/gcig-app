@@ -53,6 +53,41 @@ export async function sendVerificationCode(toEmail, code) {
   });
 }
 
+export async function sendPasswordResetEmail(toEmail, { name, resetUrl }) {
+  await getTransporter().sendMail({
+    from: from(),
+    to: toEmail,
+    subject: 'Reset your GCIG password',
+    html: `
+      <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h1 style="color: #1B2A4A; font-size: 24px; margin: 0;">GCIG</h1>
+          <p style="color: #C9A84C; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; margin: 4px 0 0;">
+            Grace Church School Investment Group
+          </p>
+        </div>
+        <div style="background: #F7F8FB; border-radius: 12px; padding: 24px;">
+          <p style="color: #1B2A4A; font-size: 14px; margin: 0 0 8px;">Hi ${name},</p>
+          <p style="color: #1B2A4A; font-size: 14px; margin: 0 0 16px;">
+            Someone requested a password reset for your GCIG account. If this was you, click below to set a new password:
+          </p>
+          <div style="text-align: center; margin: 24px 0;">
+            <a href="${resetUrl}" style="display: inline-block; background: #C9A84C; color: #1B2A4A; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 32px; border-radius: 8px;">
+              Reset Password
+            </a>
+          </div>
+          <p style="color: #8C99BB; font-size: 12px; margin: 16px 0 0;">
+            This link expires in 30 minutes. If you didn't request a reset, ignore this email — your password is unchanged.
+          </p>
+          <p style="color: #1B2A4A; font-size: 11px; font-family: monospace; word-break: break-all; margin: 8px 0 0;">
+            ${resetUrl}
+          </p>
+        </div>
+      </div>
+    `,
+  });
+}
+
 export async function sendPitchAssignmentEmail(
   toEmail,
   { name, ticker, pitcherDisplay, date, location, dashboardUrl }

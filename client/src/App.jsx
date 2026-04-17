@@ -4,6 +4,9 @@ import Layout from './components/Layout.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import Login from './pages/Login.jsx';
 import AcceptInvite from './pages/AcceptInvite.jsx';
+import ForgotPassword from './pages/ForgotPassword.jsx';
+import ResetPassword from './pages/ResetPassword.jsx';
+import AuditLog from './pages/AuditLog.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Pitches from './pages/Pitches.jsx';
 import Events from './pages/Events.jsx';
@@ -30,6 +33,8 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/accept-invite" element={<AcceptInvite />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route
         path="/"
         element={
@@ -48,6 +53,7 @@ export default function App() {
         <Route path="reports" element={<Reports />} />
         <Route path="attendance" element={<Attendance />} />
         <Route path="members" element={<Members />} />
+        <Route path="audit" element={<AuditLog />} />
         <Route path="profile" element={<Profile />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

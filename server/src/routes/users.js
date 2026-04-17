@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import prisma from '../db.js';
 import { verifyJwt, requireAdmin, requireExecutive, ROLE_RANK } from '../middleware/auth.js';
 import { sendInviteEmail } from '../services/email.js';
+import { auditReq } from '../services/audit.js';
 
 const router = Router();
 
@@ -110,6 +111,11 @@ router.post('/', requireExecutive, async (req, res) => {
     console.error('Invite email failed:', emailErr.message);
   }
 
+  await auditReq(req, 'user.invited', 'user', null, {
+    email: normalized,
+    role,
+    emailSent,
+  });
   res.status(201).json({
     email: normalized,
     name: String(name).trim(),
@@ -134,6 +140,7 @@ router.put('/:id', requireExecutive, async (req, res) => {
     },
     select: { id: true, name: true, email: true, role: true, createdAt: true },
   });
+  await auditReq(req, 'user.updated', 'user', user.id, { name, email, role });
   res.json(user);
 });
 
@@ -164,6 +171,11 @@ router.put('/:id/role', async (req, res) => {
       where: { id: targetId },
       data: { role: newRole },
       select: { id: true, name: true, email: true, role: true, extraRoles: true },
+    });
+    await auditReq(req, 'user.role_changed', 'user', targetId, {
+      from: target.role,
+      to: newRole,
+      by: 'president',
     });
     return res.json(updated);
   }
@@ -243,6 +255,7 @@ router.put('/:id/extra-roles', requireExecutive, async (req, res) => {
     data: { extraRoles },
     select: { id: true, name: true, email: true, role: true, extraRoles: true },
   });
+  await auditReq(req, 'user.extra_roles_set', 'user', user.id, { extraRoles });
   res.json(user);
 });
 
@@ -250,7 +263,12 @@ router.post('/:id/reset-password', requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   const tempPassword = generateTempPassword();
   const passwordHash = await bcrypt.hash(tempPassword, 10);
-  await prisma.user.update({ where: { id }, data: { passwordHash } });
+  // Rotate tokenVersion so the target's existing sessions die instantly.
+  await prisma.user.update({
+    where: { id },
+    data: { passwordHash, tokenVersion: { increment: 1 } },
+  });
+  await auditReq(req, 'user.password_reset_by_admin', 'user', id);
   res.json({ tempPassword });
 });
 
@@ -260,6 +278,7 @@ router.delete('/:id', requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'Cannot delete your own account' });
   }
   await prisma.user.delete({ where: { id } });
+  await auditReq(req, 'user.deleted', 'user', id);
   res.json({ ok: true });
 });
 
