@@ -14,6 +14,7 @@ import api from '../api/client.js';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
+import HoldingDetailModal from '../components/HoldingDetailModal.jsx';
 
 const RANGES = [
   { key: '1W', label: '1W', days: 7 },
@@ -84,6 +85,7 @@ export default function Portfolio() {
   const holdings = data?.holdings || [];
 
   const [range, setRange] = useState('6M');
+  const [selectedTicker, setSelectedTicker] = useState(null);
 
   // Normalize history (with real Date objects) once.
   // equity = totalValue - cashValue (falls back to total if cash is unknown).
@@ -478,7 +480,11 @@ export default function Portfolio() {
                       h.marketValue ??
                       (h.shares != null && h.price != null ? h.shares * h.price : null);
                     return (
-                      <tr key={h.ticker} className={h.isCash ? 'bg-gold-100/40' : ''}>
+                      <tr
+                        key={h.ticker}
+                        onClick={() => !h.isCash && setSelectedTicker(h.ticker)}
+                        className={`${h.isCash ? 'bg-gold-100/40' : 'cursor-pointer hover:bg-navy-50/60'}`}
+                      >
                         <td className="py-3 pr-4">
                           <div className="font-bold text-navy">{h.ticker}</div>
                           <div className="text-xs text-navy-400 truncate max-w-[220px]">
@@ -559,10 +565,16 @@ export default function Portfolio() {
           )}
           <div className="mt-4 text-xs text-navy-400">
             Positions and prices are read live from the club's Google Sheet. To
-            add or remove a position, edit the sheet directly.
+            add or remove a position, edit the sheet directly. Click any
+            holding to see company details.
           </div>
         </Card>
       </div>
+
+      <HoldingDetailModal
+        ticker={selectedTicker}
+        onClose={() => setSelectedTicker(null)}
+      />
     </>
   );
 }
