@@ -1,7 +1,10 @@
-import { authenticator } from 'otplib';
+// otplib ships CJS exports — use the default import and destructure.
+import otplib from 'otplib';
 import QRCode from 'qrcode';
 import crypto from 'node:crypto';
 import bcrypt from 'bcrypt';
+
+const { authenticator } = otplib;
 
 // TOTP config: 6 digits, 30-second step, 1-step skew tolerance (i.e. accept
 // the previous/next 30s window) to handle clock drift on phones.
