@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { Search, FileText, ExternalLink } from 'lucide-react';
 import api from '../api/client.js';
+import { safeHref } from '../api/safeUrl.js';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
 
@@ -53,7 +54,7 @@ export default function PreviousPitches() {
             {filtered.map((p) => (
               <a
                 key={p.id}
-                href={p.slideshowUrl}
+                href={safeHref(p.slideshowUrl)}
                 target="_blank"
                 rel="noreferrer"
                 className="group flex flex-col overflow-hidden rounded-lg border border-navy-100 bg-white text-left transition hover:border-gold hover:shadow-card"

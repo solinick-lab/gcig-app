@@ -2,6 +2,7 @@ import { Router } from 'express';
 import prisma from '../db.js';
 import { verifyJwt, requireRole } from '../middleware/auth.js';
 import { sendPitchAssignmentEmail } from '../services/email.js';
+import { assertSafeHttpUrl } from '../services/validateUrl.js';
 
 const canEditPitches = requireRole('PortfolioManager');
 
@@ -167,6 +168,7 @@ router.post('/', canEditPitches, async (req, res, next) => {
     return res.status(400).json({ error: 'ticker and date required' });
   }
   try {
+    assertSafeHttpUrl(slideshowUrl, 'Slideshow link');
     await assertCanUseIndustry(req, industryId);
   } catch (err) {
     return res.status(err.status || 500).json({ error: err.message });
@@ -235,6 +237,13 @@ router.put('/:id', canEditPitches, async (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Not found' });
 
   const { pitcherName, ticker, date, location, slideshowUrl, presenterIds, industryId } = req.body;
+  if (slideshowUrl !== undefined) {
+    try {
+      assertSafeHttpUrl(slideshowUrl, 'Slideshow link');
+    } catch (err) {
+      return res.status(err.status || 500).json({ error: err.message });
+    }
+  }
 
   // Portfolio Managers can only edit pitches that belong to their own pod,
   // and can't reassign a pitch to another pod. President/CIO/SPM may edit

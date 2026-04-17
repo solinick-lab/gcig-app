@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { Plus, Search, ExternalLink, Trash2 } from 'lucide-react';
 import api from '../api/client.js';
+import { safeHref } from '../api/safeUrl.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
@@ -123,7 +124,7 @@ export default function Reports() {
                 </div>
                 <div className="flex items-center gap-2">
                   <a
-                    href={r.fileUrl}
+                    href={safeHref(r.fileUrl)}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center gap-1 rounded-lg border border-navy-100 px-3 py-2 text-xs font-semibold text-navy hover:bg-navy-50"

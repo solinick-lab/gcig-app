@@ -218,20 +218,76 @@ router.post('/accept-invite', authLimiter, async (req, res) => {
 
 // ── Login / logout ───────────────────────────────────────────────────
 
+// Dummy bcrypt hash used to equalize response timing when the email doesn't
+// exist. Without this, the "no user" branch returns in ~1ms while the "bad
+// password" branch takes ~80ms — an attacker can enumerate valid emails.
+// This hash is of a random string nobody knows and will never match.
+const DUMMY_HASH = '$2b$10$CwTycUXWue0Thq9StjUM0uJ8.paj6J5gQY5z1KqL7SdHYqNQYxj5e';
+
+const MAX_FAILED_LOGINS = 10;
+const LOCKOUT_MINUTES = 15;
+
 router.post('/login', authLimiter, async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password required' });
   }
-  const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-  if (!user) {
-    await auditReq(req, 'login.failed', 'user', null, { email, reason: 'no_user' });
+  const normalized = String(email).toLowerCase();
+  const user = await prisma.user.findUnique({ where: { email: normalized } });
+
+  // If the account is locked, bail without doing bcrypt (but still keep the
+  // response consistent with "wrong password").
+  if (user && user.lockedUntil && user.lockedUntil > new Date()) {
+    await auditReq(req, 'login.locked', 'user', user.id, { email: normalized });
+    return res.status(401).json({
+      error: 'Account temporarily locked after too many failed attempts. Try again later.',
+    });
+  }
+
+  // Always run bcrypt — against the real hash if the user exists, against a
+  // dummy hash otherwise — so response time is identical either way.
+  const ok = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_HASH);
+
+  if (!user || !ok) {
+    if (user) {
+      const failed = (user.failedLogins ?? 0) + 1;
+      const shouldLock = failed >= MAX_FAILED_LOGINS;
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          failedLogins: failed,
+          lockedUntil: shouldLock
+            ? new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000)
+            : null,
+        },
+      });
+      if (shouldLock) {
+        await auditReq(req, 'login.account_locked', 'user', user.id, {
+          email: normalized,
+          after_attempts: failed,
+        });
+      } else {
+        await auditReq(req, 'login.failed', 'user', user.id, {
+          email: normalized,
+          reason: 'bad_password',
+          attempt: failed,
+        });
+      }
+    } else {
+      await auditReq(req, 'login.failed', 'user', null, {
+        email: normalized,
+        reason: 'no_user',
+      });
+    }
     return res.status(401).json({ error: 'Invalid credentials' });
   }
-  const ok = await bcrypt.compare(password, user.passwordHash);
-  if (!ok) {
-    await auditReq(req, 'login.failed', 'user', user.id, { email, reason: 'bad_password' });
-    return res.status(401).json({ error: 'Invalid credentials' });
+
+  // Successful login — reset the failure counter and clear any lock.
+  if (user.failedLogins > 0 || user.lockedUntil) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { failedLogins: 0, lockedUntil: null },
+    });
   }
 
   // If the user has 2FA enabled, password is only the first factor —

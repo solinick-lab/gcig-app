@@ -44,6 +44,8 @@ model User {
   twoFactorTotpEnabled   Boolean          @default(false)
   twoFactorEmailEnabled  Boolean          @default(false)
   twoFactorMethod        String?          // legacy — retained to backfill; unused
+  failedLogins           Int              @default(0)
+  lockedUntil            DateTime?
   createdAt              DateTime         @default(now())
   attendance        Attendance[]
   createdSessions   VotingSession[]  @relation("SessionCreator")

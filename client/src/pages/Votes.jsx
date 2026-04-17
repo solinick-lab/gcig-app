@@ -12,6 +12,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import api from '../api/client.js';
+import { safeHref } from '../api/safeUrl.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
@@ -353,7 +354,7 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
             </div>
             {session.pitch.slideshowUrl && (
               <a
-                href={session.pitch.slideshowUrl}
+                href={safeHref(session.pitch.slideshowUrl)}
                 target="_blank"
                 rel="noreferrer"
                 className="text-sm font-semibold text-gold-700 underline"

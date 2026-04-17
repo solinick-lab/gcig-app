@@ -4,6 +4,7 @@ import { format, parse, startOfWeek, getDay } from 'date-fns';
 import enUS from 'date-fns/locale/en-US';
 import { Plus } from 'lucide-react';
 import api from '../api/client.js';
+import { safeHref } from '../api/safeUrl.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
@@ -235,7 +236,7 @@ export default function Pitches() {
             )}
             {selected.slideshowUrl && (
               <a
-                href={selected.slideshowUrl}
+                href={safeHref(selected.slideshowUrl)}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-block text-sm font-semibold text-gold-700 underline"

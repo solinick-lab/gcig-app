@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generalLimiter } from './middleware/rateLimit.js';
@@ -26,6 +27,16 @@ const app = express();
 
 // Trust Render's proxy so express-rate-limit + req.ip use the real client IP.
 app.set('trust proxy', 1);
+
+// Security headers. We're an API — the client is a separate static site —
+// so we don't need a CSP here, but clickjacking and MIME-sniffing defenses
+// are still worth having.
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
 
 app.use(
   cors({
@@ -54,11 +65,19 @@ app.use('/api/industries', industryRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/2fa', twoFactorRoutes);
 
+// Generic error handler. Logs the full error server-side for debugging but
+// never leaks internal details (stack traces, Prisma error bodies, etc.) to
+// the client. Routes that want a user-visible message should throw an
+// Error with a `.status` field set and a safe `.message`.
 // eslint-disable-next-line no-unused-vars
-app.use((err, _req, res, _next) => {
-  console.error(err);
+app.use((err, req, res, _next) => {
   const status = err.status || 500;
-  res.status(status).json({ error: err.message || 'Server error' });
+  if (status >= 500) {
+    console.error(`[${req.method} ${req.originalUrl}]`, err);
+    return res.status(status).json({ error: 'Internal server error' });
+  }
+  // 4xx errors with explicit messages (e.g. validation) stay as-is.
+  res.status(status).json({ error: err.message || 'Bad request' });
 });
 
 const port = process.env.PORT || 4000;

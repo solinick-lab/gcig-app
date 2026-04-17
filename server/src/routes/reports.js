@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import prisma from '../db.js';
 import { verifyJwt, requireRole } from '../middleware/auth.js';
+import { assertSafeHttpUrl } from '../services/validateUrl.js';
 
 const canEditReports = requireRole('PortfolioManager');
 
@@ -16,6 +17,11 @@ router.post('/', canEditReports, async (req, res) => {
   const { title, author, ticker, date, description, fileUrl } = req.body || {};
   if (!title || !author || !date || !fileUrl) {
     return res.status(400).json({ error: 'title, author, date, and link required' });
+  }
+  try {
+    assertSafeHttpUrl(fileUrl, 'Report link');
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message });
   }
   const report = await prisma.report.create({
     data: {
@@ -36,6 +42,13 @@ router.put('/:id', canEditReports, async (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Not found' });
 
   const { title, author, ticker, date, description, fileUrl } = req.body || {};
+  if (fileUrl !== undefined) {
+    try {
+      assertSafeHttpUrl(fileUrl, 'Report link');
+    } catch (err) {
+      return res.status(err.status || 500).json({ error: err.message });
+    }
+  }
   const data = {};
   if (title !== undefined) data.title = title;
   if (author !== undefined) data.author = author;
