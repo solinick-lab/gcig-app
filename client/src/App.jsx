@@ -19,6 +19,8 @@ import Members from './pages/Members.jsx';
 import Profile from './pages/Profile.jsx';
 import Votes from './pages/Votes.jsx';
 import Industries from './pages/Industries.jsx';
+import Library from './pages/Library.jsx';
+import Admin from './pages/Admin.jsx';
 
 export default function App() {
   const { loading } = useAuth();
@@ -51,14 +53,17 @@ export default function App() {
         {/* Legacy routes — keep so old bookmarks/links still work */}
         <Route path="pitches" element={<Calendar />} />
         <Route path="events" element={<Calendar />} />
-        <Route path="archive" element={<PreviousPitches />} />
+        <Route path="library" element={<Library />} />
+        <Route path="admin" element={<Admin />} />
+        {/* Legacy routes — keep old bookmarks working */}
+        <Route path="archive" element={<Library />} />
+        <Route path="reports" element={<Library />} />
+        <Route path="members" element={<Admin />} />
+        <Route path="audit" element={<Admin />} />
         <Route path="portfolio" element={<Portfolio />} />
         <Route path="votes" element={<Votes />} />
         <Route path="industries" element={<Industries />} />
-        <Route path="reports" element={<Reports />} />
         <Route path="attendance" element={<Attendance />} />
-        <Route path="members" element={<Members />} />
-        <Route path="audit" element={<AuditLog />} />
         <Route path="chat" element={<Chat />} />
         <Route path="profile" element={<Profile />} />
       </Route>

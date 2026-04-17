@@ -15,7 +15,7 @@ function emptyForm() {
   return { title: '', author: '', ticker: '', date: '', description: '', fileUrl: '' };
 }
 
-export default function Reports() {
+export default function Reports({ embedded = false } = {}) {
   const { user } = useAuth();
   const canEdit = REPORT_ROLES.includes(user?.role);
 
@@ -76,20 +76,30 @@ export default function Reports() {
 
   return (
     <>
-      <PageHeader
-        title="Research Reports"
-        subtitle="Library of member-authored research."
-        actions={
-          canEdit && (
+      {!embedded && (
+        <PageHeader
+          title="Research Reports"
+          subtitle="Library of member-authored research."
+          actions={
+            canEdit && (
+              <Button onClick={() => setModalOpen(true)} variant="gold">
+                <Plus className="h-4 w-4" />
+                Add Report
+              </Button>
+            )
+          }
+        />
+      )}
+
+      <Card>
+        {embedded && canEdit && (
+          <div className="mb-4 flex justify-end">
             <Button onClick={() => setModalOpen(true)} variant="gold">
               <Plus className="h-4 w-4" />
               Add Report
             </Button>
-          )
-        }
-      />
-
-      <Card>
+          </div>
+        )}
         <div className="mb-4 flex items-center gap-2 rounded-lg border border-navy-100 px-3 py-2">
           <Search className="h-4 w-4 text-navy-400" />
           <input

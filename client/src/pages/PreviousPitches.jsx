@@ -6,7 +6,7 @@ import { safeHref } from '../api/safeUrl.js';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
 
-export default function PreviousPitches() {
+export default function PreviousPitches({ embedded = false } = {}) {
   const [pitches, setPitches] = useState([]);
   const [query, setQuery] = useState('');
 
@@ -27,10 +27,12 @@ export default function PreviousPitches() {
 
   return (
     <>
-      <PageHeader
-        title="Pitch Archive"
-        subtitle="Previously delivered stock pitches and their slideshows."
-      />
+      {!embedded && (
+        <PageHeader
+          title="Pitch Archive"
+          subtitle="Previously delivered stock pitches and their slideshows."
+        />
+      )}
 
       <Card>
         <div className="mb-4 flex items-center gap-2 rounded-lg border border-navy-100 px-3 py-2">

@@ -20,7 +20,7 @@ const ROLES = [
   'FacultyAdvisory',
 ];
 
-export default function Members() {
+export default function Members({ embedded = false } = {}) {
   const { isAdmin } = useAuth();
   const [users, setUsers] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
@@ -81,18 +81,28 @@ export default function Members() {
 
   return (
     <>
-      <PageHeader
-        title="Members"
-        subtitle="Manage club member accounts and roles."
-        actions={
-          <Button onClick={() => setModalOpen(true)} variant="gold">
-            <Plus className="h-4 w-4" />
-            Invite Member
-          </Button>
-        }
-      />
+      {!embedded && (
+        <PageHeader
+          title="Members"
+          subtitle="Manage club member accounts and roles."
+          actions={
+            <Button onClick={() => setModalOpen(true)} variant="gold">
+              <Plus className="h-4 w-4" />
+              Invite Member
+            </Button>
+          }
+        />
+      )}
 
       <Card>
+        {embedded && (
+          <div className="mb-4 flex justify-end">
+            <Button onClick={() => setModalOpen(true)} variant="gold">
+              <Plus className="h-4 w-4" />
+              Invite Member
+            </Button>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>

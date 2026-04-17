@@ -2,11 +2,9 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
   CalendarDays,
-  FileText,
   LineChart,
   BookOpen,
   ClipboardCheck,
-  Users,
   UserCircle,
   LogOut,
   Vote,
@@ -40,17 +38,11 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    header: 'Library',
-    items: [
-      { to: '/archive', label: 'Pitch Archive', icon: FileText },
-      { to: '/reports', label: 'Research Reports', icon: BookOpen },
-    ],
+    items: [{ to: '/library', label: 'Library', icon: BookOpen }],
   },
   {
-    header: 'Admin',
     items: [
-      { to: '/members', label: 'Members', icon: Users, executiveOnly: true },
-      { to: '/audit', label: 'Audit Log', icon: ShieldAlert, adminOnly: true },
+      { to: '/admin', label: 'Admin', icon: ShieldAlert, executiveOnly: true },
     ],
   },
   {

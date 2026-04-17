@@ -14,7 +14,7 @@ const ACTION_COLOR = {
   'session.logout_everywhere': 'bg-gold-100 text-gold-800',
 };
 
-export default function AuditLog() {
+export default function AuditLog({ embedded = false } = {}) {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -27,10 +27,12 @@ export default function AuditLog() {
 
   return (
     <>
-      <PageHeader
-        title="Audit Log"
-        subtitle="Security-relevant actions across the app. President only."
-      />
+      {!embedded && (
+        <PageHeader
+          title="Audit Log"
+          subtitle="Security-relevant actions across the app. President only."
+        />
+      )}
       <Card>
         {loading ? (
           <div className="py-8 text-center text-navy-400">Loading…</div>
