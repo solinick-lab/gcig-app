@@ -101,17 +101,35 @@ router.get('/info/:ticker', async (req, res) => {
   }
 
   try {
-    const [quote, summary] = await Promise.all([
-      yahooFinance.quote(raw).catch(() => null),
-      yahooFinance
-        .quoteSummary(raw, {
+    // yahoo-finance2 is strict about schema validation and sometimes throws on
+    // unexpected fields. Wrap each call so one failing doesn't kill the other.
+    // Also disable validation since Yahoo's schema drifts and we tolerate missing fields.
+    const opts = { validateResult: false };
+    const [quoteResult, summaryResult] = await Promise.allSettled([
+      yahooFinance.quote(raw, {}, opts),
+      yahooFinance.quoteSummary(
+        raw,
+        {
           modules: ['summaryProfile', 'summaryDetail', 'price', 'defaultKeyStatistics'],
-        })
-        .catch(() => null),
+        },
+        opts
+      ),
     ]);
+    const quote = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
+    const summary = summaryResult.status === 'fulfilled' ? summaryResult.value : null;
+    if (quoteResult.status === 'rejected') {
+      console.warn(`yahoo quote(${raw}) failed:`, quoteResult.reason?.message);
+    }
+    if (summaryResult.status === 'rejected') {
+      console.warn(`yahoo quoteSummary(${raw}) failed:`, summaryResult.reason?.message);
+    }
 
     if (!quote && !summary) {
-      return res.status(404).json({ error: 'Ticker not found' });
+      const reason =
+        quoteResult.reason?.message ||
+        summaryResult.reason?.message ||
+        'Ticker not found';
+      return res.status(404).json({ error: reason });
     }
 
     const profile = summary?.summaryProfile || {};
@@ -148,8 +166,8 @@ router.get('/info/:ticker', async (req, res) => {
     tickerCache.set(raw, { at: Date.now(), data });
     res.json(data);
   } catch (err) {
-    console.error(`Ticker info fetch failed for ${raw}:`, err.message);
-    res.status(502).json({ error: 'Failed to fetch ticker info' });
+    console.error(`Ticker info fetch failed for ${raw}:`, err);
+    res.status(502).json({ error: err.message || 'Failed to fetch ticker info' });
   }
 });
 
