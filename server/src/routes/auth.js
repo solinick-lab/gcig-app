@@ -393,6 +393,7 @@ router.get('/me', verifyJwt, async (req, res) => {
       email: true,
       role: true,
       twoFactorEnabled: true,
+      twoFactorMethod: true,
       createdAt: true,
     },
   });

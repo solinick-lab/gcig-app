@@ -9,8 +9,6 @@ import {
   generateSecret,
   buildQrCodeDataUrl,
   verifyToken,
-  generateBackupCodes,
-  consumeBackupCode,
   generateEmailCode,
   consumeEmailCode,
 } from '../services/twoFactor.js';
@@ -41,9 +39,6 @@ function verifyChallenge(token) {
 
 // ── SETUP ────────────────────────────────────────────────────────────
 
-// Begin TOTP enrollment: generate a secret, store it (disabled until verified),
-// return QR + recovery codes. Can be called again to regenerate (wipes prior
-// pending/confirmed 2FA).
 router.post('/setup', verifyJwt, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
@@ -54,40 +49,26 @@ router.post('/setup', verifyJwt, async (req, res) => {
     }
 
     const secret = generateSecret();
-    const { plain, hashed } = await generateBackupCodes(8);
     const qrCodeDataUrl = await buildQrCodeDataUrl(user.email, secret);
 
-    await prisma.$transaction([
-      prisma.backupCode.deleteMany({ where: { userId: user.id } }),
-      prisma.user.update({
-        where: { id: user.id },
-        data: {
-          twoFactorSecret: secret,
-          twoFactorMethod: 'totp',
-          twoFactorEnabled: false,
-        },
-      }),
-      prisma.backupCode.createMany({
-        data: hashed.map((codeHash) => ({ userId: user.id, codeHash })),
-      }),
-    ]);
-
-    await auditReq(req, '2fa.setup_started', 'user', user.id);
-
-    res.json({
-      method: 'totp',
-      secret,
-      qrCodeDataUrl,
-      backupCodes: plain,
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        twoFactorSecret: secret,
+        twoFactorMethod: 'totp',
+        twoFactorEnabled: false,
+      },
     });
+
+    await auditReq(req, '2fa.setup_started', 'user', user.id, { method: 'totp' });
+
+    res.json({ method: 'totp', secret, qrCodeDataUrl });
   } catch (err) {
     console.error('2FA TOTP setup failed:', err);
     res.status(500).json({ error: `Setup failed: ${err.message}` });
   }
 });
 
-// Begin EMAIL enrollment: generate an 8-char code, email it, and store its
-// hash. User confirms by entering the code.
 router.post('/setup-email', verifyJwt, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
@@ -99,12 +80,10 @@ router.post('/setup-email', verifyJwt, async (req, res) => {
 
     const code = generateEmailCode();
     const codeHash = await bcrypt.hash(code, 10);
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    // Clear prior pending codes + backup codes.
     await prisma.$transaction([
       prisma.twoFactorCode.deleteMany({ where: { userId: user.id } }),
-      prisma.backupCode.deleteMany({ where: { userId: user.id } }),
       prisma.user.update({
         where: { id: user.id },
         data: {
@@ -118,7 +97,7 @@ router.post('/setup-email', verifyJwt, async (req, res) => {
       }),
     ]);
 
-    await sendTwoFactorCodeEmail(user.email, { name: user.name, code });
+    await sendTwoFactorCodeEmail(user.email, { name: user.name, code, purpose: 'setup' });
     await auditReq(req, '2fa.setup_started', 'user', user.id, { method: 'email' });
     res.json({ method: 'email', email: user.email });
   } catch (err) {
@@ -127,7 +106,6 @@ router.post('/setup-email', verifyJwt, async (req, res) => {
   }
 });
 
-// Confirm TOTP enrollment by providing a current code from the app.
 router.post('/verify-setup', verifyJwt, codeLimiter, async (req, res) => {
   const { code } = req.body || {};
   if (!code) return res.status(400).json({ error: 'Code required' });
@@ -149,7 +127,6 @@ router.post('/verify-setup', verifyJwt, codeLimiter, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Confirm email enrollment by providing the 8-char code we emailed.
 router.post('/verify-setup-email', verifyJwt, codeLimiter, async (req, res) => {
   const { code } = req.body || {};
   if (!code) return res.status(400).json({ error: 'Code required' });
@@ -164,25 +141,14 @@ router.post('/verify-setup-email', verifyJwt, codeLimiter, async (req, res) => {
   if (!ok) {
     return res.status(400).json({ error: 'Incorrect or expired code. Try again or resend.' });
   }
-
-  // Also generate recovery backup codes so the member has a fallback.
-  const { plain, hashed } = await generateBackupCodes(8);
-  await prisma.$transaction([
-    prisma.backupCode.deleteMany({ where: { userId: user.id } }),
-    prisma.backupCode.createMany({
-      data: hashed.map((codeHash) => ({ userId: user.id, codeHash })),
-    }),
-    prisma.user.update({
-      where: { id: user.id },
-      data: { twoFactorEnabled: true },
-    }),
-  ]);
-
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { twoFactorEnabled: true },
+  });
   await auditReq(req, '2fa.enabled', 'user', user.id, { method: 'email' });
-  res.json({ ok: true, backupCodes: plain });
+  res.json({ ok: true });
 });
 
-// Resend the email setup code (fresh 10-min window).
 router.post('/resend-setup-email', verifyJwt, codeLimiter, async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.user.id } });
   if (user.twoFactorEnabled || user.twoFactorMethod !== 'email') {
@@ -206,7 +172,32 @@ router.post('/resend-setup-email', verifyJwt, codeLimiter, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Disable 2FA on your own account — requires password + a current code.
+// ── DISABLE ─────────────────────────────────────────────────────────
+
+// Request a disable code (email method only). TOTP users use their app.
+router.post('/send-disable-code', verifyJwt, codeLimiter, async (req, res) => {
+  const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+  if (!user.twoFactorEnabled || user.twoFactorMethod !== 'email') {
+    return res.status(400).json({ error: 'Not applicable' });
+  }
+  const code = generateEmailCode();
+  const codeHash = await bcrypt.hash(code, 10);
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  await prisma.$transaction([
+    prisma.twoFactorCode.deleteMany({ where: { userId: user.id, purpose: 'disable' } }),
+    prisma.twoFactorCode.create({
+      data: { userId: user.id, codeHash, expiresAt, purpose: 'disable' },
+    }),
+  ]);
+  try {
+    await sendTwoFactorCodeEmail(user.email, { name: user.name, code, purpose: 'login' });
+  } catch (err) {
+    console.error('Disable code email failed:', err.message);
+    return res.status(500).json({ error: 'Failed to send email.' });
+  }
+  res.json({ ok: true });
+});
+
 router.post('/disable', verifyJwt, authLimiter, async (req, res) => {
   const { password, code } = req.body || {};
   if (!password) return res.status(400).json({ error: 'Password required' });
@@ -215,9 +206,12 @@ router.post('/disable', verifyJwt, authLimiter, async (req, res) => {
   if (!pwOk) return res.status(401).json({ error: 'Incorrect password' });
 
   if (user.twoFactorEnabled) {
-    const codeOk =
-      verifyToken(user.twoFactorSecret, code) ||
-      (await consumeBackupCode(prisma, user.id, code));
+    let codeOk = false;
+    if (user.twoFactorMethod === 'totp') {
+      codeOk = verifyToken(user.twoFactorSecret, code);
+    } else if (user.twoFactorMethod === 'email') {
+      codeOk = await consumeEmailCode(prisma, user.id, code, 'disable');
+    }
     if (!codeOk) {
       return res.status(400).json({ error: 'Incorrect 2FA code' });
     }
@@ -228,41 +222,22 @@ router.post('/disable', verifyJwt, authLimiter, async (req, res) => {
       where: { id: user.id },
       data: {
         twoFactorSecret: null,
+        twoFactorMethod: null,
         twoFactorEnabled: false,
-        tokenVersion: { increment: 1 }, // nuke other sessions just in case
+        tokenVersion: { increment: 1 },
       },
     }),
-    prisma.backupCode.deleteMany({ where: { userId: user.id } }),
+    prisma.twoFactorCode.deleteMany({ where: { userId: user.id } }),
   ]);
   await auditReq(req, '2fa.disabled', 'user', user.id);
 
-  // Re-issue token for the caller so they stay logged in on this device.
   const refreshed = await prisma.user.findUnique({ where: { id: user.id } });
   const token = issueJwt(refreshed);
   res.json({ ok: true, token });
 });
 
-// Regenerate backup codes (keeps 2FA enabled; invalidates all old codes).
-router.post('/regenerate-backup-codes', verifyJwt, async (req, res) => {
-  const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-  if (!user.twoFactorEnabled) {
-    return res.status(400).json({ error: '2FA is not enabled' });
-  }
-  const { plain, hashed } = await generateBackupCodes(8);
-  await prisma.$transaction([
-    prisma.backupCode.deleteMany({ where: { userId: user.id } }),
-    prisma.backupCode.createMany({
-      data: hashed.map((codeHash) => ({ userId: user.id, codeHash })),
-    }),
-  ]);
-  await auditReq(req, '2fa.backup_codes_regenerated', 'user', user.id);
-  res.json({ backupCodes: plain });
-});
-
 // ── LOGIN (2nd factor) ───────────────────────────────────────────────
 
-// Second step of login when 2FA is enabled. Takes the challenge token from
-// /auth/login + one of: a TOTP code, an emailed login code, or a backup code.
 router.post('/login', codeLimiter, async (req, res) => {
   const { challengeToken, code } = req.body || {};
   const userId = verifyChallenge(challengeToken);
@@ -274,19 +249,14 @@ router.post('/login', codeLimiter, async (req, res) => {
     return res.status(400).json({ error: '2FA not enabled on this account' });
   }
 
-  let method = null;
-  if (user.twoFactorMethod === 'totp' && verifyToken(user.twoFactorSecret, code)) {
-    method = 'totp';
-  } else if (
-    user.twoFactorMethod === 'email' &&
-    (await consumeEmailCode(prisma, user.id, code, 'login'))
-  ) {
-    method = 'email';
-  } else if (await consumeBackupCode(prisma, user.id, code)) {
-    method = 'backup';
+  let ok = false;
+  if (user.twoFactorMethod === 'totp') {
+    ok = verifyToken(user.twoFactorSecret, code);
+  } else if (user.twoFactorMethod === 'email') {
+    ok = await consumeEmailCode(prisma, user.id, code, 'login');
   }
 
-  if (!method) {
+  if (!ok) {
     await auditReq(
       { ...req, user: { id: user.id, name: user.name } },
       '2fa.login_failed',
@@ -299,10 +269,10 @@ router.post('/login', codeLimiter, async (req, res) => {
   const jwtToken = issueJwt(user);
   await auditReq(
     { ...req, user: { id: user.id, name: user.name, role: user.role } },
-    method === 'backup' ? '2fa.login_backup_code' : '2fa.login_success',
+    '2fa.login_success',
     'user',
     user.id,
-    { method }
+    { method: user.twoFactorMethod }
   );
   res.json({
     token: jwtToken,
@@ -310,8 +280,6 @@ router.post('/login', codeLimiter, async (req, res) => {
   });
 });
 
-// Resend the login email code (fresh 10-min window) — requires a valid
-// challenge token so only the person partway through a login can trigger it.
 router.post('/resend-login-email', codeLimiter, async (req, res) => {
   const { challengeToken } = req.body || {};
   const userId = verifyChallenge(challengeToken);
@@ -340,9 +308,7 @@ router.post('/resend-login-email', codeLimiter, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Admin: reset 2FA on another user's account (lost-phone + lost-backup recovery).
-// Destructive — deletes their secret and backup codes; they'll log in with
-// password alone until they re-enroll.
+// Admin: wipe a user's 2FA (lost-device recovery).
 router.post('/admin-reset/:id', verifyJwt, async (req, res) => {
   if (req.user.role !== 'President') {
     return res.status(403).json({ error: 'President only' });
@@ -353,11 +319,12 @@ router.post('/admin-reset/:id', verifyJwt, async (req, res) => {
       where: { id },
       data: {
         twoFactorSecret: null,
+        twoFactorMethod: null,
         twoFactorEnabled: false,
         tokenVersion: { increment: 1 },
       },
     }),
-    prisma.backupCode.deleteMany({ where: { userId: id } }),
+    prisma.twoFactorCode.deleteMany({ where: { userId: id } }),
   ]);
   await auditReq(req, '2fa.admin_reset', 'user', id);
   res.json({ ok: true });
@@ -365,5 +332,4 @@ router.post('/admin-reset/:id', verifyJwt, async (req, res) => {
 
 export default router;
 
-// Exported helpers for use by /auth/login
 export { signChallenge };

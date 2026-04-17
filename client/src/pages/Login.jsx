@@ -164,8 +164,8 @@ export default function Login() {
               <h2 className="text-lg font-semibold text-navy">Two-factor verification</h2>
               <p className="mt-1 text-sm text-navy-400">
                 {twoFactorMethod === 'email'
-                  ? "We emailed you an 8-character code. Enter it below (or a backup code)."
-                  : 'Enter the 6-digit code from your authenticator app, or a backup code.'}
+                  ? 'We emailed you an 8-character code. Enter it below.'
+                  : 'Enter the 6-digit code from your authenticator app.'}
               </p>
               <form onSubmit={handleTwoFactor} className="mt-6 space-y-4">
                 <input
@@ -174,9 +174,7 @@ export default function Login() {
                   autoFocus
                   value={twoFactorCode}
                   onChange={(e) => setTwoFactorCode(e.target.value)}
-                  placeholder={
-                    twoFactorMethod === 'email' ? 'ABCD-EFGH' : '123 456  or  ABCD-EFGH'
-                  }
+                  placeholder={twoFactorMethod === 'email' ? 'ABCD-EFGH' : '123 456'}
                   className="w-full rounded-lg border border-navy-100 px-3 py-3 text-center text-xl font-bold tracking-widest text-navy focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
                 />
                 {error && (

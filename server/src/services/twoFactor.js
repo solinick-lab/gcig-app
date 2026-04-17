@@ -37,21 +37,6 @@ export function verifyToken(secret, token) {
   }
 }
 
-// Generates 8 human-readable backup codes in `AAAA-BBBB` format.
-// Returns { plain, hashed } — plain is shown to the user ONCE, hashed is stored.
-export async function generateBackupCodes(count = 8) {
-  const plain = [];
-  const hashed = [];
-  for (let i = 0; i < count; i++) {
-    const raw = crypto.randomBytes(5).toString('hex').toUpperCase(); // 10 hex chars
-    const formatted = `${raw.slice(0, 4)}-${raw.slice(4, 8)}`; // 4-4 grouping, 8 chars
-    const hash = await bcrypt.hash(formatted, 10);
-    plain.push(formatted);
-    hashed.push(hash);
-  }
-  return { plain, hashed };
-}
-
 // 8-character alphanumeric code (ambiguous chars removed) for email 2FA.
 // Format: XXXX-XXXX (displayed dashed, stored without dash).
 const EMAIL_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -85,23 +70,3 @@ export async function consumeEmailCode(prisma, userId, code, purpose) {
   return false;
 }
 
-// Consumes a backup code if it matches one of the user's unused codes.
-// Returns true if consumed, false otherwise.
-export async function consumeBackupCode(prisma, userId, code) {
-  if (!code) return false;
-  const cleaned = String(code).trim().toUpperCase();
-  const candidates = await prisma.backupCode.findMany({
-    where: { userId, usedAt: null },
-  });
-  for (const c of candidates) {
-    const ok = await bcrypt.compare(cleaned, c.codeHash);
-    if (ok) {
-      await prisma.backupCode.update({
-        where: { id: c.id },
-        data: { usedAt: new Date() },
-      });
-      return true;
-    }
-  }
-  return false;
-}
