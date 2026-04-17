@@ -30,6 +30,17 @@ export function requireAdmin(req, res, next) {
   next();
 }
 
+// Executive tier: President + CIO. Has admin powers for most features but
+// cannot perform destructive user-account operations (delete member, reset
+// password). Those remain President-only via requireAdmin.
+const EXECUTIVE_ROLES = new Set(['President', 'CIO']);
+export function requireExecutive(req, res, next) {
+  if (!req.user || !EXECUTIVE_ROLES.has(req.user.role)) {
+    return res.status(403).json({ error: 'Executive role (President or CIO) required' });
+  }
+  next();
+}
+
 // Operational permission hierarchy (higher number = more power).
 // Advisory Board Members and Faculty Advisors sit OUTSIDE the operational chain
 // — they are observers with no edit rights. They get the lowest operational

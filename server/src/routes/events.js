@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import prisma from '../db.js';
-import { verifyJwt, requireAdmin } from '../middleware/auth.js';
+import { verifyJwt, requireExecutive } from '../middleware/auth.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -17,7 +17,7 @@ router.get('/:id', async (req, res) => {
   res.json(event);
 });
 
-router.post('/', requireAdmin, async (req, res) => {
+router.post('/', requireExecutive, async (req, res) => {
   const { title, date, location, description } = req.body || {};
   if (!title || !date) {
     return res.status(400).json({ error: 'title and date required' });
@@ -33,7 +33,7 @@ router.post('/', requireAdmin, async (req, res) => {
   res.status(201).json(event);
 });
 
-router.put('/:id', requireAdmin, async (req, res) => {
+router.put('/:id', requireExecutive, async (req, res) => {
   const id = Number(req.params.id);
   const existing = await prisma.event.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: 'Not found' });
@@ -50,7 +50,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
   res.json(event);
 });
 
-router.delete('/:id', requireAdmin, async (req, res) => {
+router.delete('/:id', requireExecutive, async (req, res) => {
   const id = Number(req.params.id);
   const existing = await prisma.event.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: 'Not found' });

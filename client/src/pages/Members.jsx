@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, KeyRound, Trash2 } from 'lucide-react';
 import api from '../api/client.js';
+import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
@@ -20,6 +21,7 @@ const ROLES = [
 ];
 
 export default function Members() {
+  const { isAdmin } = useAuth();
   const [users, setUsers] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', role: 'JuniorAnalyst' });
@@ -46,8 +48,13 @@ export default function Members() {
   }
 
   async function handleRoleChange(id, role) {
-    await api.put(`/users/${id}`, { role });
-    load();
+    try {
+      await api.put(`/users/${id}/role`, { role });
+      load();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to change role');
+      load();
+    }
   }
 
   async function handleReset(id, email) {
@@ -126,20 +133,26 @@ export default function Members() {
                     )}
                   </td>
                   <td className="py-3 pr-4 text-right">
-                    <button
-                      onClick={() => handleReset(u.id, u.email)}
-                      className="mr-2 inline-flex items-center gap-1 text-xs font-semibold text-navy underline"
-                    >
-                      <KeyRound className="h-3 w-3" />
-                      Reset
-                    </button>
-                    <button
-                      onClick={() => handleDelete(u.id)}
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 underline"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                      Delete
-                    </button>
+                    {isAdmin ? (
+                      <>
+                        <button
+                          onClick={() => handleReset(u.id, u.email)}
+                          className="mr-2 inline-flex items-center gap-1 text-xs font-semibold text-navy underline"
+                        >
+                          <KeyRound className="h-3 w-3" />
+                          Reset
+                        </button>
+                        <button
+                          onClick={() => handleDelete(u.id)}
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 underline"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Delete
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-xs text-navy-400">—</span>
+                    )}
                   </td>
                 </tr>
               ))}

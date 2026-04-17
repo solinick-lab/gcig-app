@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import prisma from '../db.js';
-import { verifyJwt, requireAdmin, ROLE_RANK } from '../middleware/auth.js';
+import { verifyJwt, requireExecutive, ROLE_RANK } from '../middleware/auth.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -52,7 +52,7 @@ router.get('/', async (_req, res) => {
   res.json(shaped);
 });
 
-router.post('/', requireAdmin, async (req, res) => {
+router.post('/', requireExecutive, async (req, res) => {
   const { name, leaderId } = req.body || {};
   if (!name) return res.status(400).json({ error: 'name required' });
   const lId = leaderId ? Number(leaderId) : null;
@@ -70,7 +70,7 @@ router.post('/', requireAdmin, async (req, res) => {
   }
 });
 
-router.put('/:id', requireAdmin, async (req, res) => {
+router.put('/:id', requireExecutive, async (req, res) => {
   const id = Number(req.params.id);
   const { name, leaderId } = req.body || {};
   const data = {};
@@ -81,14 +81,14 @@ router.put('/:id', requireAdmin, async (req, res) => {
   res.json(industry);
 });
 
-router.delete('/:id', requireAdmin, async (req, res) => {
+router.delete('/:id', requireExecutive, async (req, res) => {
   const id = Number(req.params.id);
   await prisma.industry.delete({ where: { id } });
   res.json({ ok: true });
 });
 
 // Only President can add/remove members. Industry leaders manage roles only.
-router.post('/:id/members', requireAdmin, async (req, res) => {
+router.post('/:id/members', requireExecutive, async (req, res) => {
   const industryId = Number(req.params.id);
   const { userId } = req.body || {};
   if (!userId) return res.status(400).json({ error: 'userId required' });
@@ -103,7 +103,7 @@ router.post('/:id/members', requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete('/:id/members/:userId', requireAdmin, async (req, res) => {
+router.delete('/:id/members/:userId', requireExecutive, async (req, res) => {
   const industryId = Number(req.params.id);
   const userId = Number(req.params.userId);
   await prisma.userIndustry.delete({

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import crypto from 'node:crypto';
 import prisma from '../db.js';
-import { verifyJwt, requireAdmin, ROLE_RANK } from '../middleware/auth.js';
+import { verifyJwt, requireAdmin, requireExecutive, ROLE_RANK } from '../middleware/auth.js';
 import { sendInviteEmail } from '../services/email.js';
 
 const router = Router();
@@ -51,7 +51,7 @@ router.get('/', async (_req, res) => {
 
 // Invite a new member. No account is created yet — just a PendingInvite record
 // and an email with a one-time link where they set their own password.
-router.post('/', requireAdmin, async (req, res) => {
+router.post('/', requireExecutive, async (req, res) => {
   const { name, email, role } = req.body || {};
   if (!name || !email || !role) {
     return res.status(400).json({ error: 'name, email, role required' });
@@ -119,7 +119,7 @@ router.post('/', requireAdmin, async (req, res) => {
   });
 });
 
-router.put('/:id', requireAdmin, async (req, res) => {
+router.put('/:id', requireExecutive, async (req, res) => {
   const id = Number(req.params.id);
   const { name, email, role } = req.body || {};
   if (role && !ROLES.includes(role)) {
@@ -158,7 +158,7 @@ router.put('/:id/role', async (req, res) => {
   const target = await prisma.user.findUnique({ where: { id: targetId } });
   if (!target) return res.status(404).json({ error: 'User not found' });
 
-  // President: no restrictions.
+  // President: no restrictions at all.
   if (req.user.role === 'President') {
     const updated = await prisma.user.update({
       where: { id: targetId },
@@ -180,7 +180,27 @@ router.put('/:id/role', async (req, res) => {
     });
   }
 
-  // Must lead an industry that contains the target.
+  const callerRank = ROLE_RANK[req.user.role] ?? 0;
+  const currentRank = ROLE_RANK[target.role] ?? 0;
+  const newRank = ROLE_RANK[newRole] ?? 0;
+
+  // CIO can manage any user ranked below them — no industry scoping.
+  if (req.user.role === 'CIO') {
+    if (currentRank >= callerRank) {
+      return res.status(403).json({ error: 'Target is at or above your rank' });
+    }
+    if (newRank >= callerRank) {
+      return res.status(403).json({ error: "You can't assign a role at or above your own rank" });
+    }
+    const updated = await prisma.user.update({
+      where: { id: targetId },
+      data: { role: newRole },
+      select: { id: true, name: true, email: true, role: true, extraRoles: true },
+    });
+    return res.json(updated);
+  }
+
+  // Industry leaders: must lead an industry that contains the target.
   const sharedIndustry = await prisma.industry.findFirst({
     where: {
       leaderId: req.user.id,
@@ -193,9 +213,6 @@ router.put('/:id/role', async (req, res) => {
     });
   }
 
-  const callerRank = ROLE_RANK[req.user.role] ?? 0;
-  const currentRank = ROLE_RANK[target.role] ?? 0;
-  const newRank = ROLE_RANK[newRole] ?? 0;
   if (currentRank >= callerRank) {
     return res.status(403).json({ error: 'Target is at or above your rank' });
   }
@@ -212,7 +229,7 @@ router.put('/:id/role', async (req, res) => {
 });
 
 // Set the entire extra roles array (replaces existing).
-router.put('/:id/extra-roles', requireAdmin, async (req, res) => {
+router.put('/:id/extra-roles', requireExecutive, async (req, res) => {
   const id = Number(req.params.id);
   const { extraRoles } = req.body || {};
   if (!Array.isArray(extraRoles)) {

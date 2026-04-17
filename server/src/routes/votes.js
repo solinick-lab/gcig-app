@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import prisma from '../db.js';
-import { verifyJwt, requireAdmin } from '../middleware/auth.js';
+import { verifyJwt, requireExecutive } from '../middleware/auth.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -131,7 +131,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create a new voting session (President only).
-router.post('/', requireAdmin, async (req, res) => {
+router.post('/', requireExecutive, async (req, res) => {
   const { ticker, title, pitchId, deadline } = req.body || {};
   if (!ticker || !deadline) {
     return res.status(400).json({ error: 'ticker and deadline required' });
@@ -179,7 +179,7 @@ router.post('/:id/ballot', async (req, res) => {
 });
 
 // Close a session early (President only).
-router.post('/:id/close', requireAdmin, async (req, res) => {
+router.post('/:id/close', requireExecutive, async (req, res) => {
   const id = Number(req.params.id);
   const session = await prisma.votingSession.update({
     where: { id },
@@ -189,7 +189,7 @@ router.post('/:id/close', requireAdmin, async (req, res) => {
 });
 
 // Delete a session (President only).
-router.delete('/:id', requireAdmin, async (req, res) => {
+router.delete('/:id', requireExecutive, async (req, res) => {
   const id = Number(req.params.id);
   await prisma.votingSession.delete({ where: { id } });
   res.json({ ok: true });

@@ -26,12 +26,12 @@ const NAV_ITEMS = [
   { to: '/industries', label: 'Industries', icon: Building2 },
   { to: '/reports', label: 'Research Reports', icon: BookOpen },
   { to: '/attendance', label: 'Attendance', icon: ClipboardCheck },
-  { to: '/members', label: 'Members', icon: Users, adminOnly: true },
+  { to: '/members', label: 'Members', icon: Users, executiveOnly: true },
   { to: '/profile', label: 'Profile', icon: UserCircle },
 ];
 
 export default function Sidebar({ onNavigate }) {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, isExecutive } = useAuth();
 
   return (
     <aside className="flex h-full w-64 flex-col bg-navy text-white">
@@ -52,7 +52,11 @@ export default function Sidebar({ onNavigate }) {
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-        {NAV_ITEMS.filter((i) => !i.adminOnly || isAdmin).map((item) => {
+        {NAV_ITEMS.filter(
+          (i) =>
+            (!i.adminOnly || isAdmin) &&
+            (!i.executiveOnly || isExecutive)
+        ).map((item) => {
           const Icon = item.icon;
           return (
             <NavLink

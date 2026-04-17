@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Parser } from 'json2csv';
 import prisma from '../db.js';
-import { verifyJwt, requireAdmin } from '../middleware/auth.js';
+import { verifyJwt, requireExecutive } from '../middleware/auth.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -9,7 +9,7 @@ router.use(verifyJwt);
 // Full matrix — President only.
 // Only show events from 3 months ago through 2 weeks from now —
 // no one needs to mark attendance for meetings months in the future.
-router.get('/', requireAdmin, async (_req, res) => {
+router.get('/', requireExecutive, async (_req, res) => {
   const now = new Date();
   const from = new Date(now);
   from.setMonth(from.getMonth() - 3);
@@ -33,7 +33,7 @@ router.get('/', requireAdmin, async (_req, res) => {
 
 // Attendance for a single event — President only.
 // Returns all members plus an object { userId: status } for existing records.
-router.get('/event/:id', requireAdmin, async (req, res) => {
+router.get('/event/:id', requireExecutive, async (req, res) => {
   const eventId = Number(req.params.id);
   const [event, users, records] = await Promise.all([
     prisma.event.findUnique({ where: { id: eventId } }),
@@ -64,7 +64,7 @@ router.get('/mine', async (req, res) => {
 });
 
 // Upsert one attendance mark
-router.post('/', requireAdmin, async (req, res) => {
+router.post('/', requireExecutive, async (req, res) => {
   const { userId, eventId, status } = req.body || {};
   if (!userId || !eventId || !status) {
     return res.status(400).json({ error: 'userId, eventId, status required' });
@@ -80,7 +80,7 @@ router.post('/', requireAdmin, async (req, res) => {
   res.json(record);
 });
 
-router.get('/export.csv', requireAdmin, async (_req, res) => {
+router.get('/export.csv', requireExecutive, async (_req, res) => {
   const now = new Date();
   const from = new Date(now);
   from.setMonth(from.getMonth() - 3);
