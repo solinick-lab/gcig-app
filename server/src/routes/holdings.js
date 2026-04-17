@@ -1,15 +1,57 @@
 import { Router } from 'express';
-import yahooFinanceModule from 'yahoo-finance2';
-// yahoo-finance2 ships as CJS; under Node ESM the real object can live on .default.
-const yahooFinance = yahooFinanceModule?.default || yahooFinanceModule;
+import YahooFinance from 'yahoo-finance2';
+// yahoo-finance2 v2.14 ships the class as the default export; instantiate once.
+// Only `quote` / `autoc` are exposed — profile/sector data is fetched via a
+// direct HTTP call to Yahoo's quoteSummary endpoint below.
+const yahooFinance = new YahooFinance();
+
+// Fallback: Yahoo's v8 chart endpoint returns meta with current price + previous
+// close + 52w range WITHOUT needing a crumb. Used if the library's quote() call
+// fails because of rate limiting / cookie issues.
+async function fetchChartMeta(ticker) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
+  try {
+    const r = await fetch(url, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        Accept: 'application/json',
+      },
+    });
+    if (!r.ok) return null;
+    const json = await r.json();
+    return json?.chart?.result?.[0]?.meta || null;
+  } catch {
+    return null;
+  }
+}
+
+// Fetch profile/sector/summary from Yahoo's public quoteSummary endpoint.
+// This is a best-effort call; Yahoo sometimes returns 401 without a crumb,
+// in which case we return null and the caller falls back to quote-only data.
+async function fetchQuoteSummary(ticker) {
+  const modules = 'summaryProfile,summaryDetail,price,defaultKeyStatistics';
+  const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=${modules}`;
+  try {
+    const r = await fetch(url, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        Accept: 'application/json',
+      },
+    });
+    if (!r.ok) return null;
+    const json = await r.json();
+    return json?.quoteSummary?.result?.[0] || null;
+  } catch {
+    return null;
+  }
+}
 import prisma from '../db.js';
 import { verifyJwt } from '../middleware/auth.js';
 import { getSheetPortfolio } from '../services/sheetPortfolio.js';
 
 const router = Router();
-
-// Suppress yahoo-finance2's survey prompt & schema-notice noise on first call.
-yahooFinance.suppressNotices?.(['yahooSurvey', 'ripHistorical']);
 
 // Tiny in-memory cache so clicking the same ticker twice doesn't hammer Yahoo.
 // 15-minute TTL — fundamentals don't change intraday.
@@ -103,34 +145,43 @@ router.get('/info/:ticker', async (req, res) => {
   }
 
   try {
-    // yahoo-finance2 is strict about schema validation and sometimes throws on
-    // unexpected fields. Wrap each call so one failing doesn't kill the other.
-    // Also disable validation since Yahoo's schema drifts and we tolerate missing fields.
+    // quote (library) handles crumb/cookie auth; summary (direct fetch) is
+    // best-effort and can return null without breaking the whole response.
     const opts = { validateResult: false };
-    const [quoteResult, summaryResult] = await Promise.allSettled([
+    const [quoteResult, summaryResult, chartResult] = await Promise.allSettled([
       yahooFinance.quote(raw, {}, opts),
-      yahooFinance.quoteSummary(
-        raw,
-        {
-          modules: ['summaryProfile', 'summaryDetail', 'price', 'defaultKeyStatistics'],
-        },
-        opts
-      ),
+      fetchQuoteSummary(raw),
+      fetchChartMeta(raw),
     ]);
-    const quote = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
+    let quote = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
     const summary = summaryResult.status === 'fulfilled' ? summaryResult.value : null;
+    const chartMeta = chartResult.status === 'fulfilled' ? chartResult.value : null;
     if (quoteResult.status === 'rejected') {
       console.warn(`yahoo quote(${raw}) failed:`, quoteResult.reason?.message);
     }
-    if (summaryResult.status === 'rejected') {
-      console.warn(`yahoo quoteSummary(${raw}) failed:`, summaryResult.reason?.message);
+
+    // If the library's quote failed (often rate-limited crumb), synthesize a
+    // minimal quote object from the chart meta so the modal still renders
+    // price, prev close, 52w range, exchange.
+    if (!quote && chartMeta) {
+      quote = {
+        longName: chartMeta.longName || chartMeta.shortName,
+        shortName: chartMeta.shortName,
+        fullExchangeName: chartMeta.fullExchangeName || chartMeta.exchangeName,
+        currency: chartMeta.currency,
+        regularMarketPrice: chartMeta.regularMarketPrice,
+        regularMarketPreviousClose:
+          chartMeta.chartPreviousClose ?? chartMeta.previousClose,
+        regularMarketDayHigh: chartMeta.regularMarketDayHigh,
+        regularMarketDayLow: chartMeta.regularMarketDayLow,
+        fiftyTwoWeekHigh: chartMeta.fiftyTwoWeekHigh,
+        fiftyTwoWeekLow: chartMeta.fiftyTwoWeekLow,
+        regularMarketVolume: chartMeta.regularMarketVolume,
+      };
     }
 
     if (!quote && !summary) {
-      const reason =
-        quoteResult.reason?.message ||
-        summaryResult.reason?.message ||
-        'Ticker not found';
+      const reason = quoteResult.reason?.message || 'Ticker not found';
       return res.status(404).json({ error: reason });
     }
 
@@ -139,30 +190,42 @@ router.get('/info/:ticker', async (req, res) => {
     const price = summary?.price || {};
     const stats = summary?.defaultKeyStatistics || {};
 
+    // Yahoo wraps numbers as { raw: 12345, fmt: "12.3K" } — unwrap .raw.
+    const r = (v) => (v && typeof v === 'object' && 'raw' in v ? v.raw : v);
+
     const data = {
       ticker: raw,
-      name: quote?.longName || quote?.shortName || price?.longName || price?.shortName || raw,
-      exchange: quote?.fullExchangeName || price?.exchangeName || null,
-      currency: quote?.currency || price?.currency || 'USD',
+      name:
+        quote?.longName ||
+        quote?.shortName ||
+        r(price?.longName) ||
+        r(price?.shortName) ||
+        raw,
+      exchange: quote?.fullExchangeName || r(price?.exchangeName) || null,
+      currency: quote?.currency || r(price?.currency) || 'USD',
       sector: profile.sector || null,
       industry: profile.industry || null,
       website: profile.website || null,
       summary: profile.longBusinessSummary || null,
-      employees: profile.fullTimeEmployees || null,
+      employees: r(profile.fullTimeEmployees) || null,
       country: profile.country || null,
-      price: quote?.regularMarketPrice ?? price?.regularMarketPrice ?? null,
-      previousClose: quote?.regularMarketPreviousClose ?? detail?.previousClose ?? null,
-      dayHigh: quote?.regularMarketDayHigh ?? detail?.dayHigh ?? null,
-      dayLow: quote?.regularMarketDayLow ?? detail?.dayLow ?? null,
-      fiftyTwoWeekHigh: quote?.fiftyTwoWeekHigh ?? detail?.fiftyTwoWeekHigh ?? null,
-      fiftyTwoWeekLow: quote?.fiftyTwoWeekLow ?? detail?.fiftyTwoWeekLow ?? null,
-      marketCap: quote?.marketCap ?? price?.marketCap ?? null,
-      trailingPE: quote?.trailingPE ?? detail?.trailingPE ?? null,
-      forwardPE: quote?.forwardPE ?? detail?.forwardPE ?? null,
-      dividendYield: detail?.dividendYield ?? null,
-      beta: stats?.beta ?? detail?.beta ?? null,
-      volume: quote?.regularMarketVolume ?? detail?.volume ?? null,
-      avgVolume: quote?.averageDailyVolume3Month ?? detail?.averageVolume ?? null,
+      price: quote?.regularMarketPrice ?? r(price?.regularMarketPrice) ?? null,
+      previousClose:
+        quote?.regularMarketPreviousClose ?? r(detail?.previousClose) ?? null,
+      dayHigh: quote?.regularMarketDayHigh ?? r(detail?.dayHigh) ?? null,
+      dayLow: quote?.regularMarketDayLow ?? r(detail?.dayLow) ?? null,
+      fiftyTwoWeekHigh:
+        quote?.fiftyTwoWeekHigh ?? r(detail?.fiftyTwoWeekHigh) ?? null,
+      fiftyTwoWeekLow:
+        quote?.fiftyTwoWeekLow ?? r(detail?.fiftyTwoWeekLow) ?? null,
+      marketCap: quote?.marketCap ?? r(price?.marketCap) ?? null,
+      trailingPE: quote?.trailingPE ?? r(detail?.trailingPE) ?? null,
+      forwardPE: quote?.forwardPE ?? r(detail?.forwardPE) ?? null,
+      dividendYield: r(detail?.dividendYield) ?? null,
+      beta: r(stats?.beta) ?? r(detail?.beta) ?? null,
+      volume: quote?.regularMarketVolume ?? r(detail?.volume) ?? null,
+      avgVolume:
+        quote?.averageDailyVolume3Month ?? r(detail?.averageVolume) ?? null,
     };
 
     tickerCache.set(raw, { at: Date.now(), data });
