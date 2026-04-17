@@ -39,7 +39,8 @@ function fmtPct(n) {
   return `${(n * 100).toFixed(2)}%`;
 }
 
-export default function HoldingDetailModal({ ticker, onClose }) {
+export default function HoldingDetailModal({ holding, onClose }) {
+  const ticker = holding?.ticker;
   const [info, setInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -66,6 +67,14 @@ export default function HoldingDetailModal({ ticker, onClose }) {
     };
   }, [ticker]);
 
+  // Our position math — pulled from the sheet-derived holding object.
+  const ourMarketValue =
+    holding?.marketValue ??
+    (holding?.shares != null && holding?.price != null
+      ? holding.shares * holding.price
+      : null);
+  const ourReturnUp = (holding?.dollarReturn ?? 0) >= 0;
+
   const dayChange =
     info?.price != null && info?.previousClose != null
       ? info.price - info.previousClose
@@ -78,7 +87,7 @@ export default function HoldingDetailModal({ ticker, onClose }) {
 
   return (
     <Modal
-      open={!!ticker}
+      open={!!holding}
       onClose={onClose}
       title={info ? `${info.ticker} — ${info.name}` : ticker || ''}
       size="lg"
@@ -118,7 +127,7 @@ export default function HoldingDetailModal({ ticker, onClose }) {
                       {info.sector}
                     </span>
                   )}
-                  {info.industry && (
+                  {info.industry && info.industry !== info.sector && (
                     <span className="rounded-full bg-gold-100 px-2 py-0.5 text-[11px] font-semibold text-gold-800">
                       {info.industry}
                     </span>
@@ -131,6 +140,54 @@ export default function HoldingDetailModal({ ticker, onClose }) {
               {info.country && <div>{info.country}</div>}
             </div>
           </div>
+
+          {/* Our Position — data from the club's Google Sheet */}
+          {holding && !holding.isCash && (
+            <div className="rounded-lg border border-gold-300 bg-gold-100/40 p-4">
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-xs font-bold uppercase tracking-wider text-gold-800">
+                  Our Position
+                </div>
+                {holding.portfolioPct != null && (
+                  <div className="text-xs font-semibold text-navy">
+                    {holding.portfolioPct.toFixed(2)}% of portfolio
+                  </div>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+                <Stat
+                  label="Shares"
+                  value={holding.shares != null ? holding.shares.toLocaleString('en-US') : '—'}
+                />
+                <Stat
+                  label="Avg Cost"
+                  value={fmtMoney(holding.costBasis, info.currency)}
+                />
+                <Stat
+                  label="Market Value"
+                  value={fmtMoney(ourMarketValue, info.currency)}
+                />
+                <Stat
+                  label="Return"
+                  value={
+                    <span
+                      className={
+                        ourReturnUp ? 'text-emerald-600' : 'text-red-600'
+                      }
+                    >
+                      {fmtMoney(holding.dollarReturn, info.currency)}
+                      {holding.percentReturn != null && (
+                        <span className="ml-1 text-xs">
+                          ({ourReturnUp ? '+' : ''}
+                          {holding.percentReturn.toFixed(2)}%)
+                        </span>
+                      )}
+                    </span>
+                  }
+                />
+              </div>
+            </div>
+          )}
 
           {/* Stats grid */}
           <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
@@ -205,7 +262,10 @@ export default function HoldingDetailModal({ ticker, onClose }) {
               </a>
             )}
           </div>
-          <div className="text-[10px] text-navy-400">Data from Yahoo Finance.</div>
+          <div className="text-[10px] text-navy-400">
+            Market data from {info._source === 'finnhub' ? 'Finnhub' : 'Yahoo Finance'}.
+            Position data from the club's Google Sheet.
+          </div>
         </div>
       ) : null}
     </Modal>
@@ -218,7 +278,9 @@ function Stat({ label, value }) {
       <div className="text-[10px] font-bold uppercase tracking-wider text-navy-400">
         {label}
       </div>
-      <div className="text-sm font-semibold text-navy tabular-nums">{value}</div>
+      <div className="text-sm font-semibold text-navy tabular-nums">
+        {value ?? '—'}
+      </div>
     </div>
   );
 }

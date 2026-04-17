@@ -85,7 +85,7 @@ export default function Portfolio() {
   const holdings = data?.holdings || [];
 
   const [range, setRange] = useState('6M');
-  const [selectedTicker, setSelectedTicker] = useState(null);
+  const [selectedHolding, setSelectedHolding] = useState(null);
 
   // Normalize history (with real Date objects) once.
   // equity = totalValue - cashValue (falls back to total if cash is unknown).
@@ -482,7 +482,7 @@ export default function Portfolio() {
                     return (
                       <tr
                         key={h.ticker}
-                        onClick={() => !h.isCash && setSelectedTicker(h.ticker)}
+                        onClick={() => !h.isCash && setSelectedHolding(h)}
                         className={`${h.isCash ? 'bg-gold-100/40' : 'cursor-pointer hover:bg-navy-50/60'}`}
                       >
                         <td className="py-3 pr-4">
@@ -572,8 +572,8 @@ export default function Portfolio() {
       </div>
 
       <HoldingDetailModal
-        ticker={selectedTicker}
-        onClose={() => setSelectedTicker(null)}
+        holding={selectedHolding}
+        onClose={() => setSelectedHolding(null)}
       />
     </>
   );
