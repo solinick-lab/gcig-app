@@ -19,7 +19,10 @@ export default function Login() {
   const [pendingEmail, setPendingEmail] = useState('');
   const [challengeToken, setChallengeToken] = useState('');
   const [twoFactorCode, setTwoFactorCode] = useState('');
+  // Which method the user is currently using to submit a code.
   const [twoFactorMethod, setTwoFactorMethod] = useState('totp');
+  // Which methods are available on this account.
+  const [availableMethods, setAvailableMethods] = useState({ totp: false, email: false });
   const codeRefs = useRef([]);
 
   if (user) return <Navigate to="/" replace />;
@@ -32,9 +35,16 @@ export default function Login() {
       const result = await login(email, password);
       if (result.twoFactorRequired) {
         setChallengeToken(result.challengeToken);
-        setTwoFactorMethod(result.method || 'totp');
+        const methods = result.methods || {};
+        setAvailableMethods({
+          totp: !!methods.totp,
+          email: !!methods.email,
+        });
+        // Default to TOTP if available — strongest, offline, no extra wait.
+        setTwoFactorMethod(methods.totp ? 'totp' : 'email');
         setMode('2fa');
         setTwoFactorCode('');
+        setMessage('');
       } else {
         navigate('/');
       }
@@ -56,6 +66,20 @@ export default function Login() {
       setError(err.response?.data?.error || 'Verification failed');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function switchToEmailMethod() {
+    setError('');
+    setMessage('');
+    setTwoFactorMethod('email');
+    setTwoFactorCode('');
+    try {
+      const { default: apiClient } = await import('../api/client.js');
+      await apiClient.post('/2fa/resend-login-email', { challengeToken });
+      setMessage('Code sent — check your inbox.');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to send email');
     }
   }
 
@@ -164,9 +188,43 @@ export default function Login() {
               <h2 className="text-lg font-semibold text-navy">Two-factor verification</h2>
               <p className="mt-1 text-sm text-navy-400">
                 {twoFactorMethod === 'email'
-                  ? 'We emailed you an 8-character code. Enter it below.'
+                  ? 'Enter the 8-character code we emailed you.'
                   : 'Enter the 6-digit code from your authenticator app.'}
               </p>
+
+              {/* Method toggle — only shown when the user has both options */}
+              {availableMethods.totp && availableMethods.email && (
+                <div className="mt-4 flex rounded-lg border border-navy-100 bg-white p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTwoFactorMethod('totp');
+                      setTwoFactorCode('');
+                      setError('');
+                      setMessage('');
+                    }}
+                    className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                      twoFactorMethod === 'totp'
+                        ? 'bg-navy text-white'
+                        : 'text-navy-400 hover:text-navy'
+                    }`}
+                  >
+                    Authenticator app
+                  </button>
+                  <button
+                    type="button"
+                    onClick={switchToEmailMethod}
+                    className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                      twoFactorMethod === 'email'
+                        ? 'bg-navy text-white'
+                        : 'text-navy-400 hover:text-navy'
+                    }`}
+                  >
+                    Email code
+                  </button>
+                </div>
+              )}
+
               <form onSubmit={handleTwoFactor} className="mt-6 space-y-4">
                 <input
                   type="text"
@@ -209,10 +267,8 @@ export default function Login() {
                         setError('');
                         setMessage('');
                         try {
-                          await (await import('../api/client.js')).default.post(
-                            '/2fa/resend-login-email',
-                            { challengeToken }
-                          );
+                          const { default: apiClient } = await import('../api/client.js');
+                          await apiClient.post('/2fa/resend-login-email', { challengeToken });
                           setMessage('New code sent — check your inbox.');
                         } catch (err) {
                           setError(err.response?.data?.error || 'Failed to resend');

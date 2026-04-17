@@ -237,10 +237,15 @@ router.post('/login', authLimiter, async (req, res) => {
 
   // If the user has 2FA enabled, password is only the first factor —
   // hand back a short-lived challenge token and make them complete 2FA.
-  // If email method is on, email them a code right now.
+  //
+  // Only send an email code if email is the ONLY method the user has
+  // (no authenticator fallback available). If they have both, let the
+  // client pick — default is the authenticator app; they can request an
+  // email code explicitly via /2fa/resend-login-email.
   if (user.twoFactorEnabled) {
     const challengeToken = signChallenge(user.id);
-    if (user.twoFactorEmailEnabled) {
+    const emailOnly = user.twoFactorEmailEnabled && !user.twoFactorTotpEnabled;
+    if (emailOnly) {
       try {
         const code = await issueEmailCode(user.id, 'login');
         await sendTwoFactorCodeEmail(user.email, {

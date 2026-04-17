@@ -48,7 +48,7 @@ export function AuthProvider({ children }) {
       return {
         twoFactorRequired: true,
         challengeToken: res.data.challengeToken,
-        method: res.data.method, // 'totp' or 'email'
+        methods: res.data.methods || {}, // { totp: bool, email: bool }
       };
     }
     saveSession(res.data.token, res.data.user);
