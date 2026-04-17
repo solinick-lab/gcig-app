@@ -26,7 +26,7 @@ const NAV_SECTIONS = [
     items: [
       { to: '/calendar', label: 'Calendar', icon: CalendarDays },
       { to: '/chat', label: 'Chat', icon: MessageSquare },
-      { to: '/attendance', label: 'Attendance', icon: ClipboardCheck },
+      { to: '/attendance', label: 'Attendance', icon: ClipboardCheck, hideForAdvisory: true },
     ],
   },
   {
@@ -51,7 +51,7 @@ const NAV_SECTIONS = [
 ];
 
 export default function Sidebar({ onNavigate }) {
-  const { user, logout, isAdmin, isExecutive } = useAuth();
+  const { user, logout, isAdmin, isExecutive, isAdvisory } = useAuth();
 
   return (
     <aside className="flex h-full w-64 flex-col bg-navy text-white">
@@ -76,7 +76,8 @@ export default function Sidebar({ onNavigate }) {
           const visible = section.items.filter(
             (i) =>
               (!i.adminOnly || isAdmin) &&
-              (!i.executiveOnly || isExecutive)
+              (!i.executiveOnly || isExecutive) &&
+              (!i.hideForAdvisory || !isAdvisory)
           );
           if (visible.length === 0) return null;
           return (

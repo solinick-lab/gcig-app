@@ -6,6 +6,12 @@ import { verifyJwt, requireExecutive } from '../middleware/auth.js';
 const router = Router();
 router.use(verifyJwt);
 
+// Advisory roles (Advisory Board, Faculty Advisor) aren't part of the regular
+// meeting attendance. We exclude them everywhere attendance is tracked so they
+// don't show up in the matrix or get counted against percentages.
+const ADVISORY_ROLES = ['AdvisoryBoardMember', 'FacultyAdvisory'];
+const ATTENDEE_WHERE = { role: { notIn: ADVISORY_ROLES } };
+
 // Full matrix — President only.
 // Only show events from 3 months ago through 2 weeks from now —
 // no one needs to mark attendance for meetings months in the future.
@@ -18,6 +24,7 @@ router.get('/', requireExecutive, async (_req, res) => {
 
   const [users, events, records] = await Promise.all([
     prisma.user.findMany({
+      where: ATTENDEE_WHERE,
       select: { id: true, name: true, role: true },
       orderBy: { name: 'asc' },
     }),
@@ -38,6 +45,7 @@ router.get('/event/:id', requireExecutive, async (req, res) => {
   const [event, users, records] = await Promise.all([
     prisma.event.findUnique({ where: { id: eventId } }),
     prisma.user.findMany({
+      where: ATTENDEE_WHERE,
       select: { id: true, name: true, role: true },
       orderBy: { name: 'asc' },
     }),
@@ -51,6 +59,18 @@ router.get('/event/:id', requireExecutive, async (req, res) => {
 
 // Current user's own record + percentage
 router.get('/mine', async (req, res) => {
+  // Advisory roles aren't tracked — return a clear opt-out response instead
+  // of an empty 0% card that looks like a bad attendance record.
+  if (ADVISORY_ROLES.includes(req.user.role)) {
+    return res.json({
+      exempt: true,
+      records: [],
+      total: 0,
+      present: 0,
+      excused: 0,
+      percentage: null,
+    });
+  }
   const records = await prisma.attendance.findMany({
     where: { userId: req.user.id },
     include: { event: { select: { id: true, title: true, date: true } } },
@@ -72,6 +92,16 @@ router.post('/', requireExecutive, async (req, res) => {
   if (!['Present', 'Absent', 'Excused'].includes(status)) {
     return res.status(400).json({ error: 'Invalid status' });
   }
+  // Refuse to create attendance rows for advisory-role users.
+  const target = await prisma.user.findUnique({
+    where: { id: Number(userId) },
+    select: { role: true },
+  });
+  if (target && ADVISORY_ROLES.includes(target.role)) {
+    return res.status(400).json({
+      error: 'Advisory Board and Faculty Advisors do not have attendance tracked',
+    });
+  }
   const record = await prisma.attendance.upsert({
     where: { userId_eventId: { userId: Number(userId), eventId: Number(eventId) } },
     update: { status },
@@ -89,6 +119,7 @@ router.get('/export.csv', requireExecutive, async (_req, res) => {
 
   const [users, events, records] = await Promise.all([
     prisma.user.findMany({
+      where: ATTENDEE_WHERE,
       select: { id: true, name: true, role: true },
       orderBy: { name: 'asc' },
     }),

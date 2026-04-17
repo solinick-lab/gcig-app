@@ -106,6 +106,8 @@ export function AuthProvider({ children }) {
 
   const isAdmin = user?.role === 'President';
   const isExecutive = user?.role === 'President' || user?.role === 'CIO';
+  const isAdvisory =
+    user?.role === 'AdvisoryBoardMember' || user?.role === 'FacultyAdvisory';
 
   return (
     <AuthContext.Provider
@@ -123,6 +125,7 @@ export function AuthProvider({ children }) {
         logoutEverywhere,
         isAdmin,
         isExecutive,
+        isAdvisory,
       }}
     >
       {children}

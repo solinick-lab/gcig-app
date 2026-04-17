@@ -16,8 +16,26 @@ const STATUS_COLORS = {
 };
 
 export default function Attendance() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isAdvisory } = useAuth();
+  if (isAdvisory) return <AdvisoryAttendance />;
   return isAdmin ? <AdminAttendance /> : <MineAttendance />;
+}
+
+function AdvisoryAttendance() {
+  return (
+    <>
+      <PageHeader
+        title="Attendance"
+        subtitle="Attendance tracking is for active club members only."
+      />
+      <Card>
+        <div className="py-10 text-center text-navy-400">
+          Advisory Board Members and Faculty Advisors don't have attendance
+          recorded. Nothing to show here.
+        </div>
+      </Card>
+    </>
+  );
 }
 
 function MineAttendance() {
