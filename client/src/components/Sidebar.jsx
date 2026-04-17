@@ -17,19 +17,45 @@ import {
 import { useAuth } from '../context/AuthContext.jsx';
 import RoleBadge from './RoleBadge.jsx';
 
-const NAV_ITEMS = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/calendar', label: 'Calendar', icon: CalendarDays },
-  { to: '/archive', label: 'Pitch Archive', icon: FileText },
-  { to: '/portfolio', label: 'Portfolio', icon: LineChart },
-  { to: '/chat', label: 'Chat', icon: MessageSquare },
-  { to: '/votes', label: 'Voting', icon: Vote },
-  { to: '/industries', label: 'Industries', icon: Building2 },
-  { to: '/reports', label: 'Research Reports', icon: BookOpen },
-  { to: '/attendance', label: 'Attendance', icon: ClipboardCheck },
-  { to: '/members', label: 'Members', icon: Users, executiveOnly: true },
-  { to: '/audit', label: 'Audit Log', icon: ShieldAlert, adminOnly: true },
-  { to: '/profile', label: 'Profile', icon: UserCircle },
+// Grouped sidebar nav. Sections with a header collapse the crowd of items
+// into 4 scannable clusters instead of a flat list of 12.
+const NAV_SECTIONS = [
+  {
+    items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true }],
+  },
+  {
+    header: 'Day to day',
+    items: [
+      { to: '/calendar', label: 'Calendar', icon: CalendarDays },
+      { to: '/chat', label: 'Chat', icon: MessageSquare },
+      { to: '/attendance', label: 'Attendance', icon: ClipboardCheck },
+    ],
+  },
+  {
+    header: 'Investing',
+    items: [
+      { to: '/portfolio', label: 'Portfolio', icon: LineChart },
+      { to: '/votes', label: 'Voting', icon: Vote },
+      { to: '/industries', label: 'Industries', icon: Building2 },
+    ],
+  },
+  {
+    header: 'Library',
+    items: [
+      { to: '/archive', label: 'Pitch Archive', icon: FileText },
+      { to: '/reports', label: 'Research Reports', icon: BookOpen },
+    ],
+  },
+  {
+    header: 'Admin',
+    items: [
+      { to: '/members', label: 'Members', icon: Users, executiveOnly: true },
+      { to: '/audit', label: 'Audit Log', icon: ShieldAlert, adminOnly: true },
+    ],
+  },
+  {
+    items: [{ to: '/profile', label: 'Profile', icon: UserCircle }],
+  },
 ];
 
 export default function Sidebar({ onNavigate }) {
@@ -53,30 +79,45 @@ export default function Sidebar({ onNavigate }) {
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-        {NAV_ITEMS.filter(
-          (i) =>
-            (!i.adminOnly || isAdmin) &&
-            (!i.executiveOnly || isExecutive)
-        ).map((item) => {
-          const Icon = item.icon;
+      <nav className="flex-1 overflow-y-auto px-3 py-3">
+        {NAV_SECTIONS.map((section, sectionIdx) => {
+          const visible = section.items.filter(
+            (i) =>
+              (!i.adminOnly || isAdmin) &&
+              (!i.executiveOnly || isExecutive)
+          );
+          if (visible.length === 0) return null;
           return (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              onClick={onNavigate}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
-                  isActive
-                    ? 'bg-gold text-navy'
-                    : 'text-navy-100 hover:bg-navy-500 hover:text-white'
-                }`
-              }
-            >
-              <Icon className="h-4 w-4" />
-              {item.label}
-            </NavLink>
+            <div key={sectionIdx} className={sectionIdx === 0 ? 'mb-1' : 'mt-4 mb-1'}>
+              {section.header && (
+                <div className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-widest text-navy-200/60">
+                  {section.header}
+                </div>
+              )}
+              <div className="space-y-0.5">
+                {visible.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      end={item.end}
+                      onClick={onNavigate}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                          isActive
+                            ? 'bg-gold text-navy'
+                            : 'text-navy-100 hover:bg-navy-500 hover:text-white'
+                        }`
+                      }
+                    >
+                      <Icon className="h-4 w-4" />
+                      {item.label}
+                    </NavLink>
+                  );
+                })}
+              </div>
+            </div>
           );
         })}
       </nav>
