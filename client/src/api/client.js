@@ -7,23 +7,25 @@ const BASE =
 
 export const API_BASE = BASE;
 
-// withCredentials: true so the httpOnly session cookie travels on every
-// cross-origin request.
-const api = axios.create({ baseURL: BASE, withCredentials: true });
+const api = axios.create({ baseURL: BASE });
+
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('gcig_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
 
 api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      // Clear any legacy localStorage state, then redirect to login.
       localStorage.removeItem('gcig_token');
       localStorage.removeItem('gcig_user');
-      if (
-        window.location.pathname !== '/login' &&
-        window.location.pathname !== '/accept-invite' &&
-        window.location.pathname !== '/reset-password' &&
-        window.location.pathname !== '/forgot-password'
-      ) {
+      const path = window.location.pathname;
+      const publicPaths = ['/login', '/accept-invite', '/forgot-password', '/reset-password'];
+      if (!publicPaths.includes(path)) {
         window.location.href = '/login';
       }
     }

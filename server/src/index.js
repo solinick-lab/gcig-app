@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import cookieParser from 'cookie-parser';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generalLimiter } from './middleware/rateLimit.js';
@@ -34,7 +33,6 @@ app.use(
   })
 );
 app.use(express.json({ limit: '2mb' }));
-app.use(cookieParser());
 app.use('/api', generalLimiter);
 
 // Serve uploaded files (PDF, PPTX)

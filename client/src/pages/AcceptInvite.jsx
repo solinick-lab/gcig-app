@@ -55,8 +55,9 @@ export default function AcceptInvite() {
     }
     setSubmitting(true);
     try {
-      await api.post('/auth/accept-invite', { token, password });
-      // Hard reload so AuthContext picks up the new session cookie.
+      const { data } = await api.post('/auth/accept-invite', { token, password });
+      localStorage.setItem('gcig_token', data.token);
+      localStorage.setItem('gcig_user', JSON.stringify(data.user));
       window.location.href = '/';
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to set up account');

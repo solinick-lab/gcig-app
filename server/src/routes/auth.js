@@ -3,11 +3,7 @@ import bcrypt from 'bcrypt';
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import prisma from '../db.js';
-import {
-  verifyJwt,
-  issueJwt,
-  clearSessionCookie,
-} from '../middleware/auth.js';
+import { verifyJwt, issueJwt } from '../middleware/auth.js';
 import { authLimiter, codeLimiter } from '../middleware/rateLimit.js';
 import { sendVerificationCode, sendPasswordResetEmail } from '../services/email.js';
 import { auditReq } from '../services/audit.js';
@@ -110,7 +106,7 @@ router.post('/verify', codeLimiter, async (req, res) => {
   });
   await prisma.pendingVerification.delete({ where: { email: normalized } });
 
-  issueJwt(res, user);
+  const token = issueJwt(user);
   await auditReq(
     { ...req, user: { id: user.id, name: user.name, role: user.role } },
     'signup.completed',
@@ -118,6 +114,7 @@ router.post('/verify', codeLimiter, async (req, res) => {
     user.id
   );
   res.status(201).json({
+    token,
     user: { id: user.id, name: user.name, email: user.email, role: user.role },
   });
 });
@@ -202,7 +199,7 @@ router.post('/accept-invite', authLimiter, async (req, res) => {
   });
   await prisma.pendingInvite.delete({ where: { id: invite.id } });
 
-  issueJwt(res, user);
+  const token = issueJwt(user);
   await auditReq(
     { ...req, user: { id: user.id, name: user.name, role: user.role } },
     'invite.accepted',
@@ -210,6 +207,7 @@ router.post('/accept-invite', authLimiter, async (req, res) => {
     user.id
   );
   res.status(201).json({
+    token,
     user: { id: user.id, name: user.name, email: user.email, role: user.role },
   });
 });
@@ -231,7 +229,7 @@ router.post('/login', authLimiter, async (req, res) => {
     await auditReq(req, 'login.failed', 'user', user.id, { email, reason: 'bad_password' });
     return res.status(401).json({ error: 'Invalid credentials' });
   }
-  issueJwt(res, user);
+  const token = issueJwt(user);
   await auditReq(
     { ...req, user: { id: user.id, name: user.name, role: user.role } },
     'login.success',
@@ -239,12 +237,13 @@ router.post('/login', authLimiter, async (req, res) => {
     user.id
   );
   res.json({
+    token,
     user: { id: user.id, name: user.name, email: user.email, role: user.role },
   });
 });
 
-router.post('/logout', async (req, res) => {
-  clearSessionCookie(res);
+router.post('/logout', async (_req, res) => {
+  // Client is responsible for discarding its token.
   res.json({ ok: true });
 });
 
@@ -254,7 +253,6 @@ router.post('/logout-everywhere', verifyJwt, async (req, res) => {
     where: { id: req.user.id },
     data: { tokenVersion: { increment: 1 } },
   });
-  clearSessionCookie(res);
   await auditReq(req, 'session.logout_everywhere', 'user', req.user.id);
   res.json({ ok: true });
 });
@@ -363,10 +361,10 @@ router.post('/change-password', verifyJwt, async (req, res) => {
     where: { id: user.id },
     data: { passwordHash, tokenVersion: { increment: 1 } },
   });
-  // Re-issue a fresh cookie so the user stays logged in on this device.
-  issueJwt(res, { ...user, tokenVersion: (user.tokenVersion ?? 0) + 1 });
+  // Re-issue a fresh token so the user stays logged in on this device.
+  const token = issueJwt({ ...user, tokenVersion: (user.tokenVersion ?? 0) + 1 });
   await auditReq(req, 'password_changed', 'user', user.id);
-  res.json({ ok: true });
+  res.json({ ok: true, token });
 });
 
 export default router;

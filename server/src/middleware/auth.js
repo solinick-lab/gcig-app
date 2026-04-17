@@ -1,48 +1,26 @@
 import jwt from 'jsonwebtoken';
 import prisma from '../db.js';
 
-export const COOKIE_NAME = 'gcig_session';
+// We're on cross-origin hosts (onrender.com is a public suffix, so
+// gcig-client and gcig-api are "cross-site" — browsers block cross-site
+// cookies by default). So tokens live in localStorage on the client and
+// travel in an Authorization header. The tokenVersion claim still lets us
+// invalidate every outstanding JWT instantly.
 
-// Cookie options: always httpOnly, always secure in prod, sameSite=none so the
-// cross-origin client (gcig-client → gcig-api) can send it along.
-export function cookieOptions() {
-  const prod = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
-  return {
-    httpOnly: true,
-    secure: prod,
-    sameSite: prod ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7d
-    path: '/',
-  };
-}
-
-export function issueJwt(res, user) {
-  const token = jwt.sign(
+export function issueJwt(user) {
+  return jwt.sign(
     { id: user.id, role: user.role, v: user.tokenVersion ?? 0 },
     process.env.JWT_SECRET,
     { expiresIn: '7d' }
   );
-  res.cookie(COOKIE_NAME, token, cookieOptions());
-  return token;
-}
-
-export function clearSessionCookie(res) {
-  res.clearCookie(COOKIE_NAME, { ...cookieOptions(), maxAge: 0 });
 }
 
 export async function verifyJwt(req, res, next) {
-  // Prefer the cookie (set at login). Fall back to Authorization header for
-  // clients that still send it (e.g. tools / legacy sessions).
-  let token = req.cookies?.[COOKIE_NAME];
-  if (!token) {
-    const header = req.headers.authorization;
-    if (header && header.startsWith('Bearer ')) {
-      token = header.slice(7);
-    }
-  }
-  if (!token) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Missing token' });
   }
+  const token = header.slice(7);
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
     // Always fetch the current role AND tokenVersion from the DB.
@@ -54,7 +32,6 @@ export async function verifyJwt(req, res, next) {
     });
     if (!user) return res.status(401).json({ error: 'User not found' });
     if ((payload.v ?? 0) !== (user.tokenVersion ?? 0)) {
-      clearSessionCookie(res);
       return res.status(401).json({ error: 'Session revoked, please sign in again' });
     }
     req.user = { id: user.id, name: user.name, role: user.role };
