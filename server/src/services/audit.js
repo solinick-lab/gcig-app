@@ -29,14 +29,18 @@ export async function audit(
 }
 
 // Convenience wrapper for Express — extracts user and IP from the request.
+// Defensive on every field because callers sometimes pass synthetic req-like
+// objects (e.g. spread copies that lose getters) during signup/invite flows.
 export async function auditReq(req, action, resource, resourceId, metadata) {
+  const headers = req?.headers ?? {};
   const ip =
-    req.headers['x-forwarded-for']?.split(',')[0].trim() ||
-    req.socket?.remoteAddress ||
+    headers['x-forwarded-for']?.split(',')[0].trim() ||
+    req?.ip ||
+    req?.socket?.remoteAddress ||
     null;
   await audit({
-    userId: req.user?.id ?? null,
-    userName: req.user?.name ?? req.user?.email ?? null,
+    userId: req?.user?.id ?? null,
+    userName: req?.user?.name ?? req?.user?.email ?? null,
     action,
     resource,
     resourceId,
