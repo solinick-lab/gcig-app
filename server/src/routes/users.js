@@ -35,6 +35,7 @@ router.get('/', async (_req, res) => {
       email: true,
       role: true,
       extraRoles: true,
+      twoFactorEnabled: true,
       createdAt: true,
       industries: {
         include: { industry: { select: { id: true, name: true } } },

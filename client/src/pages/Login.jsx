@@ -6,9 +6,9 @@ import Button from '../components/Button.jsx';
 const ALLOWED_DOMAIN = '@gcschool.org';
 
 export default function Login() {
-  const { user, login, signup, verify, resendCode } = useAuth();
+  const { user, login, signup, verify, resendCode, verifyTwoFactor } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState('login'); // 'login' | 'signup' | 'verify'
+  const [mode, setMode] = useState('login'); // 'login' | 'signup' | 'verify' | '2fa'
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -17,6 +17,8 @@ export default function Login() {
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [pendingEmail, setPendingEmail] = useState('');
+  const [challengeToken, setChallengeToken] = useState('');
+  const [twoFactorCode, setTwoFactorCode] = useState('');
   const codeRefs = useRef([]);
 
   if (user) return <Navigate to="/" replace />;
@@ -26,10 +28,30 @@ export default function Login() {
     setError('');
     setSubmitting(true);
     try {
-      await login(email, password);
-      navigate('/');
+      const result = await login(email, password);
+      if (result.twoFactorRequired) {
+        setChallengeToken(result.challengeToken);
+        setMode('2fa');
+        setTwoFactorCode('');
+      } else {
+        navigate('/');
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleTwoFactor(e) {
+    e.preventDefault();
+    setError('');
+    setSubmitting(true);
+    try {
+      await verifyTwoFactor(challengeToken, twoFactorCode.trim());
+      navigate('/');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Verification failed');
     } finally {
       setSubmitting(false);
     }
@@ -135,7 +157,45 @@ export default function Login() {
         </div>
 
         <div className="rounded-xl bg-white p-8 shadow-xl">
-          {mode === 'verify' ? (
+          {mode === '2fa' ? (
+            <>
+              <h2 className="text-lg font-semibold text-navy">Two-factor verification</h2>
+              <p className="mt-1 text-sm text-navy-400">
+                Enter the 6-digit code from your authenticator app, or a backup code.
+              </p>
+              <form onSubmit={handleTwoFactor} className="mt-6 space-y-4">
+                <input
+                  type="text"
+                  inputMode="text"
+                  autoFocus
+                  value={twoFactorCode}
+                  onChange={(e) => setTwoFactorCode(e.target.value)}
+                  placeholder="123 456  or  ABCD-EFGH"
+                  className="w-full rounded-lg border border-navy-100 px-3 py-3 text-center text-xl font-bold tracking-widest text-navy focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
+                />
+                {error && (
+                  <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {error}
+                  </div>
+                )}
+                <Button type="submit" disabled={submitting || !twoFactorCode} className="w-full">
+                  {submitting ? 'Verifying…' : 'Verify & Sign in'}
+                </Button>
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('login');
+                      setError('');
+                    }}
+                    className="text-xs font-semibold text-navy-400 underline"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </>
+          ) : mode === 'verify' ? (
             <>
               <h2 className="text-lg font-semibold text-navy">Verify your email</h2>
               <p className="mt-1 text-sm text-navy-400">

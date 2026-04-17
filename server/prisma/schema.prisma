@@ -32,20 +32,34 @@ enum VoteAction {
 }
 
 model User {
-  id              Int              @id @default(autoincrement())
-  name            String
-  email           String           @unique
-  passwordHash    String
-  role            Role
-  extraRoles      Role[]           @default([])
-  tokenVersion    Int              @default(0)
-  createdAt       DateTime         @default(now())
-  attendance      Attendance[]
-  createdSessions VotingSession[]  @relation("SessionCreator")
-  ballots         Ballot[]
-  industries      UserIndustry[]
-  ledIndustries   Industry[]       @relation("IndustryLeader")
-  pitchPresenters PitchPresenter[]
+  id                Int              @id @default(autoincrement())
+  name              String
+  email             String           @unique
+  passwordHash      String
+  role              Role
+  extraRoles        Role[]           @default([])
+  tokenVersion      Int              @default(0)
+  twoFactorSecret   String?
+  twoFactorEnabled  Boolean          @default(false)
+  createdAt         DateTime         @default(now())
+  attendance        Attendance[]
+  createdSessions   VotingSession[]  @relation("SessionCreator")
+  ballots           Ballot[]
+  industries        UserIndustry[]
+  ledIndustries     Industry[]       @relation("IndustryLeader")
+  pitchPresenters   PitchPresenter[]
+  backupCodes       BackupCode[]
+}
+
+model BackupCode {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Industry {

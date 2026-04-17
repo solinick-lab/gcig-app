@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, KeyRound, Trash2 } from 'lucide-react';
+import { Plus, KeyRound, Trash2, ShieldCheck, ShieldOff } from 'lucide-react';
 import api from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
@@ -65,6 +65,17 @@ export default function Members() {
   async function handleDelete(id) {
     if (!confirm('Delete this member? Their attendance records will also be removed.')) return;
     await api.delete(`/users/${id}`);
+    load();
+  }
+
+  async function handleReset2FA(id, name) {
+    if (
+      !confirm(
+        `Reset 2FA for ${name}? They'll be able to sign in with just their password and can re-enroll afterwards.`
+      )
+    )
+      return;
+    await api.post(`/2fa/admin-reset/${id}`);
     load();
   }
 
@@ -135,6 +146,14 @@ export default function Members() {
                   <td className="py-3 pr-4 text-right">
                     {isAdmin ? (
                       <>
+                        {u.twoFactorEnabled && (
+                          <span
+                            title="2FA enabled"
+                            className="mr-2 inline-flex items-center text-emerald-600"
+                          >
+                            <ShieldCheck className="h-3.5 w-3.5" />
+                          </span>
+                        )}
                         <button
                           onClick={() => handleReset(u.id, u.email)}
                           className="mr-2 inline-flex items-center gap-1 text-xs font-semibold text-navy underline"
@@ -142,6 +161,15 @@ export default function Members() {
                           <KeyRound className="h-3 w-3" />
                           Reset
                         </button>
+                        {u.twoFactorEnabled && (
+                          <button
+                            onClick={() => handleReset2FA(u.id, u.name)}
+                            className="mr-2 inline-flex items-center gap-1 text-xs font-semibold text-gold-700 underline"
+                          >
+                            <ShieldOff className="h-3 w-3" />
+                            Reset 2FA
+                          </button>
+                        )}
                         <button
                           onClick={() => handleDelete(u.id)}
                           className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 underline"

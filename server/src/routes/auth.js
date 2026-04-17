@@ -7,6 +7,7 @@ import { verifyJwt, issueJwt } from '../middleware/auth.js';
 import { authLimiter, codeLimiter } from '../middleware/rateLimit.js';
 import { sendVerificationCode, sendPasswordResetEmail } from '../services/email.js';
 import { auditReq } from '../services/audit.js';
+import { signChallenge } from './twoFactor.js';
 
 const router = Router();
 
@@ -229,6 +230,20 @@ router.post('/login', authLimiter, async (req, res) => {
     await auditReq(req, 'login.failed', 'user', user.id, { email, reason: 'bad_password' });
     return res.status(401).json({ error: 'Invalid credentials' });
   }
+
+  // If the user has 2FA enabled, password is only the first factor —
+  // hand back a short-lived challenge token and make them complete 2FA.
+  if (user.twoFactorEnabled) {
+    const challengeToken = signChallenge(user.id);
+    await auditReq(
+      { ...req, user: { id: user.id, name: user.name, role: user.role } },
+      'login.password_ok_awaiting_2fa',
+      'user',
+      user.id
+    );
+    return res.json({ twoFactorRequired: true, challengeToken });
+  }
+
   const token = issueJwt(user);
   await auditReq(
     { ...req, user: { id: user.id, name: user.name, role: user.role } },
@@ -341,7 +356,14 @@ router.post('/reset/:token', authLimiter, async (req, res) => {
 router.get('/me', verifyJwt, async (req, res) => {
   const user = await prisma.user.findUnique({
     where: { id: req.user.id },
-    select: { id: true, name: true, email: true, role: true, createdAt: true },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      twoFactorEnabled: true,
+      createdAt: true,
+    },
   });
   if (!user) return res.status(404).json({ error: 'User not found' });
   res.json(user);

@@ -6,6 +6,7 @@ import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
 import RoleBadge from '../components/RoleBadge.jsx';
 import Button from '../components/Button.jsx';
+import TwoFactorPanel from '../components/TwoFactorPanel.jsx';
 
 export default function Profile() {
   const { user, logoutEverywhere } = useAuth();
@@ -128,6 +129,12 @@ export default function Profile() {
             )}
             <Button type="submit">Update Password</Button>
           </form>
+        </Card>
+      </div>
+
+      <div className="mt-6">
+        <Card title="Two-Factor Authentication">
+          <TwoFactorPanel />
         </Card>
       </div>
 

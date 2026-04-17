@@ -39,8 +39,21 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
+  // Returns either { user } on full success, or { twoFactorRequired, challengeToken }
+  // when the user has 2FA enabled. The caller then collects a code and calls
+  // verifyTwoFactor().
   async function login(email, password) {
     const res = await api.post('/auth/login', { email, password });
+    if (res.data.twoFactorRequired) {
+      return { twoFactorRequired: true, challengeToken: res.data.challengeToken };
+    }
+    saveSession(res.data.token, res.data.user);
+    setUser(res.data.user);
+    return { user: res.data.user };
+  }
+
+  async function verifyTwoFactor(challengeToken, code) {
+    const res = await api.post('/2fa/login', { challengeToken, code });
     saveSession(res.data.token, res.data.user);
     setUser(res.data.user);
     return res.data.user;
@@ -96,6 +109,7 @@ export function AuthProvider({ children }) {
         user,
         loading,
         login,
+        verifyTwoFactor,
         signup,
         verify,
         resendCode,

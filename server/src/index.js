@@ -16,6 +16,7 @@ import dashboardRoutes from './routes/dashboard.js';
 import voteRoutes from './routes/votes.js';
 import industryRoutes from './routes/industries.js';
 import auditRoutes from './routes/audit.js';
+import twoFactorRoutes from './routes/twoFactor.js';
 import { ensureRecurringMeetings } from './services/recurringMeetings.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -51,6 +52,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/votes', voteRoutes);
 app.use('/api/industries', industryRoutes);
 app.use('/api/audit', auditRoutes);
+app.use('/api/2fa', twoFactorRoutes);
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
