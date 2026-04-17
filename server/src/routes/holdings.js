@@ -1,5 +1,7 @@
 import { Router } from 'express';
-import yahooFinance from 'yahoo-finance2';
+import yahooFinanceModule from 'yahoo-finance2';
+// yahoo-finance2 ships as CJS; under Node ESM the real object can live on .default.
+const yahooFinance = yahooFinanceModule?.default || yahooFinanceModule;
 import prisma from '../db.js';
 import { verifyJwt } from '../middleware/auth.js';
 import { getSheetPortfolio } from '../services/sheetPortfolio.js';
