@@ -26,12 +26,22 @@ const RANGES = [
   { key: 'ALL', label: 'All' },
 ];
 
+// Starting capital the club was founded with. The sheet's per-position cost
+// basis sometimes drifts by a few dollars from rounding — anchoring Total
+// Gain/Loss to the actual dollar amount we began with avoids that error.
+const INITIAL_CAPITAL = 100000;
+
 // Capital infusions/withdrawals — subtracted from performance calcs so the
 // return % reflects actual market movement, not money added.
 // Positive = money in, negative = money out.
 const CASH_FLOWS = [
   { date: new Date('2026-01-29T12:00:00Z'), amount: 25000, label: 'Capital infusion' },
 ];
+
+// Everything we've put in: the starting $100k + every cash flow since.
+// Used as the denominator for the Total Gain/Loss card.
+const TOTAL_INVESTED =
+  INITIAL_CAPITAL + CASH_FLOWS.reduce((sum, cf) => sum + cf.amount, 0);
 
 // Annualized risk-free rate used in the Sharpe calculation.
 // Currently set to the 3-month US Treasury yield (~4.25% as of Apr 2026).
@@ -81,8 +91,16 @@ export default function Portfolio() {
   }, []);
 
   const totals = data?.totals || {};
-  const isUp = (totals.totalGainLoss ?? 0) >= 0;
   const holdings = data?.holdings || [];
+
+  // Recompute Total Gain/Loss against the actual capital invested (starting
+  // $100k + every infusion) so per-position cost-basis rounding in the sheet
+  // doesn't throw off the top-line number.
+  const lifetimeGainLoss =
+    totals.totalValue != null ? totals.totalValue - TOTAL_INVESTED : null;
+  const lifetimeGainLossPct =
+    lifetimeGainLoss != null ? (lifetimeGainLoss / TOTAL_INVESTED) * 100 : null;
+  const isUp = (lifetimeGainLoss ?? 0) >= 0;
 
   const [range, setRange] = useState('6M');
   const [selectedHolding, setSelectedHolding] = useState(null);
@@ -310,14 +328,17 @@ export default function Portfolio() {
             }`}
           >
             {isUp ? <TrendingUp className="h-7 w-7" /> : <TrendingDown className="h-7 w-7" />}
-            {fmtMoney(totals.totalGainLoss)}
+            {fmtMoney(lifetimeGainLoss)}
           </div>
           <div
             className={`mt-1 text-sm font-semibold ${
               isUp ? 'text-emerald-600' : 'text-red-600'
             }`}
           >
-            {fmtPct(totals.totalGainLossPct)}
+            {fmtPct(lifetimeGainLossPct)}
+          </div>
+          <div className="mt-1 text-[10px] text-navy-400">
+            vs. {fmtMoney(TOTAL_INVESTED)} invested
           </div>
         </Card>
         <Card>
@@ -549,14 +570,14 @@ export default function Portfolio() {
                         isUp ? 'text-emerald-600' : 'text-red-600'
                       }`}
                     >
-                      {fmtMoney(totals.totalGainLoss)}
+                      {fmtMoney(lifetimeGainLoss)}
                     </td>
                     <td
                       className={`py-3 pr-4 text-right font-bold tabular-nums ${
                         isUp ? 'text-emerald-600' : 'text-red-600'
                       }`}
                     >
-                      {fmtPct(totals.totalGainLossPct)}
+                      {fmtPct(lifetimeGainLossPct)}
                     </td>
                   </tr>
                 </tfoot>
