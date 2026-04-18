@@ -166,7 +166,8 @@ export default function Profile() {
                   {((mine.hitRate ?? 0) * 100).toFixed(0)}%
                 </div>
                 <div className="mt-0.5 text-[11px] text-navy-400">
-                  Positions currently green
+                  {mine.pitchesVotedBuy ?? 0} voted yes ·{' '}
+                  {mine.pitchesVotedNo ?? 0} voted no
                 </div>
               </div>
             </div>

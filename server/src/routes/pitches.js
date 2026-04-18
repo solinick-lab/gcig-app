@@ -185,45 +185,74 @@ router.get('/outcomes/all', async (_req, res) => {
       (a, b) => new Date(b.date) - new Date(a.date)
     );
 
-    // Roll up per-presenter (each presenter gets credit for the pitch).
+    // Hit rate = pitches the club voted YES to (bought). A pitch "won a vote"
+    // if it became a position or was explicitly marked votedOutcome='Buy'.
+    // A pitch "lost a vote" if votedOutcome='NoBuy'. Pitches with neither
+    // signal (no decision yet) don't count in the denominator.
+    function pitchDecision(r) {
+      if (r.type !== 'pitch') return null;
+      if (r.isPosition || r.votedOutcome === 'Buy') return 'buy';
+      if (r.votedOutcome === 'NoBuy') return 'nobuy';
+      return null;
+    }
+
+    // Roll up per-presenter: avg return uses rows with a real $ return, hit
+    // rate uses voted-on pitches (buys / (buys + nobuys)).
     const byPresenter = new Map();
+    function ensure(key, p) {
+      if (!byPresenter.has(key)) {
+        byPresenter.set(key, {
+          name: p.name,
+          id: p.id,
+          returnRows: 0,
+          totalReturn: 0,
+          buys: 0,
+          noBuys: 0,
+        });
+      }
+      return byPresenter.get(key);
+    }
     for (const r of results) {
-      if (!r.isPosition || r.percent == null) continue;
-      for (const p of r.presenters) {
-        const key = p.name;
-        if (!byPresenter.has(key)) {
-          byPresenter.set(key, {
-            name: p.name,
-            id: p.id,
-            pitches: 0,
-            totalReturn: 0,
-            wins: 0,
-          });
+      // Average return contributions.
+      if (r.isPosition && r.percent != null) {
+        for (const p of r.presenters) {
+          const agg = ensure(p.name, p);
+          agg.returnRows += 1;
+          agg.totalReturn += r.percent;
         }
-        const agg = byPresenter.get(key);
-        agg.pitches += 1;
-        agg.totalReturn += r.percent;
-        if (r.percent > 0) agg.wins += 1;
+      }
+      // Hit-rate contributions (pitches only).
+      const decision = pitchDecision(r);
+      if (decision) {
+        for (const p of r.presenters) {
+          const agg = ensure(p.name, p);
+          if (decision === 'buy') agg.buys += 1;
+          else agg.noBuys += 1;
+        }
       }
     }
     const leaderboard = [...byPresenter.values()]
-      .map((a) => ({
-        ...a,
-        avgReturn: a.pitches > 0 ? a.totalReturn / a.pitches : 0,
-        hitRate: a.pitches > 0 ? a.wins / a.pitches : 0,
-      }))
+      .map((a) => {
+        const voted = a.buys + a.noBuys;
+        return {
+          ...a,
+          pitches: voted,
+          avgReturn: a.returnRows > 0 ? a.totalReturn / a.returnRows : 0,
+          hitRate: voted > 0 ? a.buys / voted : 0,
+        };
+      })
       .sort((a, b) => b.avgReturn - a.avgReturn);
 
-    // Club-wide averages only count rows with an actual $ return.
+    // Club-wide averages.
     const withReturn = results.filter((r) => r.isPosition && r.percent != null);
     const clubAvg =
       withReturn.length > 0
         ? withReturn.reduce((s, r) => s + r.percent, 0) / withReturn.length
         : 0;
-    const clubHitRate =
-      withReturn.length > 0
-        ? withReturn.filter((r) => r.percent > 0).length / withReturn.length
-        : 0;
+    const clubBuys = results.filter((r) => pitchDecision(r) === 'buy').length;
+    const clubNoBuys = results.filter((r) => pitchDecision(r) === 'nobuy').length;
+    const clubVoted = clubBuys + clubNoBuys;
+    const clubHitRate = clubVoted > 0 ? clubBuys / clubVoted : 0;
 
     res.json({
       results,
@@ -342,12 +371,16 @@ router.get('/outcomes/mine', async (req, res) => {
       withReturn.length > 0
         ? withReturn.reduce((s, r) => s + r.percent, 0) / withReturn.length
         : 0;
-    const hitRate =
-      withReturn.length > 0
-        ? withReturn.filter((r) => r.percent > 0).length / withReturn.length
-        : 0;
     const totalPitches = myPitches.length;
     const pitchesVotedNo = myPitches.filter((p) => p.votedOutcome === 'NoBuy').length;
+    // A pitch "won a vote" if it's a current position OR was explicitly
+    // voted Buy. Hit rate = buys / (buys + nobuys). Pitches with no
+    // decision yet don't count either way.
+    const myBuys = pitchRows.filter(
+      (r) => r.isPosition || r.votedOutcome === 'Buy'
+    ).length;
+    const myVoted = myBuys + pitchesVotedNo;
+    const hitRate = myVoted > 0 ? myBuys / myVoted : 0;
 
     res.json({
       rows,
@@ -355,6 +388,7 @@ router.get('/outcomes/mine', async (req, res) => {
       totalReports: myReports.length,
       positionsCount: withReturn.length,
       pitchesVotedNo,
+      pitchesVotedBuy: myBuys,
       avgReturn,
       hitRate,
     });

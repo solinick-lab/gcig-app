@@ -93,7 +93,7 @@ export default function PitchOutcomes() {
                 {(clubHitRate * 100).toFixed(0)}%
               </div>
               <div className="text-[11px] text-navy-400">
-                of pitches currently in the green
+                of pitches voted Buy (vs. voted No)
               </div>
             </div>
           </div>
