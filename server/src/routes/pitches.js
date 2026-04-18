@@ -189,14 +189,20 @@ router.get('/outcomes/all', async (_req, res) => {
       (a, b) => new Date(b.date) - new Date(a.date)
     );
 
-    // Hit rate = pitches the club voted YES to (bought). A pitch "won a vote"
-    // if it became a position or was explicitly marked votedOutcome='Buy'.
-    // A pitch "lost a vote" if votedOutcome='NoBuy'. Pitches with neither
-    // signal (no decision yet) don't count in the denominator.
+    // Hit rate = coverage (pitches + reports) the club ended up buying.
+    //   Pitch → "buy" if it became a position or votedOutcome='Buy',
+    //           "nobuy" if votedOutcome='NoBuy', null otherwise.
+    //   Report → "buy" if its ticker is held today (tacit approval via
+    //            ownership), otherwise null (reports aren't voted down).
     function pitchDecision(r) {
-      if (r.type !== 'pitch') return null;
-      if (r.isPosition || r.votedOutcome === 'Buy') return 'buy';
-      if (r.votedOutcome === 'NoBuy') return 'nobuy';
+      if (r.type === 'pitch') {
+        if (r.isPosition || r.votedOutcome === 'Buy') return 'buy';
+        if (r.votedOutcome === 'NoBuy') return 'nobuy';
+        return null;
+      }
+      if (r.type === 'report') {
+        return r.isPosition ? 'buy' : null;
+      }
       return null;
     }
 
@@ -376,12 +382,14 @@ router.get('/outcomes/mine', async (req, res) => {
         : 0;
     const totalPitches = myPitches.length;
     const pitchesVotedNo = myPitches.filter((p) => p.votedOutcome === 'NoBuy').length;
-    // A pitch "won a vote" if it's a current position OR was explicitly
-    // voted Buy. Hit rate = buys / (buys + nobuys). Pitches with no
-    // decision yet don't count either way.
-    const myBuys = pitchRows.filter(
+    // Hit rate counts pitches AND reports tied to current positions as
+    // "buys" (a report that became a holding is tacitly approved coverage).
+    // Denominator = buys + explicitly voted-no pitches.
+    const pitchBuys = pitchRows.filter(
       (r) => r.isPosition || r.votedOutcome === 'Buy'
     ).length;
+    const reportBuys = reportRows.filter((r) => r.isPosition).length;
+    const myBuys = pitchBuys + reportBuys;
     const myVoted = myBuys + pitchesVotedNo;
     const hitRate = myVoted > 0 ? myBuys / myVoted : 0;
 
