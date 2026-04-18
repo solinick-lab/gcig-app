@@ -3,6 +3,27 @@ import bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
+// One-off snapshot corrections. Google's CSV export served stale data for a
+// stretch in Apr 2026, so the auto-written snapshots for those days are wrong.
+// These overrides fix the rows we have verified values for. Adding a new entry
+// here will upsert it on the next deploy — safe to re-run.
+const SNAPSHOT_CORRECTIONS = [
+  { date: '2026-04-16', totalValue: 130170.36 },
+  { date: '2026-04-17', totalValue: 132239.81 },
+];
+
+async function seedSnapshotCorrections() {
+  for (const c of SNAPSHOT_CORRECTIONS) {
+    const date = new Date(`${c.date}T00:00:00Z`);
+    await prisma.portfolioSnapshot.upsert({
+      where: { date },
+      update: { totalValue: c.totalValue },
+      create: { date, totalValue: c.totalValue },
+    });
+    console.log(`Corrected snapshot: ${c.date} -> $${c.totalValue.toLocaleString()}`);
+  }
+}
+
 // Known historical lots. Seeded once per ticker; if a matching row is already
 // present (same ticker + shares + pricePerShare + buyDate), we leave it alone.
 const INITIAL_LOTS = [
@@ -62,6 +83,7 @@ async function main() {
   }
 
   await seedLots();
+  await seedSnapshotCorrections();
 }
 
 main()
