@@ -435,6 +435,47 @@ router.delete('/lots/:id', requireSuperAdmin, async (req, res) => {
   }
 });
 
+// Super-admin-only: overwrite a single day's snapshot. Used to correct days
+// where Google Sheets served a stale CSV (the known Apr 14–17 flat stretch).
+router.put('/snapshot/:date', requireSuperAdmin, async (req, res) => {
+  const iso = String(req.params.date || '').trim();
+  // Accept YYYY-MM-DD.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    return res.status(400).json({ error: 'Date must be YYYY-MM-DD' });
+  }
+  const { totalValue, cashValue } = req.body || {};
+  const tv = Number(totalValue);
+  if (!Number.isFinite(tv) || tv <= 0) {
+    return res.status(400).json({ error: 'totalValue (positive number) required' });
+  }
+  const cv = cashValue == null || cashValue === '' ? null : Number(cashValue);
+  if (cv != null && !Number.isFinite(cv)) {
+    return res.status(400).json({ error: 'cashValue must be a number if provided' });
+  }
+  // Snapshots are stored at UTC midnight.
+  const date = new Date(`${iso}T00:00:00Z`);
+  const snap = await prisma.portfolioSnapshot.upsert({
+    where: { date },
+    update: { totalValue: tv, cashValue: cv },
+    create: { date, totalValue: tv, cashValue: cv },
+  });
+  res.json(snap);
+});
+
+router.delete('/snapshot/:date', requireSuperAdmin, async (req, res) => {
+  const iso = String(req.params.date || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    return res.status(400).json({ error: 'Date must be YYYY-MM-DD' });
+  }
+  const date = new Date(`${iso}T00:00:00Z`);
+  try {
+    await prisma.portfolioSnapshot.delete({ where: { date } });
+    res.json({ ok: true });
+  } catch {
+    res.status(404).json({ error: 'Snapshot not found' });
+  }
+});
+
 router.get('/history', async (_req, res) => {
   const snapshots = await prisma.portfolioSnapshot.findMany({
     orderBy: { date: 'asc' },
