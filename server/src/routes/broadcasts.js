@@ -31,6 +31,27 @@ const sendLimiter = rateLimit({
 });
 
 const KNOWN_ROLES = Object.keys(ROLE_RANK);
+const ADVISORY_ROLES = new Set(['AdvisoryBoardMember', 'FacultyAdvisory']);
+
+// Advisory members are observers and should not receive club broadcasts
+// unless the sender explicitly targets an advisory role. "Only advisory"
+// means their primary role is advisory AND every extraRole (if any) is also
+// advisory — someone serving on the advisory board who also holds an
+// operational extra role (e.g. a dual-hat alum) still receives.
+function isAdvisoryOnly(user) {
+  if (!ADVISORY_ROLES.has(user.role)) return false;
+  const extras = user.extraRoles || [];
+  if (extras.length === 0) return true;
+  return extras.every((r) => ADVISORY_ROLES.has(r));
+}
+
+// Whether the selected audience is an explicit opt-in to emailing advisors.
+function audienceTargetsAdvisors(parsed) {
+  if (parsed.kind === 'role' && ADVISORY_ROLES.has(parsed.role)) return true;
+  // rank_gte uses operational ranks where advisory sits at the floor (rank 1).
+  // Targeting rank_gte: an advisory role means "everyone" — not an advisor opt-in.
+  return false;
+}
 
 function parseAudience(audience) {
   if (!audience || typeof audience !== 'string') return null;
@@ -53,43 +74,45 @@ function parseAudience(audience) {
 }
 
 async function resolveRecipients(parsed) {
+  const baseSelect = { id: true, email: true, name: true, role: true, extraRoles: true };
+  let users = [];
   if (parsed.kind === 'all') {
-    return prisma.user.findMany({ select: { id: true, email: true, name: true, role: true } });
-  }
-  if (parsed.kind === 'industry') {
+    users = await prisma.user.findMany({ select: baseSelect });
+  } else if (parsed.kind === 'industry') {
     const rows = await prisma.userIndustry.findMany({
       where: { industryId: parsed.id },
-      include: { user: { select: { id: true, email: true, name: true, role: true } } },
+      include: { user: { select: baseSelect } },
     });
-    const users = rows.map((r) => r.user);
+    users = rows.map((r) => r.user);
     // Include the pod leader even if not a listed member (Industries page
     // self-heals membership but we double-check for safety).
     const industry = await prisma.industry.findUnique({
       where: { id: parsed.id },
-      include: { leader: { select: { id: true, email: true, name: true, role: true } } },
+      include: { leader: { select: baseSelect } },
     });
     if (industry?.leader && !users.some((u) => u.id === industry.leader.id)) {
       users.push(industry.leader);
     }
-    return users;
-  }
-  if (parsed.kind === 'role') {
-    return prisma.user.findMany({
+  } else if (parsed.kind === 'role') {
+    users = await prisma.user.findMany({
       where: { role: parsed.role },
-      select: { id: true, email: true, name: true, role: true },
+      select: baseSelect,
     });
-  }
-  if (parsed.kind === 'rank_gte') {
+  } else if (parsed.kind === 'rank_gte') {
     const minRank = ROLE_RANK[parsed.role];
     const eligible = Object.entries(ROLE_RANK)
       .filter(([, rank]) => rank >= minRank)
       .map(([role]) => role);
-    return prisma.user.findMany({
+    users = await prisma.user.findMany({
       where: { role: { in: eligible } },
-      select: { id: true, email: true, name: true, role: true },
+      select: baseSelect,
     });
   }
-  return [];
+  // Strip advisory-only users unless the audience explicitly asked for advisors.
+  if (!audienceTargetsAdvisors(parsed)) {
+    users = users.filter((u) => !isAdvisoryOnly(u));
+  }
+  return users;
 }
 
 function audienceLabel(parsed, context = {}) {
