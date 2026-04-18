@@ -241,6 +241,9 @@ router.get('/outcomes/all', async (_req, res) => {
         }
       }
     }
+    // Presenters with 0% hit rate (every pitch voted down, nothing bought)
+    // are hidden from the leaderboard — it's a ranking of successful
+    // pitchers, not a wall of shame.
     const leaderboard = [...byPresenter.values()]
       .map((a) => {
         const voted = a.buys + a.noBuys;
@@ -251,6 +254,7 @@ router.get('/outcomes/all', async (_req, res) => {
           hitRate: voted > 0 ? a.buys / voted : 0,
         };
       })
+      .filter((a) => a.hitRate > 0)
       .sort((a, b) => b.avgReturn - a.avgReturn);
 
     // Club-wide averages.
