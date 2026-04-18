@@ -11,8 +11,12 @@ const CACHE_TTL_MS = 20 * 60 * 1000; // 20 minutes
 
 let cached = null; // { at: number, data: ParsedPortfolio }
 
+// Bust Google's CSV export cache. Without a unique param, Google will happily
+// serve a stale snapshot of GOOGLEFINANCE() values that hasn't been re-evaluated
+// in hours (especially problematic for automated fetches when no one has the
+// sheet open).
 function csvUrl() {
-  return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${SHEET_GID}`;
+  return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${SHEET_GID}&_=${Date.now()}`;
 }
 
 // Turn "$12,020.14", "16.93%", "  121 " into real numbers. Empty / dashes → null.
@@ -57,15 +61,21 @@ function matchHeaderIndex(headerRow) {
   return map;
 }
 
-export async function getSheetPortfolio() {
+export async function getSheetPortfolio({ forceFresh = false } = {}) {
   if (!SHEET_ID) {
     throw new Error('GCIG_SHEET_ID is not set in .env');
   }
-  if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+  if (!forceFresh && cached && Date.now() - cached.at < CACHE_TTL_MS) {
     return cached.data;
   }
 
-  const res = await fetch(csvUrl(), { redirect: 'follow' });
+  // `no-store` + `Cache-Control: no-cache` on the request tells any CDN along
+  // the way (including Google's) not to hand us a stale copy.
+  const res = await fetch(csvUrl(), {
+    redirect: 'follow',
+    cache: 'no-store',
+    headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+  });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(

@@ -128,7 +128,10 @@ router.post('/snapshot/daily', async (req, res) => {
     return res.status(401).json({ error: 'Invalid cron secret' });
   }
   try {
-    const data = await getSheetPortfolio();
+    // Skip the 20-min memory cache so the cron always gets a fresh read of
+    // the sheet (otherwise a user who opened the page 15 min earlier could
+    // freeze today's snapshot at pre-close prices).
+    const data = await getSheetPortfolio({ forceFresh: true });
     if (data.totals.totalValue <= 0) {
       return res.status(400).json({ error: 'Sheet returned zero total value' });
     }
