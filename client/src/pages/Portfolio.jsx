@@ -136,18 +136,38 @@ export default function Portfolio() {
     return cutoff ? fullHistory.filter((d) => d.date >= cutoff) : fullHistory;
   }, [fullHistory, range]);
 
-  // Chart series: cumulative % return from the start of the visible range,
-  // measured against the equity base and excluding any capital infusions
-  // that occurred after the range started.
+  // Chart series.
+  //
+  // For the ALL range we anchor to TOTAL_INVESTED (starting capital + all
+  // infusions to date) so the right edge of the chart matches the Total
+  // Gain/Loss card exactly. At each point:
+  //     running_invested(t) = INITIAL_CAPITAL + sum of infusions ≤ t
+  //     pct(t) = (value(t) - running_invested(t)) / running_invested(t)
+  //
+  // For every other range (1W, 1M, YTD, …) we keep the "change since start of
+  // range" model, subtracting infusions that landed inside the range so they
+  // don't fake-inflate the return.
   const percentSeries = useMemo(() => {
     if (chartData.length === 0) return [];
+
+    if (range === 'ALL') {
+      return chartData.map((d) => {
+        const runningInvested =
+          INITIAL_CAPITAL +
+          CASH_FLOWS.filter((cf) => cf.date <= d.date).reduce(
+            (s, cf) => s + cf.amount,
+            0
+          );
+        const dollarDelta = d.value - runningInvested;
+        const percent = runningInvested > 0 ? (dollarDelta / runningInvested) * 100 : 0;
+        return { ...d, dollarDelta, percent };
+      });
+    }
+
     const start = chartData[0];
     const base = start.equity > 0 ? start.equity : start.value;
     if (base <= 0) return [];
     return chartData.map((d) => {
-      // Sum every cash flow that occurred strictly AFTER the range start and
-      // up to this data point. Subtracting it from the current value leaves
-      // only market movement.
       const cfSoFar = CASH_FLOWS.filter(
         (cf) => cf.date > start.date && cf.date <= d.date
       ).reduce((s, cf) => s + cf.amount, 0);
@@ -155,7 +175,7 @@ export default function Portfolio() {
       const percent = (dollarDelta / base) * 100;
       return { ...d, dollarDelta, percent };
     });
-  }, [chartData]);
+  }, [chartData, range]);
 
   // Tight y-axis domain in percent — pad slightly so the line doesn't kiss
   // the top / bottom of the chart.
@@ -229,8 +249,16 @@ export default function Portfolio() {
   // Percent = dollar change / equity at start of range.
   const rangeChange = useMemo(() => {
     if (chartData.length < 2) return null;
-    const start = chartData[0];
     const end = chartData[chartData.length - 1];
+
+    // ALL range: the header should match the Total Gain/Loss card.
+    if (range === 'ALL') {
+      const diff = end.value - TOTAL_INVESTED;
+      const pct = TOTAL_INVESTED > 0 ? (diff / TOTAL_INVESTED) * 100 : 0;
+      return { diff, pct, cashFlowInRange: 0 };
+    }
+
+    const start = chartData[0];
     const cashFlowInRange = CASH_FLOWS.filter(
       (cf) => cf.date > start.date && cf.date <= end.date
     ).reduce((sum, cf) => sum + cf.amount, 0);
@@ -239,7 +267,7 @@ export default function Portfolio() {
     const base = start.equity > 0 ? start.equity : start.value;
     const pct = base > 0 ? (diff / base) * 100 : 0;
     return { diff, pct, cashFlowInRange };
-  }, [chartData]);
+  }, [chartData, range]);
 
   // Build display data with a short date label. For long ranges we thin labels out.
   const displayData = percentSeries.map((d) => ({
@@ -383,11 +411,15 @@ export default function Portfolio() {
                       in {RANGES.find((r) => r.key === range)?.label}
                     </span>
                   </div>
-                  {rangeChange.cashFlowInRange > 0 && (
+                  {range === 'ALL' ? (
+                    <div className="mt-0.5 text-[11px] text-navy-400">
+                      vs. {fmtMoney(TOTAL_INVESTED)} invested
+                    </div>
+                  ) : rangeChange.cashFlowInRange > 0 ? (
                     <div className="mt-0.5 text-[11px] text-navy-400">
                       Excludes {fmtMoney(rangeChange.cashFlowInRange)} capital infusion
                     </div>
-                  )}
+                  ) : null}
                 </>
               )}
             </div>
