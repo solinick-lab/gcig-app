@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import prisma from '../db.js';
-import { verifyJwt, issueJwt } from '../middleware/auth.js';
+import { verifyJwt, issueJwt, serializeUser } from '../middleware/auth.js';
 import { authLimiter, codeLimiter } from '../middleware/rateLimit.js';
 import { auditReq } from '../services/audit.js';
 import { trackLogin } from '../services/knownLogins.js';
