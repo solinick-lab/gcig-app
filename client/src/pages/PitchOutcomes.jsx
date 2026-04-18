@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
-import { Trophy, TrendingUp, TrendingDown, Target } from 'lucide-react';
+import { Trophy, TrendingUp, TrendingDown, Target, FileText, BookOpen } from 'lucide-react';
 import api from '../api/client.js';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
@@ -52,12 +52,13 @@ export default function PitchOutcomes() {
 
   const { results = [], leaderboard = [], clubAvg = 0, clubHitRate = 0, trackedCount = 0 } = data || {};
   const positionsOnly = results.filter((r) => r.isPosition);
+  const notTracked = results.filter((r) => !r.isPosition);
 
   return (
     <>
       <PageHeader
-        title="Pitch Outcomes"
-        subtitle="How pitches that became positions have performed."
+        title="Coverage Outcomes"
+        subtitle="How pitches and research reports that became positions have performed."
       />
 
       {/* Club-wide top stats */}
@@ -97,11 +98,11 @@ export default function PitchOutcomes() {
         </Card>
         <Card>
           <div className="text-xs uppercase tracking-wider text-navy-400">
-            Pitches Tracked
+            Tracked
           </div>
           <div className="mt-1 text-3xl font-bold text-navy">{trackedCount}</div>
           <div className="text-[11px] text-navy-400">
-            Only pitches that became positions are included.
+            Pitches + reports tied to current holdings.
           </div>
         </Card>
       </div>
@@ -156,21 +157,21 @@ export default function PitchOutcomes() {
         </Card>
       </div>
 
-      {/* Every pitch that's now a position */}
+      {/* Every pitch / report that's now a position */}
       <div className="mt-6">
-        <Card title="Pitch-by-pitch">
+        <Card title="Coverage tied to current positions">
           {positionsOnly.length === 0 ? (
             <div className="py-8 text-center text-navy-400">
-              No pitches have been tied to current holdings yet. Seed the
-              matching HoldingLot for each pitch to start tracking.
+              No pitches or reports have been tied to current holdings yet.
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-navy-100 text-left text-xs uppercase text-navy-400">
+                    <th className="py-2 pr-4">Type</th>
                     <th className="py-2 pr-4">Ticker</th>
-                    <th className="py-2 pr-4">Pitched</th>
+                    <th className="py-2 pr-4">Date</th>
                     <th className="py-2 pr-4">By</th>
                     <th className="py-2 pr-4 text-right">Buy Price</th>
                     <th className="py-2 pr-4 text-right">Now</th>
@@ -182,8 +183,29 @@ export default function PitchOutcomes() {
                     const up = (r.percent ?? 0) >= 0;
                     return (
                       <tr key={r.id}>
+                        <td className="py-3 pr-4">
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                              r.type === 'report'
+                                ? 'bg-navy-50 text-navy'
+                                : 'bg-gold-100 text-gold-800'
+                            }`}
+                          >
+                            {r.type === 'report' ? (
+                              <BookOpen className="h-3 w-3" />
+                            ) : (
+                              <FileText className="h-3 w-3" />
+                            )}
+                            {r.type}
+                          </span>
+                        </td>
                         <td className="py-3 pr-4 font-bold text-navy">
                           {r.ticker}
+                          {r.title && (
+                            <div className="truncate max-w-[220px] text-xs font-normal text-navy-400">
+                              {r.title}
+                            </div>
+                          )}
                         </td>
                         <td className="py-3 pr-4 text-xs text-navy-400">
                           {format(new Date(r.date), 'MMM d, yyyy')}
@@ -228,6 +250,62 @@ export default function PitchOutcomes() {
           )}
         </Card>
       </div>
+
+      {/* Pitches / reports not currently held — still useful context */}
+      {notTracked.length > 0 && (
+        <div className="mt-6">
+          <Card title="Coverage not tied to current holdings">
+            <div className="mb-3 text-xs text-navy-400">
+              Ticker isn't in the current portfolio (either never bought, sold,
+              or a ticker mismatch on the pitch/report). Not counted in the
+              leaderboard.
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-navy-100 text-left text-xs uppercase text-navy-400">
+                    <th className="py-2 pr-4">Type</th>
+                    <th className="py-2 pr-4">Ticker</th>
+                    <th className="py-2 pr-4">Date</th>
+                    <th className="py-2 pr-4">By</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-navy-50">
+                  {notTracked.map((r) => (
+                    <tr key={r.id}>
+                      <td className="py-3 pr-4">
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                            r.type === 'report'
+                              ? 'bg-navy-50 text-navy'
+                              : 'bg-gold-100 text-gold-800'
+                          }`}
+                        >
+                          {r.type}
+                        </span>
+                      </td>
+                      <td className="py-3 pr-4 font-bold text-navy">
+                        {r.ticker}
+                        {r.title && (
+                          <div className="truncate max-w-[220px] text-xs font-normal text-navy-400">
+                            {r.title}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4 text-xs text-navy-400">
+                        {format(new Date(r.date), 'MMM d, yyyy')}
+                      </td>
+                      <td className="py-3 pr-4 text-sm text-navy">
+                        {r.presenters.map((p) => p.name).join(', ')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      )}
     </>
   );
 }

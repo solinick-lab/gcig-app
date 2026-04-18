@@ -34,7 +34,7 @@ const NAV_SECTIONS = [
     header: 'Investing',
     items: [
       { to: '/portfolio', label: 'Portfolio', icon: LineChart },
-      { to: '/outcomes', label: 'Pitch Outcomes', icon: Trophy },
+      { to: '/outcomes', label: 'Coverage Outcomes', icon: Trophy },
       { to: '/votes', label: 'Voting', icon: Vote },
       { to: '/industries', label: 'Industries', icon: Building2 },
     ],

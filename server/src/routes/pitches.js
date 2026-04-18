@@ -71,7 +71,7 @@ router.get('/:id', async (req, res) => {
 //   2. Falls back to the holding's avg cost from the sheet
 router.get('/outcomes/all', async (_req, res) => {
   try {
-    const [pitches, portfolio, lots] = await Promise.all([
+    const [pitches, reports, portfolio, lots] = await Promise.all([
       prisma.pitch.findMany({
         orderBy: { date: 'desc' },
         include: {
@@ -79,6 +79,10 @@ router.get('/outcomes/all', async (_req, res) => {
             include: { user: { select: { id: true, name: true } } },
           },
         },
+      }),
+      prisma.report.findMany({
+        where: { ticker: { not: null } },
+        orderBy: { date: 'desc' },
       }),
       getSheetPortfolio().catch(() => null),
       prisma.holdingLot.findMany(),
@@ -89,8 +93,8 @@ router.get('/outcomes/all', async (_req, res) => {
       if (!h.isCash) holdingsByTicker.set(h.ticker.toUpperCase(), h);
     }
 
-    function nearestLot(ticker, pitchDate) {
-      const ts = new Date(pitchDate).getTime();
+    function nearestLot(ticker, refDate) {
+      const ts = new Date(refDate).getTime();
       let best = null;
       let bestDiff = Infinity;
       for (const l of lots) {
@@ -101,39 +105,78 @@ router.get('/outcomes/all', async (_req, res) => {
           best = l;
         }
       }
-      // Only count a lot as "the buy for this pitch" if it's within 90 days.
+      // Only count a lot as "the buy for this entry" if it's within 90 days.
       const NINETY_DAYS = 90 * 24 * 60 * 60 * 1000;
       return bestDiff <= NINETY_DAYS ? best : null;
     }
 
-    const results = pitches.map((p) => {
-      const ticker = (p.ticker || '').toUpperCase();
-      const h = holdingsByTicker.get(ticker);
-      const lot = nearestLot(ticker, p.date);
-      const presenters =
-        p.presenters.length > 0
-          ? p.presenters.map((pp) => ({ id: pp.user.id, name: pp.user.name }))
-          : [{ id: null, name: p.pitcherName }];
+    function outcomeFor(ticker, refDate) {
+      const t = (ticker || '').toUpperCase();
+      const h = holdingsByTicker.get(t);
+      const lot = nearestLot(t, refDate);
       const buyPrice = lot?.pricePerShare ?? h?.costBasis ?? null;
       const currentPrice = h?.price ?? null;
       const percent =
         buyPrice != null && currentPrice != null && buyPrice > 0
           ? ((currentPrice - buyPrice) / buyPrice) * 100
           : null;
-      const isPosition = !!h;
+      return { ticker: t, holding: h, lot, buyPrice, currentPrice, percent };
+    }
+
+    // Split author strings like "Jane Doe, John Smith" or "Jane Doe & John Smith"
+    // so each listed member gets credit for the report.
+    function splitAuthors(author) {
+      if (!author) return [];
+      return String(author)
+        .split(/[,&]|\band\b/i)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+
+    const pitchResults = pitches.map((p) => {
+      const o = outcomeFor(p.ticker, p.date);
+      const presenters =
+        p.presenters.length > 0
+          ? p.presenters.map((pp) => ({ id: pp.user.id, name: pp.user.name }))
+          : [{ id: null, name: p.pitcherName }];
       return {
-        id: p.id,
-        ticker,
+        id: `pitch-${p.id}`,
+        type: 'pitch',
+        ticker: o.ticker,
         date: p.date,
         presenters,
         industry: p.industryId,
-        isPosition,
-        buyPrice,
-        buyDate: lot?.buyDate ?? null,
-        currentPrice,
-        percent,
+        isPosition: !!o.holding,
+        buyPrice: o.buyPrice,
+        buyDate: o.lot?.buyDate ?? null,
+        currentPrice: o.currentPrice,
+        percent: o.percent,
       };
     });
+
+    const reportResults = reports.map((r) => {
+      const o = outcomeFor(r.ticker, r.date);
+      const presenters = splitAuthors(r.author).map((name) => ({ id: null, name }));
+      return {
+        id: `report-${r.id}`,
+        type: 'report',
+        ticker: o.ticker,
+        title: r.title,
+        date: r.date,
+        presenters:
+          presenters.length > 0 ? presenters : [{ id: null, name: r.author || 'Unknown' }],
+        industry: null,
+        isPosition: !!o.holding,
+        buyPrice: o.buyPrice,
+        buyDate: o.lot?.buyDate ?? null,
+        currentPrice: o.currentPrice,
+        percent: o.percent,
+      };
+    });
+
+    const results = [...pitchResults, ...reportResults].sort(
+      (a, b) => new Date(b.date) - new Date(a.date)
+    );
 
     // Roll up per-presenter (each presenter gets credit for the pitch).
     const byPresenter = new Map();
