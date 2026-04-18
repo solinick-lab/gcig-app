@@ -93,34 +93,38 @@ router.get('/outcomes/all', async (_req, res) => {
       if (!h.isCash) holdingsByTicker.set(h.ticker.toUpperCase(), h);
     }
 
-    function nearestLot(ticker, refDate) {
-      const ts = new Date(refDate).getTime();
-      let best = null;
-      let bestDiff = Infinity;
-      for (const l of lots) {
-        if (l.ticker.toUpperCase() !== ticker.toUpperCase()) continue;
-        const diff = Math.abs(new Date(l.buyDate).getTime() - ts);
-        if (diff < bestDiff) {
-          bestDiff = diff;
-          best = l;
-        }
+    // True weighted-avg cost across every lot we have for a ticker. Falls back
+    // to the sheet's costBasis (also blended) if no lots are seeded yet. Used
+    // instead of the "nearest lot" heuristic so a pitcher's return reflects
+    // the WHOLE position they're responsible for, including later add-ons.
+    function blendedCost(ticker) {
+      const t = ticker.toUpperCase();
+      const tickerLots = lots.filter((l) => l.ticker.toUpperCase() === t);
+      if (tickerLots.length === 0) return null;
+      let shares = 0;
+      let cost = 0;
+      for (const l of tickerLots) {
+        shares += l.shares;
+        cost += l.shares * l.pricePerShare;
       }
-      // Only count a lot as "the buy for this entry" if it's within 90 days.
-      const NINETY_DAYS = 90 * 24 * 60 * 60 * 1000;
-      return bestDiff <= NINETY_DAYS ? best : null;
+      return shares > 0 ? cost / shares : null;
     }
 
     function outcomeFor(ticker, refDate) {
       const t = (ticker || '').toUpperCase();
       const h = holdingsByTicker.get(t);
-      const lot = nearestLot(t, refDate);
-      const buyPrice = lot?.pricePerShare ?? h?.costBasis ?? null;
+      // Prefer the sheet's blended return when available — it already factors
+      // in every lot currently held. Otherwise derive from lots or fall back
+      // to cost basis math.
+      const buyPrice = blendedCost(t) ?? h?.costBasis ?? null;
       const currentPrice = h?.price ?? null;
       const percent =
-        buyPrice != null && currentPrice != null && buyPrice > 0
+        h?.percentReturn != null
+          ? h.percentReturn
+          : buyPrice != null && currentPrice != null && buyPrice > 0
           ? ((currentPrice - buyPrice) / buyPrice) * 100
           : null;
-      return { ticker: t, holding: h, lot, buyPrice, currentPrice, percent };
+      return { ticker: t, holding: h, buyPrice, currentPrice, percent };
     }
 
     // Split author strings like "Jane Doe, John Smith" or "Jane Doe & John Smith"
@@ -149,7 +153,7 @@ router.get('/outcomes/all', async (_req, res) => {
         isPosition: !!o.holding,
         votedOutcome: p.votedOutcome,
         buyPrice: o.buyPrice,
-        buyDate: o.lot?.buyDate ?? null,
+        buyDate: null,
         currentPrice: o.currentPrice,
         percent: o.percent,
       };
@@ -169,7 +173,7 @@ router.get('/outcomes/all', async (_req, res) => {
         industry: null,
         isPosition: !!o.holding,
         buyPrice: o.buyPrice,
-        buyDate: o.lot?.buyDate ?? null,
+        buyDate: null,
         currentPrice: o.currentPrice,
         percent: o.percent,
       };
@@ -294,31 +298,30 @@ router.get('/outcomes/mine', async (req, res) => {
     for (const h of portfolio?.holdings || []) {
       if (!h.isCash) holdingsByTicker.set(h.ticker.toUpperCase(), h);
     }
-    function nearestLot(ticker, refDate) {
-      const ts = new Date(refDate).getTime();
-      let best = null;
-      let bestDiff = Infinity;
-      for (const l of lots) {
-        if (l.ticker.toUpperCase() !== ticker.toUpperCase()) continue;
-        const diff = Math.abs(new Date(l.buyDate).getTime() - ts);
-        if (diff < bestDiff) {
-          bestDiff = diff;
-          best = l;
-        }
+    function blendedCost(ticker) {
+      const t = ticker.toUpperCase();
+      const tickerLots = lots.filter((l) => l.ticker.toUpperCase() === t);
+      if (tickerLots.length === 0) return null;
+      let shares = 0;
+      let cost = 0;
+      for (const l of tickerLots) {
+        shares += l.shares;
+        cost += l.shares * l.pricePerShare;
       }
-      return bestDiff <= 90 * 24 * 60 * 60 * 1000 ? best : null;
+      return shares > 0 ? cost / shares : null;
     }
     function outcomeFor(ticker, refDate) {
       const t = (ticker || '').toUpperCase();
       const h = holdingsByTicker.get(t);
-      const lot = nearestLot(t, refDate);
-      const buyPrice = lot?.pricePerShare ?? h?.costBasis ?? null;
+      const buyPrice = blendedCost(t) ?? h?.costBasis ?? null;
       const currentPrice = h?.price ?? null;
       const percent =
-        buyPrice != null && currentPrice != null && buyPrice > 0
+        h?.percentReturn != null
+          ? h.percentReturn
+          : buyPrice != null && currentPrice != null && buyPrice > 0
           ? ((currentPrice - buyPrice) / buyPrice) * 100
           : null;
-      return { ticker: t, holding: h, lot, buyPrice, currentPrice, percent };
+      return { ticker: t, holding: h, buyPrice, currentPrice, percent };
     }
 
     const pitchRows = myPitches.map((p) => {
