@@ -112,6 +112,7 @@ async function fetchQuoteSummary(ticker) {
 import prisma from '../db.js';
 import { verifyJwt, requireSuperAdmin, requireRole } from '../middleware/auth.js';
 import { getSheetPortfolio } from '../services/sheetPortfolio.js';
+import { getNewsForTicker } from '../services/news.js';
 
 const router = Router();
 
@@ -307,6 +308,26 @@ router.get('/info/:ticker', async (req, res) => {
   } catch (err) {
     console.error(`Ticker info fetch failed for ${raw}:`, err);
     res.status(502).json({ error: err.message || 'Failed to fetch ticker info' });
+  }
+});
+
+// Recent news headlines for a ticker, sourced from newsapi.org. The service
+// caches 15 minutes so a rapid round of holding clicks doesn't burn quota.
+router.get('/news/:ticker', async (req, res) => {
+  const raw = String(req.params.ticker || '').trim().toUpperCase();
+  if (!raw || !/^[A-Z0-9.\-]{1,10}$/.test(raw)) {
+    return res.status(400).json({ error: 'Invalid ticker' });
+  }
+  // Company name optionally passed via ?name= so the query can be scoped to
+  // the actual company rather than the ticker string (which collides with
+  // common words).
+  const name = typeof req.query.name === 'string' ? req.query.name.slice(0, 80) : '';
+  try {
+    const data = await getNewsForTicker(raw, name);
+    res.json(data);
+  } catch (err) {
+    console.error(`news(${raw}) failed:`, err.message);
+    res.status(err.status || 502).json({ error: err.message || 'Failed to fetch news' });
   }
 });
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import {
   ExternalLink,
   TrendingUp,
@@ -8,6 +8,7 @@ import {
   BookOpen,
   Plus,
   Trash2,
+  Newspaper,
 } from 'lucide-react';
 import api from '../api/client.js';
 import { safeHref } from '../api/safeUrl.js';
@@ -55,6 +56,9 @@ export default function HoldingDetailModal({ holding, onClose }) {
   const [info, setInfo] = useState(null);
   const [coverage, setCoverage] = useState(null);
   const [lots, setLots] = useState([]);
+  const [news, setNews] = useState(null);
+  const [newsError, setNewsError] = useState('');
+  const [newsLoading, setNewsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -74,6 +78,8 @@ export default function HoldingDetailModal({ holding, onClose }) {
     setInfo(null);
     setCoverage(null);
     setLots([]);
+    setNews(null);
+    setNewsError('');
     Promise.all([
       api
         .get(`/holdings/info/${encodeURIComponent(ticker)}`)
@@ -93,6 +99,25 @@ export default function HoldingDetailModal({ holding, onClose }) {
       setCoverage(coverageData);
       setLots(lotsData);
       setLoading(false);
+
+      // News is fired AFTER the info call resolves so we can pass the
+      // company name along — that gives dramatically cleaner results than
+      // querying by ticker alone (e.g. "AAPL" → apple orchards).
+      setNewsLoading(true);
+      const name = infoData?.name || '';
+      api
+        .get(`/holdings/news/${encodeURIComponent(ticker)}`, {
+          params: name ? { name } : {},
+        })
+        .then(({ data }) => {
+          if (!cancelled) setNews(data);
+        })
+        .catch((err) => {
+          if (!cancelled) setNewsError(err.response?.data?.error || 'News unavailable');
+        })
+        .finally(() => {
+          if (!cancelled) setNewsLoading(false);
+        });
     });
     return () => {
       cancelled = true;
@@ -334,6 +359,13 @@ export default function HoldingDetailModal({ holding, onClose }) {
                 </div>
               </div>
             )}
+
+          {/* Recent news — from newsapi.org, cached 15 min server-side */}
+          <NewsSection
+            loading={newsLoading}
+            error={newsError}
+            articles={news?.articles || []}
+          />
 
           {/* Stats grid */}
           <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
@@ -678,6 +710,90 @@ function LotSection({ ticker, lots, currentPrice, currency, canEdit, onChange, o
             </button>
           </div>
         </form>
+      )}
+    </div>
+  );
+}
+
+// Compact headline feed for the modal. Pulls from /api/holdings/news/:ticker
+// which hits newsapi.org server-side (cached 15 min). Returns null when there
+// are no articles and no error — we don't want a dead "Recent News" header
+// for obscure tickers newsapi has nothing on.
+function NewsSection({ loading, error, articles }) {
+  if (!loading && !error && (!articles || articles.length === 0)) return null;
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-navy-400">
+          <Newspaper className="h-3.5 w-3.5" />
+          Recent News
+        </div>
+        {articles.length > 0 && (
+          <span className="text-[10px] text-navy-400">
+            via newsapi.org · {articles.length} stories
+          </span>
+        )}
+      </div>
+      {loading ? (
+        <div className="rounded-lg border border-navy-100 bg-white p-3 text-xs text-navy-400">
+          Loading headlines…
+        </div>
+      ) : error ? (
+        <div className="rounded-lg border border-navy-100 bg-navy-50/40 p-3 text-xs text-navy-400">
+          {error}
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {articles.map((a, i) => (
+            <li key={i} className="rounded-lg border border-navy-100 bg-white">
+              <a
+                href={safeHref(a.url)}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-start gap-3 p-3 transition hover:bg-navy-50/40"
+              >
+                {a.imageUrl ? (
+                  <img
+                    src={a.imageUrl}
+                    alt=""
+                    loading="lazy"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                    className="hidden h-14 w-14 shrink-0 rounded-md object-cover sm:block"
+                  />
+                ) : (
+                  <div className="hidden h-14 w-14 shrink-0 items-center justify-center rounded-md bg-navy-50 text-navy-400 sm:flex">
+                    <Newspaper className="h-5 w-5" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold leading-snug text-navy line-clamp-2">
+                    {a.title}
+                  </div>
+                  {a.description && (
+                    <div className="mt-1 line-clamp-2 text-xs text-navy-400">
+                      {a.description}
+                    </div>
+                  )}
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-navy-400">
+                    {a.source && (
+                      <span className="font-semibold uppercase tracking-wider text-navy">
+                        {a.source}
+                      </span>
+                    )}
+                    {a.publishedAt && (
+                      <span>
+                        {formatDistanceToNow(new Date(a.publishedAt), { addSuffix: true })}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <ExternalLink className="mt-1 h-3.5 w-3.5 shrink-0 text-navy-400" />
+              </a>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
