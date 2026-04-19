@@ -7,17 +7,29 @@ router.use(verifyJwt);
 
 // ── Tally computation ──────────────────────────────────────────────
 
-const GENERAL_BODY_WEIGHT = 2;
+// Weighting rules:
+//   General body's majority choice = 3 weighted votes
+//   Each Leadership member (President or CIO) = 1 weighted vote
+// Leadership ballots contribute individually; general body contributes as a
+// single bloc whose direction is its majority (tied bloc = 0 contribution).
+const GENERAL_BODY_WEIGHT = 3;
+const LEADERSHIP_ROLES = new Set(['President', 'CIO']);
 
 function computeTally(ballots, allUsers) {
   const userMap = new Map(allUsers.map((u) => [u.id, u]));
 
-  const presidentBallots = ballots.filter(
-    (b) => userMap.get(b.userId)?.role === 'President'
+  const leadershipBallots = ballots.filter((b) =>
+    LEADERSHIP_ROLES.has(userMap.get(b.userId)?.role)
   );
   const memberBallots = ballots.filter(
-    (b) => userMap.get(b.userId)?.role !== 'President'
+    (b) => !LEADERSHIP_ROLES.has(userMap.get(b.userId)?.role)
   );
+
+  // Max possible weighted votes = general-body bloc + # of leadership seats
+  // currently held. Used by the client to draw progress bars and "X of Y"
+  // counters without guessing the ceiling.
+  const leadershipEligible = allUsers.filter((u) => LEADERSHIP_ROLES.has(u.role)).length;
+  const maxWeightedVotes = GENERAL_BODY_WEIGHT + leadershipEligible;
 
   // General body counts
   const memberCounts = { Buy: 0, Hold: 0, Sell: 0 };
@@ -27,12 +39,12 @@ function computeTally(ballots, allUsers) {
   const memberWinners = Object.keys(memberCounts).filter(
     (k) => memberCounts[k] === maxMemberVotes && memberCounts[k] > 0
   );
-  // Tie in general body → 0 contribution; presidents decide alone.
+  // Tie in general body → 0 contribution; leadership decides alone.
   const generalBodyDecision = memberWinners.length === 1 ? memberWinners[0] : null;
 
   // Final weighted tally
   const weights = { Buy: 0, Hold: 0, Sell: 0 };
-  for (const b of presidentBallots) weights[b.action]++;
+  for (const b of leadershipBallots) weights[b.action]++;
   if (generalBodyDecision) weights[generalBodyDecision] += GENERAL_BODY_WEIGHT;
 
   const maxWeight = Math.max(weights.Buy, weights.Hold, weights.Sell);
@@ -47,15 +59,20 @@ function computeTally(ballots, allUsers) {
     memberTotal: memberBallots.length,
     generalBodyDecision,
     generalBodyWeight: generalBodyDecision ? GENERAL_BODY_WEIGHT : 0,
-    presidentVotes: presidentBallots.map((b) => ({
+    generalBodyBlocWeight: GENERAL_BODY_WEIGHT,
+    leadershipVotes: leadershipBallots.map((b) => ({
       userId: b.userId,
       name: userMap.get(b.userId)?.name || 'Unknown',
+      role: userMap.get(b.userId)?.role || null,
       action: b.action,
       note: b.note,
     })),
-    presidentCount: presidentBallots.length,
+    leadershipCount: leadershipBallots.length,
+    leadershipEligible,
+    maxWeightedVotes,
     weights,
-    totalWeightedVotes: (generalBodyDecision ? GENERAL_BODY_WEIGHT : 0) + presidentBallots.length,
+    totalWeightedVotes:
+      (generalBodyDecision ? GENERAL_BODY_WEIGHT : 0) + leadershipBallots.length,
     finalDecision,
     isTied: finalWinners.length > 1,
   };

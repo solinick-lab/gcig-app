@@ -130,7 +130,7 @@ export default function Votes() {
     <>
       <PageHeader
         title="Voting"
-        subtitle="Vote on pitches — general body (2 votes) + presidents (1 each)."
+        subtitle="Vote on pitches — general body (3 votes) + leadership (Presidents & CIO, 1 each)."
         actions={
           <AdminOnly>
             <Button onClick={() => setModalOpen(true)} variant="gold">
@@ -426,7 +426,7 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
                 </div>
               )}
               <div className="mt-3 text-sm text-navy-400">
-                {tally.totalWeightedVotes} of 6 weighted votes cast
+                {tally.totalWeightedVotes} of {tally.maxWeightedVotes} weighted votes cast
               </div>
             </div>
           </Card>
@@ -446,7 +446,7 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-navy">{b.user.name}</span>
                       <RoleBadge role={b.user.role} />
-                      {b.user.role === 'President' && (
+                      {(b.user.role === 'President' || b.user.role === 'CIO') && (
                         <span className="text-[10px] text-navy-400">(1 vote)</span>
                       )}
                     </div>
@@ -467,7 +467,16 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
 
 function TallyDisplay({ tally, isOpen }) {
   if (!tally) return null;
-  const { memberCounts, memberTotal, generalBodyDecision, generalBodyWeight, presidentVotes, weights } = tally;
+  const {
+    memberCounts,
+    memberTotal,
+    generalBodyDecision,
+    generalBodyWeight,
+    generalBodyBlocWeight = 3,
+    leadershipVotes = [],
+    maxWeightedVotes = generalBodyBlocWeight + 2,
+    weights,
+  } = tally;
 
   const barTotal = Math.max(weights.Buy + weights.Hold + weights.Sell, 1);
 
@@ -475,7 +484,9 @@ function TallyDisplay({ tally, isOpen }) {
     <div className="space-y-4">
       {/* Weight bar */}
       <div>
-        <div className="mb-1 text-xs uppercase text-navy-400">Weighted Votes (max 6)</div>
+        <div className="mb-1 text-xs uppercase text-navy-400">
+          Weighted Votes (max {maxWeightedVotes})
+        </div>
         <div className="flex h-8 overflow-hidden rounded-lg border border-navy-100">
           {weights.Buy > 0 && (
             <div
@@ -512,7 +523,7 @@ function TallyDisplay({ tally, isOpen }) {
       {/* General body */}
       <div className="rounded-lg border border-navy-100 p-3">
         <div className="text-xs font-semibold uppercase text-navy-400">
-          General Body (worth {2} votes)
+          General Body (worth {generalBodyBlocWeight} votes)
         </div>
         <div className="mt-2 flex gap-4 text-sm">
           <span className="text-emerald-700 font-semibold">Buy {memberCounts.Buy}</span>
@@ -533,21 +544,28 @@ function TallyDisplay({ tally, isOpen }) {
         </div>
       </div>
 
-      {/* Presidents */}
+      {/* Leadership — Presidents & CIO */}
       <div className="rounded-lg border border-navy-100 p-3">
         <div className="text-xs font-semibold uppercase text-navy-400">
-          Presidents (1 vote each)
+          Leadership (1 vote each · Presidents & CIO)
         </div>
-        {presidentVotes.length === 0 ? (
+        {leadershipVotes.length === 0 ? (
           <div className="mt-2 text-xs text-navy-400">
-            {isOpen ? 'No presidents have voted yet' : 'No presidents voted'}
+            {isOpen ? 'No leadership votes yet' : 'No leadership votes cast'}
           </div>
         ) : (
           <ul className="mt-2 space-y-1">
-            {presidentVotes.map((pv) => (
-              <li key={pv.userId} className="flex items-center justify-between text-sm">
-                <span className="text-navy">{pv.name}</span>
-                <ActionBadge action={pv.action} />
+            {leadershipVotes.map((lv) => (
+              <li key={lv.userId} className="flex items-center justify-between text-sm">
+                <span className="text-navy">
+                  {lv.name}
+                  {lv.role && (
+                    <span className="ml-1 text-[10px] uppercase text-navy-400">
+                      · {lv.role}
+                    </span>
+                  )}
+                </span>
+                <ActionBadge action={lv.action} />
               </li>
             ))}
           </ul>
