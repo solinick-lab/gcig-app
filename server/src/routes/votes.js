@@ -54,6 +54,22 @@ function computeTally(ballots, allUsers) {
   // Tie in final → default to Hold (conservative).
   const finalDecision = finalWinners.length === 1 ? finalWinners[0] : 'Hold';
 
+  // Aggregate what the voters want to allocate. Only Buy ballots carry an
+  // amount; we surface the average + min + max so leadership can see at a
+  // glance how much the club thinks to commit.
+  const buyAmounts = ballots
+    .filter((b) => b.action === 'Buy' && typeof b.investmentAmount === 'number')
+    .map((b) => b.investmentAmount);
+  const buyAmountStats =
+    buyAmounts.length > 0
+      ? {
+          count: buyAmounts.length,
+          avg: buyAmounts.reduce((s, n) => s + n, 0) / buyAmounts.length,
+          min: Math.min(...buyAmounts),
+          max: Math.max(...buyAmounts),
+        }
+      : null;
+
   return {
     memberCounts,
     memberTotal: memberBallots.length,
@@ -66,7 +82,9 @@ function computeTally(ballots, allUsers) {
       role: userMap.get(b.userId)?.role || null,
       action: b.action,
       note: b.note,
+      investmentAmount: b.investmentAmount ?? null,
     })),
+    buyAmountStats,
     leadershipCount: leadershipBallots.length,
     leadershipEligible,
     maxWeightedVotes,
@@ -173,13 +191,35 @@ router.post('/', requireExecutive, async (req, res) => {
   res.status(201).json(session);
 });
 
+// Dollar bounds for a Buy ballot. Mirrored in the client inputs.
+const BUY_MIN = 1500;
+const BUY_MAX = 10000;
+
 // Cast or update your ballot on an open session.
 router.post('/:id/ballot', async (req, res) => {
   const sessionId = Number(req.params.id);
-  const { action, note } = req.body || {};
+  const { action, note, investmentAmount } = req.body || {};
   if (!action || !['Buy', 'Hold', 'Sell'].includes(action)) {
     return res.status(400).json({ error: 'action must be Buy, Hold, or Sell' });
   }
+
+  // Validate investmentAmount. Required on Buy, must fall inside the band.
+  // Hold/Sell ballots store null even if the client sends a stale value.
+  let amount = null;
+  if (action === 'Buy') {
+    const n = Number(investmentAmount);
+    if (!Number.isFinite(n)) {
+      return res.status(400).json({ error: 'Buy ballots require an investment amount' });
+    }
+    if (n < BUY_MIN || n > BUY_MAX) {
+      return res.status(400).json({
+        error: `Investment amount must be between $${BUY_MIN} and $${BUY_MAX}`,
+      });
+    }
+    // Round to the nearest dollar — fractional cents on a ballot would be noise.
+    amount = Math.round(n);
+  }
+
   const session = await prisma.votingSession.findUnique({ where: { id: sessionId } });
   if (!session) return res.status(404).json({ error: 'Session not found' });
   if (session.status !== 'open' || new Date() > session.deadline) {
@@ -188,8 +228,19 @@ router.post('/:id/ballot', async (req, res) => {
 
   const ballot = await prisma.ballot.upsert({
     where: { sessionId_userId: { sessionId, userId: req.user.id } },
-    update: { action, note: note || null, castAt: new Date() },
-    create: { sessionId, userId: req.user.id, action, note: note || null },
+    update: {
+      action,
+      note: note || null,
+      investmentAmount: amount,
+      castAt: new Date(),
+    },
+    create: {
+      sessionId,
+      userId: req.user.id,
+      action,
+      note: note || null,
+      investmentAmount: amount,
+    },
     include: { user: { select: { id: true, name: true, role: true } } },
   });
   res.json(ballot);

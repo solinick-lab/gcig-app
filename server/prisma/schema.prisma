@@ -177,14 +177,18 @@ model VotingSession {
 }
 
 model Ballot {
-  id        Int            @id @default(autoincrement())
-  sessionId Int
-  session   VotingSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  userId    Int
-  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  action    VoteAction
-  note      String?
-  castAt    DateTime       @default(now())
+  id               Int            @id @default(autoincrement())
+  sessionId        Int
+  session          VotingSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId           Int
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action           VoteAction
+  // Required when action = Buy. Dollar amount the voter thinks the club
+  // should allocate, constrained to $1,500–$10,000 at the API layer. Null
+  // for Hold/Sell.
+  investmentAmount Float?
+  note             String?
+  castAt           DateTime       @default(now())
 
   @@unique([sessionId, userId])
 }

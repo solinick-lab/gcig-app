@@ -273,10 +273,15 @@ function SessionCard({ session: s, onClick }) {
 
 // ── Session detail view ──────────────────────────────────────────────
 
+const BUY_MIN = 1500;
+const BUY_MAX = 10000;
+
 function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
   const { user, isAdmin } = useAuth();
   const [ballotAction, setBallotAction] = useState('');
   const [ballotNote, setBallotNote] = useState('');
+  const [ballotAmount, setBallotAmount] = useState('');
+  const [ballotError, setBallotError] = useState('');
   const [casting, setCasting] = useState(false);
   const isOpen = session.status === 'open' && !isPast(new Date(session.deadline));
   const tally = session.tally;
@@ -285,18 +290,36 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
     if (session.myBallot) {
       setBallotAction(session.myBallot.action);
       setBallotNote(session.myBallot.note || '');
+      setBallotAmount(
+        session.myBallot.investmentAmount != null
+          ? String(session.myBallot.investmentAmount)
+          : ''
+      );
     }
   }, [session.myBallot]);
 
   async function castBallot(e) {
     e.preventDefault();
+    setBallotError('');
+    // Client-side guard mirrors the server. The server is still the source
+    // of truth and will reject anything out of range.
+    if (ballotAction === 'Buy') {
+      const n = Number(ballotAmount);
+      if (!Number.isFinite(n) || n < BUY_MIN || n > BUY_MAX) {
+        setBallotError(`Enter a Buy amount between $${BUY_MIN.toLocaleString()} and $${BUY_MAX.toLocaleString()}`);
+        return;
+      }
+    }
     setCasting(true);
     try {
       await api.post(`/votes/${session.id}/ballot`, {
         action: ballotAction,
         note: ballotNote || null,
+        investmentAmount: ballotAction === 'Buy' ? Number(ballotAmount) : null,
       });
       onRefresh();
+    } catch (err) {
+      setBallotError(err.response?.data?.error || 'Failed to submit ballot');
     } finally {
       setCasting(false);
     }
@@ -385,7 +408,10 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
                     <button
                       key={a}
                       type="button"
-                      onClick={() => setBallotAction(a)}
+                      onClick={() => {
+                        setBallotAction(a);
+                        setBallotError('');
+                      }}
                       className={`flex flex-col items-center gap-1 rounded-lg border px-3 py-3 text-sm font-semibold transition ${
                         selected
                           ? `${meta.badge} ring-2`
@@ -398,6 +424,41 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
                   );
                 })}
               </div>
+
+              {/* Amount input only appears when Buy is selected. Required field,
+                  constrained to the server's accepted band. */}
+              {ballotAction === 'Buy' && (
+                <div>
+                  <label className="block text-sm font-medium text-navy">
+                    Proposed allocation <span className="text-red-600">*</span>
+                  </label>
+                  <div className="mt-1 flex items-center">
+                    <span className="rounded-l-lg border border-r-0 border-navy-100 bg-navy-50 px-3 py-2 text-sm font-semibold text-navy-400">
+                      $
+                    </span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={BUY_MIN}
+                      max={BUY_MAX}
+                      step={100}
+                      required
+                      value={ballotAmount}
+                      onChange={(e) => {
+                        setBallotAmount(e.target.value);
+                        setBallotError('');
+                      }}
+                      placeholder={`${BUY_MIN.toLocaleString()} – ${BUY_MAX.toLocaleString()}`}
+                      className="w-full rounded-r-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
+                    />
+                  </div>
+                  <p className="mt-1 text-xs text-navy-400">
+                    How much should the club allocate? Enter a whole dollar
+                    amount between ${BUY_MIN.toLocaleString()} and ${BUY_MAX.toLocaleString()}.
+                  </p>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-navy">Note (optional)</label>
                 <textarea
@@ -408,6 +469,13 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
                   className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
                 />
               </div>
+
+              {ballotError && (
+                <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {ballotError}
+                </div>
+              )}
+
               <Button type="submit" disabled={!ballotAction || casting} className="w-full">
                 {casting ? 'Submitting…' : session.myBallot ? 'Update Vote' : 'Submit Vote'}
               </Button>
@@ -443,11 +511,16 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
               {session.ballots.map((b) => (
                 <li key={b.id} className="flex items-center justify-between gap-3 py-3">
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-navy">{b.user.name}</span>
                       <RoleBadge role={b.user.role} />
                       {(b.user.role === 'President' || b.user.role === 'CIO') && (
                         <span className="text-[10px] text-navy-400">(1 vote)</span>
+                      )}
+                      {b.action === 'Buy' && b.investmentAmount != null && (
+                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                          ${b.investmentAmount.toLocaleString()}
+                        </span>
                       )}
                     </div>
                     {b.note && <p className="mt-1 text-sm text-navy-400">{b.note}</p>}
@@ -476,6 +549,7 @@ function TallyDisplay({ tally, isOpen }) {
     leadershipVotes = [],
     maxWeightedVotes = generalBodyBlocWeight + 2,
     weights,
+    buyAmountStats,
   } = tally;
 
   const barTotal = Math.max(weights.Buy + weights.Hold + weights.Sell, 1);
@@ -565,12 +639,40 @@ function TallyDisplay({ tally, isOpen }) {
                     </span>
                   )}
                 </span>
-                <ActionBadge action={lv.action} />
+                <div className="flex items-center gap-2">
+                  {lv.action === 'Buy' && lv.investmentAmount != null && (
+                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                      ${lv.investmentAmount.toLocaleString()}
+                    </span>
+                  )}
+                  <ActionBadge action={lv.action} />
+                </div>
               </li>
             ))}
           </ul>
         )}
       </div>
+
+      {/* Proposed Buy allocation — average / range from Buy ballots */}
+      {buyAmountStats && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-3">
+          <div className="text-xs font-semibold uppercase text-emerald-800">
+            Proposed Buy allocation
+          </div>
+          <div className="mt-2 flex items-baseline gap-3">
+            <div className="text-2xl font-bold tabular-nums text-emerald-800">
+              ${Math.round(buyAmountStats.avg).toLocaleString()}
+            </div>
+            <div className="text-xs text-navy-400">
+              average across {buyAmountStats.count} Buy ballot
+              {buyAmountStats.count === 1 ? '' : 's'}
+            </div>
+          </div>
+          <div className="mt-1 text-xs text-navy-400">
+            Range: ${buyAmountStats.min.toLocaleString()} – ${buyAmountStats.max.toLocaleString()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
