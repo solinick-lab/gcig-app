@@ -19,6 +19,8 @@ const NO_BUY_PITCHES = [
   { ticker: 'INTU', date: '2026-01-28' },
   { ticker: 'KSA', date: '2025-12-17' },
   { ticker: 'CRM', date: '2025-11-12' },
+  { ticker: 'ARMCO', date: '2026-03-05' },
+  { ticker: 'AXON', date: '2025-11-19' },
 ];
 
 async function seedNoBuyOutcomes() {
