@@ -366,6 +366,7 @@ export default function HoldingDetailModal({ holding, onClose }) {
             loading={newsLoading}
             error={newsError}
             articles={news?.articles || []}
+            topic={news?.topic || null}
             onOpen={(article) => setReaderArticle(article)}
           />
           <ArticleReaderModal
@@ -729,14 +730,17 @@ function LotSection({ ticker, lots, currentPrice, currency, canEdit, onChange, o
 // Each card is a button that opens ArticleReaderModal in-app instead of
 // leaving for the publisher's site. The reader falls back to a clean link to
 // the original if extraction fails.
-function NewsSection({ loading, error, articles, onOpen }) {
+function NewsSection({ loading, error, articles, topic, onOpen }) {
   if (!loading && !error && (!articles || articles.length === 0)) return null;
+  // For broad-market / sector ETFs the server swaps in curated category
+  // headlines; `topic` tells the UI what to advertise instead of the default.
+  const heading = topic || 'Recent News';
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-navy-400">
           <Newspaper className="h-3.5 w-3.5" />
-          Recent News
+          {heading}
         </div>
         {articles.length > 0 && (
           <span className="text-[10px] text-navy-400">

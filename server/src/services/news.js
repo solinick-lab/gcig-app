@@ -30,6 +30,19 @@ function buildQuery(ticker, name) {
   return ticker;
 }
 
+// Some tickers are broad-market or sector ETFs where "news about Vanguard
+// S&P 500 ETF" isn't what a member actually wants to read. For these we
+// switch to newsapi's top-headlines endpoint scoped to a topical category
+// so VOO readers see actual market news and QQQ readers see actual tech
+// news. Expand this map as other sector ETFs enter the portfolio.
+const TICKER_TOPIC_OVERRIDES = {
+  VOO: { category: 'business', topic: 'Market news' },
+  SPY: { category: 'business', topic: 'Market news' },
+  QQQ: { category: 'technology', topic: 'Tech news' },
+  XLK: { category: 'technology', topic: 'Tech news' },
+  XLV: { category: 'health', topic: 'Healthcare news' },
+};
+
 export async function getNewsForTicker(ticker, name) {
   const key = process.env.NEWS_API_KEY;
   if (!key) {
@@ -43,14 +56,29 @@ export async function getNewsForTicker(ticker, name) {
     return cached.data;
   }
 
-  const q = buildQuery(ticker, name);
-  const params = new URLSearchParams({
-    q,
-    language: 'en',
-    sortBy: 'publishedAt',
-    pageSize: '12',
-  });
-  const url = `https://newsapi.org/v2/everything?${params.toString()}`;
+  const override = TICKER_TOPIC_OVERRIDES[ticker];
+  let url;
+  let topic = null;
+  if (override) {
+    // top-headlines is curated by newsapi, so we just ask for US + category.
+    // Everything endpoint's free-text search for "market news" returns a mess.
+    const params = new URLSearchParams({
+      country: 'us',
+      category: override.category,
+      pageSize: '12',
+    });
+    url = `https://newsapi.org/v2/top-headlines?${params.toString()}`;
+    topic = override.topic;
+  } else {
+    const q = buildQuery(ticker, name);
+    const params = new URLSearchParams({
+      q,
+      language: 'en',
+      sortBy: 'publishedAt',
+      pageSize: '12',
+    });
+    url = `https://newsapi.org/v2/everything?${params.toString()}`;
+  }
 
   const res = await fetch(url, {
     headers: {
@@ -87,6 +115,7 @@ export async function getNewsForTicker(ticker, name) {
 
   const data = {
     ticker,
+    topic,
     fetchedAt: new Date().toISOString(),
     articles,
   };
