@@ -112,7 +112,7 @@ async function fetchQuoteSummary(ticker) {
 import prisma from '../db.js';
 import { verifyJwt, requireSuperAdmin, requireRole } from '../middleware/auth.js';
 import { getSheetPortfolio } from '../services/sheetPortfolio.js';
-import { getNewsForTicker } from '../services/news.js';
+import { getNewsForTicker, extractArticle } from '../services/news.js';
 
 const router = Router();
 
@@ -308,6 +308,22 @@ router.get('/info/:ticker', async (req, res) => {
   } catch (err) {
     console.error(`Ticker info fetch failed for ${raw}:`, err);
     res.status(502).json({ error: err.message || 'Failed to fetch ticker info' });
+  }
+});
+
+// Full-text extraction of a single article URL. Fetched server-side so we
+// bypass CORS, run Mozilla's Readability to pull the main content, and
+// sanitize the result before sending it back. 1-hour cache per URL.
+router.get('/news/article', async (req, res) => {
+  const url = typeof req.query.url === 'string' ? req.query.url : '';
+  if (!url) return res.status(400).json({ error: 'url required' });
+  try {
+    const data = await extractArticle(url);
+    res.json(data);
+  } catch (err) {
+    const status = err.status || 502;
+    console.warn(`article extract failed for ${url}: ${err.message}`);
+    res.status(status).json({ error: err.message || 'Failed to extract article' });
   }
 });
 

@@ -59,6 +59,7 @@ export default function HoldingDetailModal({ holding, onClose }) {
   const [news, setNews] = useState(null);
   const [newsError, setNewsError] = useState('');
   const [newsLoading, setNewsLoading] = useState(false);
+  const [readerArticle, setReaderArticle] = useState(null); // article passed to ArticleReaderModal
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -365,6 +366,11 @@ export default function HoldingDetailModal({ holding, onClose }) {
             loading={newsLoading}
             error={newsError}
             articles={news?.articles || []}
+            onOpen={(article) => setReaderArticle(article)}
+          />
+          <ArticleReaderModal
+            article={readerArticle}
+            onClose={() => setReaderArticle(null)}
           />
 
           {/* Stats grid */}
@@ -719,7 +725,11 @@ function LotSection({ ticker, lots, currentPrice, currency, canEdit, onChange, o
 // which hits newsapi.org server-side (cached 15 min). Returns null when there
 // are no articles and no error — we don't want a dead "Recent News" header
 // for obscure tickers newsapi has nothing on.
-function NewsSection({ loading, error, articles }) {
+//
+// Each card is a button that opens ArticleReaderModal in-app instead of
+// leaving for the publisher's site. The reader falls back to a clean link to
+// the original if extraction fails.
+function NewsSection({ loading, error, articles, onOpen }) {
   if (!loading && !error && (!articles || articles.length === 0)) return null;
   return (
     <div>
@@ -746,11 +756,10 @@ function NewsSection({ loading, error, articles }) {
         <ul className="space-y-2">
           {articles.map((a, i) => (
             <li key={i} className="rounded-lg border border-navy-100 bg-white">
-              <a
-                href={safeHref(a.url)}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-start gap-3 p-3 transition hover:bg-navy-50/40"
+              <button
+                type="button"
+                onClick={() => onOpen?.(a)}
+                className="flex w-full items-start gap-3 p-3 text-left transition hover:bg-navy-50/40"
               >
                 {a.imageUrl ? (
                   <img
@@ -789,12 +798,131 @@ function NewsSection({ loading, error, articles }) {
                     )}
                   </div>
                 </div>
-                <ExternalLink className="mt-1 h-3.5 w-3.5 shrink-0 text-navy-400" />
-              </a>
+              </button>
             </li>
           ))}
         </ul>
       )}
     </div>
+  );
+}
+
+// In-app reader for a news article. On open, fetches the extracted content
+// from /api/holdings/news/article?url= and renders sanitized HTML. A "Open
+// original" link is always offered as a fallback if extraction fails or the
+// user wants the publisher's full page.
+function ArticleReaderModal({ article, onClose }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!article?.url) return;
+    let cancelled = false;
+    setData(null);
+    setError('');
+    setLoading(true);
+    api
+      .get('/holdings/news/article', { params: { url: article.url } })
+      .then(({ data: d }) => {
+        if (!cancelled) setData(d);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.response?.data?.error || 'Failed to load article');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [article?.url]);
+
+  if (!article) return null;
+
+  return (
+    <Modal
+      open={!!article}
+      onClose={onClose}
+      title={data?.siteName || article.source || 'Article'}
+      size="xl"
+    >
+      <div className="space-y-4">
+        {/* Header */}
+        <div>
+          <h1 className="font-serif text-2xl font-semibold leading-snug text-navy md:text-3xl">
+            {data?.title || article.title}
+          </h1>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-navy-400">
+            {(data?.byline || article.author) && (
+              <span>By {data?.byline || article.author}</span>
+            )}
+            {article.publishedAt && (
+              <span>
+                · {format(new Date(article.publishedAt), 'MMM d, yyyy')}
+              </span>
+            )}
+            {article.source && <span>· {article.source}</span>}
+          </div>
+        </div>
+
+        {/* Hero image if present */}
+        {article.imageUrl && (
+          <img
+            src={article.imageUrl}
+            alt=""
+            className="w-full rounded-lg object-cover"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none';
+            }}
+          />
+        )}
+
+        {/* Body */}
+        {loading ? (
+          <div className="py-8 text-center text-sm text-navy-400">
+            Loading article…
+          </div>
+        ) : error ? (
+          <div className="space-y-2 rounded-lg border border-gold-300 bg-gold-100/40 p-4 text-sm">
+            <div className="font-semibold text-navy">Couldn't read this one inline.</div>
+            <div className="text-xs text-navy-400">
+              {error}. Some publisher pages block extraction (paywalls,
+              JavaScript-only content). You can still open the original:
+            </div>
+            <a
+              href={safeHref(article.url)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 rounded-lg border border-navy bg-white px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy hover:text-white"
+            >
+              <ExternalLink className="h-3 w-3" />
+              Open original
+            </a>
+          </div>
+        ) : data?.contentHtml ? (
+          <article
+            className="article-reader text-navy"
+            // Server sanitized via sanitize-html with a tight allowlist.
+            dangerouslySetInnerHTML={{ __html: data.contentHtml }}
+          />
+        ) : null}
+
+        {/* Footer link to original */}
+        {!error && data && (
+          <div className="border-t border-navy-50 pt-3">
+            <a
+              href={safeHref(article.url)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs font-semibold text-navy-400 hover:text-navy"
+            >
+              <ExternalLink className="h-3 w-3" />
+              Continue on {article.source || 'publisher site'}
+            </a>
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }

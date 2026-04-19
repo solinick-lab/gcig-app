@@ -7,6 +7,12 @@
 //
 // Query strategy: search for the company name in quotes + ticker context, and
 // pin to English. We sort by publishedAt and cap to 10 to keep payloads light.
+//
+// We also extract full article bodies server-side (see extractArticle below)
+// so members can read the whole story without leaving the app.
+import { JSDOM } from 'jsdom';
+import { Readability, isProbablyReaderable } from '@mozilla/readability';
+import sanitizeHtml from 'sanitize-html';
 
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 min — headlines don't change minute-to-minute
 const cache = new Map(); // key = ticker|name, value = { at, data }
@@ -85,5 +91,147 @@ export async function getNewsForTicker(ticker, name) {
     articles,
   };
   cache.set(ck, { at: Date.now(), data });
+  return data;
+}
+
+// ── Article extraction ─────────────────────────────────────────────────
+//
+// Fetches the article URL server-side (newsapi gives us the publisher URL),
+// parses it with JSDOM, runs Mozilla's Readability (same algorithm as
+// Firefox's reader view), then sanitizes the resulting HTML before returning
+// it to the client. Sanitization is non-negotiable because Readability hands
+// back whatever was on the page — including <script> and inline event
+// handlers in a worst case.
+//
+// Cache is separate from the headline cache, keyed by URL, 1-hour TTL. News
+// articles don't change after publish, so a longer TTL is safe.
+
+const articleCache = new Map();
+const ARTICLE_TTL_MS = 60 * 60 * 1000;
+const MAX_ARTICLE_BYTES = 2_000_000; // 2 MB ceiling on any fetched page
+
+// Very conservative allowlist. Semantic + inline formatting tags, plus links
+// and images. Everything else (scripts, iframes, forms, styles) is stripped.
+const SANITIZE_OPTS = {
+  allowedTags: [
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'p', 'br', 'hr',
+    'strong', 'b', 'em', 'i', 'u', 's', 'mark', 'small', 'sub', 'sup',
+    'ul', 'ol', 'li',
+    'blockquote', 'cite', 'q',
+    'figure', 'figcaption',
+    'img',
+    'a',
+    'span', 'div',
+    'pre', 'code',
+    'table', 'thead', 'tbody', 'tr', 'th', 'td',
+  ],
+  allowedAttributes: {
+    a: ['href', 'title'],
+    img: ['src', 'alt', 'title', 'width', 'height'],
+    '*': ['class'],
+  },
+  allowedSchemes: ['http', 'https', 'mailto'],
+  transformTags: {
+    // Open every surviving link in a new tab with safe rel.
+    a: (tagName, attribs) => ({
+      tagName: 'a',
+      attribs: {
+        ...attribs,
+        target: '_blank',
+        rel: 'noreferrer noopener',
+      },
+    }),
+  },
+};
+
+function isHttpUrl(raw) {
+  try {
+    const u = new URL(raw);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+export async function extractArticle(url) {
+  if (!isHttpUrl(url)) {
+    const err = new Error('Invalid article URL');
+    err.status = 400;
+    throw err;
+  }
+  const cached = articleCache.get(url);
+  if (cached && Date.now() - cached.at < ARTICLE_TTL_MS) {
+    return cached.data;
+  }
+
+  const res = await fetch(url, {
+    redirect: 'follow',
+    headers: {
+      // Publisher sites often gate bot-looking UAs. Present a normal browser.
+      'User-Agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9',
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
+  });
+  if (!res.ok) {
+    const err = new Error(`Publisher returned ${res.status}`);
+    err.status = 502;
+    throw err;
+  }
+  const ct = res.headers.get('content-type') || '';
+  if (!/text\/html|application\/xhtml/i.test(ct)) {
+    const err = new Error('Not an HTML page');
+    err.status = 415;
+    throw err;
+  }
+
+  // Read up to MAX_ARTICLE_BYTES. Some news sites serve surprisingly large
+  // pages (tracking SDKs, embedded videos). Cutting here bounds memory.
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > MAX_ARTICLE_BYTES) {
+      const err = new Error('Article page too large');
+      err.status = 413;
+      throw err;
+    }
+    chunks.push(value);
+  }
+  const html = Buffer.concat(chunks).toString('utf8');
+
+  const dom = new JSDOM(html, { url });
+  if (!isProbablyReaderable(dom.window.document)) {
+    const err = new Error('This page does not look like a readable article');
+    err.status = 422;
+    throw err;
+  }
+  const reader2 = new Readability(dom.window.document);
+  const parsed = reader2.parse();
+  if (!parsed || !parsed.content) {
+    const err = new Error('Could not extract the article');
+    err.status = 422;
+    throw err;
+  }
+
+  const safeContent = sanitizeHtml(parsed.content, SANITIZE_OPTS);
+
+  const data = {
+    url,
+    title: parsed.title || null,
+    byline: parsed.byline || null,
+    siteName: parsed.siteName || null,
+    excerpt: parsed.excerpt || null,
+    publishedTime: parsed.publishedTime || null,
+    length: parsed.length || null,
+    contentHtml: safeContent,
+    fetchedAt: new Date().toISOString(),
+  };
+  articleCache.set(url, { at: Date.now(), data });
   return data;
 }
