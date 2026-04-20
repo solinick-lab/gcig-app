@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
-import { CalendarDays, LineChart, CalendarRange, FileText, BookOpen } from 'lucide-react';
+import { CalendarDays, LineChart, CalendarRange, FileText, BookOpen, Sparkles } from 'lucide-react';
 import api from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
@@ -29,6 +29,20 @@ export default function Dashboard() {
         subtitle="Here's what's happening at the Investment Group today."
         actions={<RoleBadge role={user?.role} className="text-sm" />}
       />
+
+      {/* AI-generated week-in-review. Refreshes every few hours server-side;
+          hides cleanly if the LLM hasn't produced a text for this cycle yet. */}
+      {data?.weekInReview && (
+        <div className="mb-4 rounded-xl border border-gold-300 bg-gradient-to-br from-gold-100/60 to-white p-5 shadow-card">
+          <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gold-800">
+            <Sparkles className="h-4 w-4" />
+            The Week in Review
+          </div>
+          <p className="text-[15px] leading-relaxed text-navy">
+            {data.weekInReview}
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <Link to="/calendar" className="block transition hover:-translate-y-0.5 hover:shadow-card">

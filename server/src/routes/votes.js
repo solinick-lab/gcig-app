@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import prisma from '../db.js';
 import { verifyJwt, requireExecutive } from '../middleware/auth.js';
+import { summarizeVoteSession } from '../services/articleSummarizer.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -162,7 +163,23 @@ router.get('/:id', async (req, res) => {
   const tally = computeTally(session.ballots, allUsers);
   const myBallot = session.ballots.find((b) => b.userId === req.user.id) || null;
 
-  res.json({ ...session, tally, myBallot });
+  // Lazily generate the closed-session recap the first time anyone views a
+  // session after it closes. Saved on the row so future views just return
+  // the cached text. Fire-and-forget for the write so the response isn't
+  // held up by the LLM call on a cold model.
+  let synthesis = session.synthesis;
+  if (!synthesis && session.status !== 'open' && process.env.LOCAL_LLM_URL) {
+    synthesis = await summarizeVoteSession({ ...session, tally });
+    if (synthesis) {
+      prisma.votingSession
+        .update({ where: { id }, data: { synthesis } })
+        .catch((err) =>
+          console.warn('vote synthesis save failed:', err.message)
+        );
+    }
+  }
+
+  res.json({ ...session, tally, myBallot, synthesis });
 });
 
 // Create a new voting session (President only).

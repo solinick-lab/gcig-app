@@ -497,6 +497,18 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
                 {tally.totalWeightedVotes} of {tally.maxWeightedVotes} weighted votes cast
               </div>
             </div>
+            {/* AI recap of the session. Generated server-side the first
+                time someone opens the session after it closed. */}
+            {session.synthesis && (
+              <div className="mt-2 rounded-lg border border-gold-200 bg-gold-100/30 p-3">
+                <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gold-800">
+                  AI Recap
+                </div>
+                <p className="text-sm leading-relaxed text-navy">
+                  {session.synthesis}
+                </p>
+              </div>
+            )}
           </Card>
         )}
       </div>

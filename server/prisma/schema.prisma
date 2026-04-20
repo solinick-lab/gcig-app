@@ -171,6 +171,10 @@ model VotingSession {
   createdBy  Int
   creator    User      @relation("SessionCreator", fields: [createdBy], references: [id])
   closedAt   DateTime?
+  // LLM-generated 2-3 sentence recap of the closed session: tally, who
+  // supported, proposed allocation range, main concerns from notes.
+  // Lazily filled the first time someone views the session after it closes.
+  synthesis  String?
   ballots    Ballot[]
 
   @@index([createdAt])

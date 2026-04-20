@@ -146,6 +146,67 @@ function tickerCacheKey(ticker, articles) {
   return `${ticker}::${urls}`;
 }
 
+// ── Voting session recaps ─────────────────────────────────────────────
+
+const VOTE_SYSTEM_PROMPT = `You are summarizing the outcome of a closed voting session for a student-run investment club. Write 2-3 short sentences (max 70 words total) capturing:
+  - The final decision and weighted tally (e.g. "Club voted Buy 4-2").
+  - Who supported vs. opposed, noting if leadership (Presidents/CIO) and the general body aligned.
+  - If action = Buy, the proposed allocation range / average.
+  - Any recurring theme in the notes members left (valuation, timing, thesis concerns, etc.).
+
+Plain prose — no bullet points, no headers, no meta-commentary. If ballots are sparse (fewer than 3), return exactly: INSUFFICIENT`;
+
+export async function summarizeVoteSession(session) {
+  if (!session?.ballots?.length || session.ballots.length < 3) return null;
+  const payload = {
+    ticker: session.ticker,
+    title: session.title,
+    finalDecision: session.tally?.finalDecision,
+    weightedTally: session.tally?.weights,
+    generalBody: session.tally?.memberCounts,
+    leadership: (session.tally?.leadershipVotes || []).map((v) => ({
+      name: v.name,
+      role: v.role,
+      action: v.action,
+    })),
+    ballots: session.ballots.map((b) => ({
+      name: b.user?.name,
+      role: b.user?.role,
+      action: b.action,
+      amount: b.investmentAmount,
+      note: b.note,
+    })),
+    buyStats: session.tally?.buyAmountStats,
+  };
+  const out = await callChat(
+    VOTE_SYSTEM_PROMPT,
+    `Session:\n${JSON.stringify(payload, null, 2)}`
+  );
+  if (!out || out.trim() === 'INSUFFICIENT') return null;
+  const cleaned = out
+    .replace(/^["'“”]\s*|\s*["'“”]$/g, '')
+    .replace(/^\s*summary\s*:\s*/i, '')
+    .trim();
+  return cleaned.length >= 30 ? cleaned : null;
+}
+
+// ── Dashboard week-in-review ──────────────────────────────────────────
+
+const WIR_SYSTEM_PROMPT = `You are writing a one-paragraph weekly briefing for members of a student-run investment club. You will receive structured data about the last 7 days: new pitches, upcoming pitches, open/closed votes, portfolio performance, and the most material news from the club's holdings. Write ONE concise paragraph (max 90 words) that captures what happened, what's coming up, and how the portfolio did. Plain prose. No bullets, no headers. Reference specific tickers and names where relevant. Skip sections where data is empty rather than saying "no news" — silence is fine. If the input is nearly empty (nothing happened this week), return exactly: INSUFFICIENT`;
+
+export async function generateWeekInReview(payload) {
+  const out = await callChat(
+    WIR_SYSTEM_PROMPT,
+    JSON.stringify(payload, null, 2)
+  );
+  if (!out || out.trim() === 'INSUFFICIENT') return null;
+  const cleaned = out
+    .replace(/^["'“”]\s*|\s*["'“”]$/g, '')
+    .replace(/^\s*summary\s*:\s*/i, '')
+    .trim();
+  return cleaned.length >= 40 ? cleaned : null;
+}
+
 export async function summarizeTickerNews(ticker, articles) {
   if (!Array.isArray(articles) || articles.length < 3) return null;
   const key = tickerCacheKey(ticker, articles);
