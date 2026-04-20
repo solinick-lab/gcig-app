@@ -13,6 +13,7 @@
 import { JSDOM } from 'jsdom';
 import { Readability, isProbablyReaderable } from '@mozilla/readability';
 import sanitizeHtml from 'sanitize-html';
+import { rankArticles } from './articleRanker.js';
 
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 min — headlines don't change minute-to-minute
 const cache = new Map(); // key = ticker|name, value = { at, data }
@@ -101,7 +102,7 @@ export async function getNewsForTicker(ticker, name) {
     err.status = 502;
     throw err;
   }
-  const articles = (json.articles || [])
+  const rawArticles = (json.articles || [])
     .filter((a) => a.title && a.url)
     .map((a) => ({
       title: a.title,
@@ -113,10 +114,18 @@ export async function getNewsForTicker(ticker, name) {
       imageUrl: a.urlToImage || null,
     }));
 
+  // Best-effort rank via the local LLM. Returns articles unchanged if
+  // LOCAL_LLM_URL is unset or the call fails/times out. Ranking runs
+  // in-line so it's cached alongside the articles and not recomputed
+  // every request.
+  const articles = await rankArticles(rawArticles, { ticker });
+
   const data = {
     ticker,
     topic,
     fetchedAt: new Date().toISOString(),
+    // Client uses this to decide whether to show priority pills.
+    ranked: articles.some((a) => a.priority),
     articles,
   };
   cache.set(ck, { at: Date.now(), data });

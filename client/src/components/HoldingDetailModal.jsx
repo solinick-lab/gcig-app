@@ -765,7 +765,17 @@ function NewsSection({ loading, error, articles, topic, onOpen }) {
                 onClick={() => onOpen?.(a)}
                 className="flex w-full items-start gap-3 p-3 text-left transition hover:bg-navy-50/40"
               >
-                {a.imageUrl ? (
+                {/* Left rail: priority dot. Only rendered if the server
+                    did LLM-ranked the batch. Non-ranked articles show a
+                    neutral newsapi icon instead. */}
+                {a.priority ? (
+                  <PriorityDot priority={a.priority} />
+                ) : (
+                  <div className="hidden h-14 w-14 shrink-0 items-center justify-center rounded-md bg-navy-50 text-navy-400 sm:flex">
+                    <Newspaper className="h-5 w-5" />
+                  </div>
+                )}
+                {a.imageUrl && !a.priority ? (
                   <img
                     src={a.imageUrl}
                     alt=""
@@ -775,20 +785,23 @@ function NewsSection({ loading, error, articles, topic, onOpen }) {
                     }}
                     className="hidden h-14 w-14 shrink-0 rounded-md object-cover sm:block"
                   />
-                ) : (
-                  <div className="hidden h-14 w-14 shrink-0 items-center justify-center rounded-md bg-navy-50 text-navy-400 sm:flex">
-                    <Newspaper className="h-5 w-5" />
-                  </div>
-                )}
+                ) : null}
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold leading-snug text-navy line-clamp-2">
-                    {a.title}
+                  <div className="flex items-start gap-2">
+                    <div className="text-sm font-semibold leading-snug text-navy line-clamp-2 flex-1">
+                      {a.title}
+                    </div>
+                    {a.priority && <PriorityPill priority={a.priority} />}
                   </div>
-                  {a.description && (
+                  {a.reason ? (
+                    <div className="mt-1 text-xs italic text-navy-500 line-clamp-2">
+                      Why it matters: {a.reason}
+                    </div>
+                  ) : a.description ? (
                     <div className="mt-1 line-clamp-2 text-xs text-navy-400">
                       {a.description}
                     </div>
-                  )}
+                  ) : null}
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-navy-400">
                     {a.source && (
                       <span className="font-semibold uppercase tracking-wider text-navy">
@@ -808,6 +821,37 @@ function NewsSection({ loading, error, articles, topic, onOpen }) {
         </ul>
       )}
     </div>
+  );
+}
+
+// Small priority indicators used on ranked news cards.
+function PriorityDot({ priority }) {
+  const map = {
+    high: 'bg-red-500',
+    medium: 'bg-gold',
+    low: 'bg-navy-100',
+  };
+  return (
+    <div className="hidden h-14 w-14 shrink-0 items-center justify-center rounded-md bg-navy-50 sm:flex">
+      <span className={`h-3 w-3 rounded-full ${map[priority] || 'bg-navy-100'}`} />
+    </div>
+  );
+}
+
+function PriorityPill({ priority }) {
+  const map = {
+    high: 'bg-red-50 text-red-700 border-red-200',
+    medium: 'bg-gold-100 text-gold-800 border-gold-200',
+    low: 'bg-navy-50 text-navy-400 border-navy-100',
+  };
+  return (
+    <span
+      className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+        map[priority] || map.low
+      }`}
+    >
+      {priority}
+    </span>
   );
 }
 
