@@ -16,7 +16,7 @@
 //   OPENAI_MODEL          Defaults to gpt-4o-mini.
 
 const DEFAULT_LOCAL_MODEL = 'qwen2.5:14b-instruct-q4_K_M';
-const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
+const DEFAULT_OPENAI_MODEL = 'gpt-5-nano';
 const DEFAULT_TIMEOUT_MS = 25_000;
 
 function normalizeBase(raw) {
