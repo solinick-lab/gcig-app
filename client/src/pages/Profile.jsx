@@ -8,6 +8,7 @@ import {
   FileText,
   BookOpen,
 } from 'lucide-react';
+import { GoogleLogin } from '@react-oauth/google';
 import api from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
@@ -16,6 +17,8 @@ import RoleBadge from '../components/RoleBadge.jsx';
 import Button from '../components/Button.jsx';
 import TwoFactorPanel from '../components/TwoFactorPanel.jsx';
 
+const GOOGLE_ENABLED = !!import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
 export default function Profile() {
   const { user, logoutEverywhere, isAdvisory } = useAuth();
   const [stats, setStats] = useState(null);
@@ -23,6 +26,17 @@ export default function Profile() {
   const [form, setForm] = useState({ currentPassword: '', newPassword: '' });
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [authInfo, setAuthInfo] = useState(null);
+  const [googleMsg, setGoogleMsg] = useState({ kind: '', text: '' });
+
+  async function refreshAuthInfo() {
+    try {
+      const { data } = await api.get('/auth/me');
+      setAuthInfo(data);
+    } catch {
+      /* ignore */
+    }
+  }
 
   useEffect(() => {
     api.get('/attendance/mine').then((r) => setStats(r.data));
@@ -30,7 +44,37 @@ export default function Profile() {
       .get('/pitches/outcomes/mine')
       .then((r) => setMine(r.data))
       .catch(() => setMine({ rows: [], totalPitches: 0, totalReports: 0 }));
+    refreshAuthInfo();
   }, []);
+
+  async function linkGoogle(credential) {
+    setGoogleMsg({ kind: '', text: '' });
+    try {
+      await api.post('/auth/google/link', { credential });
+      setGoogleMsg({ kind: 'ok', text: 'Google account linked.' });
+      refreshAuthInfo();
+    } catch (err) {
+      setGoogleMsg({
+        kind: 'err',
+        text: err.response?.data?.error || 'Failed to link Google account',
+      });
+    }
+  }
+
+  async function unlinkGoogle() {
+    if (!confirm('Unlink your Google account?')) return;
+    setGoogleMsg({ kind: '', text: '' });
+    try {
+      await api.post('/auth/google/unlink');
+      setGoogleMsg({ kind: 'ok', text: 'Google account unlinked.' });
+      refreshAuthInfo();
+    } catch (err) {
+      setGoogleMsg({
+        kind: 'err',
+        text: err.response?.data?.error || 'Failed to unlink',
+      });
+    }
+  }
 
   const hasCoverageData =
     mine && ((mine.totalPitches ?? 0) > 0 || (mine.totalReports ?? 0) > 0);
@@ -41,8 +85,9 @@ export default function Profile() {
     setError('');
     try {
       await api.post('/auth/change-password', form);
-      setMessage('Password updated.');
+      setMessage(authInfo?.hasPassword === false ? 'Password set.' : 'Password updated.');
       setForm({ currentPassword: '', newPassword: '' });
+      refreshAuthInfo();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to change password');
     }
@@ -247,21 +292,76 @@ export default function Profile() {
         </div>
       )}
 
+      {GOOGLE_ENABLED && (
+        <div className="mt-6">
+          <Card title="Sign in with Google">
+            {authInfo?.googleLinked ? (
+              <div className="max-w-md space-y-3">
+                <p className="text-sm text-navy">
+                  Your Google account is linked. You can sign in with one click
+                  from the login page.
+                </p>
+                <Button variant="danger" onClick={unlinkGoogle}>
+                  Unlink Google
+                </Button>
+                {!authInfo?.hasPassword && (
+                  <p className="text-xs text-navy-400">
+                    You don't have a password set. Unlink only after setting one
+                    via Forgot Password, or you'll be locked out.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="max-w-md space-y-3">
+                <p className="text-sm text-navy">
+                  Link your Google account to skip the password on future logins.
+                  The Google email must match your account email.
+                </p>
+                <GoogleLogin
+                  onSuccess={(res) => res?.credential && linkGoogle(res.credential)}
+                  onError={() =>
+                    setGoogleMsg({ kind: 'err', text: 'Google prompt was cancelled' })
+                  }
+                  text="continue_with"
+                  shape="pill"
+                  theme="outline"
+                />
+              </div>
+            )}
+            {googleMsg.text && (
+              <div
+                className={`mt-3 rounded-lg px-3 py-2 text-sm ${
+                  googleMsg.kind === 'ok'
+                    ? 'bg-emerald-50 text-emerald-800'
+                    : 'bg-red-50 text-red-700'
+                }`}
+              >
+                {googleMsg.text}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
       <div className="mt-6">
-        <Card title="Change Password">
+        <Card title={authInfo?.hasPassword === false ? 'Set Password' : 'Change Password'}>
           <form onSubmit={handleChangePassword} className="max-w-md space-y-3">
+            {authInfo?.hasPassword !== false && (
+              <div>
+                <label className="block text-sm font-medium text-navy">Current Password</label>
+                <input
+                  type="password"
+                  required
+                  value={form.currentPassword}
+                  onChange={(e) => setForm({ ...form, currentPassword: e.target.value })}
+                  className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
+                />
+              </div>
+            )}
             <div>
-              <label className="block text-sm font-medium text-navy">Current Password</label>
-              <input
-                type="password"
-                required
-                value={form.currentPassword}
-                onChange={(e) => setForm({ ...form, currentPassword: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-navy">New Password</label>
+              <label className="block text-sm font-medium text-navy">
+                {authInfo?.hasPassword === false ? 'Password' : 'New Password'}
+              </label>
               <input
                 type="password"
                 required
@@ -282,7 +382,9 @@ export default function Profile() {
                 {error}
               </div>
             )}
-            <Button type="submit">Update Password</Button>
+            <Button type="submit">
+              {authInfo?.hasPassword === false ? 'Set Password' : 'Update Password'}
+            </Button>
           </form>
         </Card>
       </div>

@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
 import { Navigate, useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { GoogleLogin } from '@react-oauth/google';
 import { useAuth } from '../context/AuthContext.jsx';
 import Button from '../components/Button.jsx';
 
 const ALLOWED_DOMAIN = '@gcschool.org';
+const GOOGLE_ENABLED = !!import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
 export default function Login() {
-  const { user, login, signup, verify, resendCode, verifyTwoFactor } = useAuth();
+  const { user, login, signup, verify, resendCode, verifyTwoFactor, googleSignIn } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [mode, setMode] = useState('login'); // 'login' | 'signup' | 'verify' | '2fa'
@@ -37,6 +39,20 @@ export default function Login() {
   const codeRefs = useRef([]);
 
   if (user) return <Navigate to="/dashboard" replace />;
+
+  async function handleGoogleCredential(credential) {
+    setError('');
+    setMessage('');
+    setSubmitting(true);
+    try {
+      await googleSignIn(credential);
+      navigate('/dashboard');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Google sign-in failed');
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -412,6 +428,28 @@ export default function Login() {
                   ? 'Club members can sign in below.'
                   : `Self-signup is restricted to ${ALLOWED_DOMAIN} email addresses.`}
               </p>
+
+              {GOOGLE_ENABLED && (
+                <>
+                  <div className="mt-6 flex justify-center">
+                    <GoogleLogin
+                      onSuccess={(res) =>
+                        res?.credential && handleGoogleCredential(res.credential)
+                      }
+                      onError={() => setError('Google sign-in was cancelled or failed')}
+                      text={mode === 'login' ? 'signin_with' : 'signup_with'}
+                      shape="pill"
+                      theme="outline"
+                      width="320"
+                    />
+                  </div>
+                  <div className="mt-5 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-wider text-navy-300">
+                    <div className="flex-1 border-t border-navy-100" />
+                    or use email
+                    <div className="flex-1 border-t border-navy-100" />
+                  </div>
+                </>
+              )}
 
               <form
                 onSubmit={mode === 'login' ? handleLogin : handleSignup}

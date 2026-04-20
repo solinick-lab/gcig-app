@@ -35,7 +35,10 @@ model User {
   id                Int              @id @default(autoincrement())
   name              String
   email             String           @unique
-  passwordHash      String
+  // Nullable so Google-only signups don't need a local password. They can
+  // set one later via the forgot-password flow if they want dual login.
+  passwordHash      String?
+  googleId          String?          @unique
   role              Role
   extraRoles        Role[]           @default([])
   tokenVersion      Int              @default(0)

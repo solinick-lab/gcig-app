@@ -63,6 +63,13 @@ export function AuthProvider({ children }) {
     return res.data.user;
   }
 
+  async function googleSignIn(credential) {
+    const res = await api.post('/auth/google', { credential });
+    saveSession(res.data.token, res.data.user);
+    setUser(res.data.user);
+    return res.data.user;
+  }
+
   async function signup(name, email, password) {
     const res = await api.post('/auth/signup', { name, email, password });
     return res.data;
@@ -119,6 +126,7 @@ export function AuthProvider({ children }) {
         loading,
         login,
         verifyTwoFactor,
+        googleSignIn,
         signup,
         verify,
         resendCode,

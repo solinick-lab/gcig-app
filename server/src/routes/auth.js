@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
+import { OAuth2Client } from 'google-auth-library';
 import prisma from '../db.js';
 import { verifyJwt, issueJwt, serializeUser } from '../middleware/auth.js';
 import { authLimiter, codeLimiter } from '../middleware/rateLimit.js';
@@ -19,6 +20,30 @@ const router = Router();
 const ALLOWED_SIGNUP_DOMAIN = '@gcschool.org';
 const CODE_EXPIRY_MINUTES = 10;
 const RESET_EXPIRY_MINUTES = 30;
+
+// Lazily built so the server boots even without GOOGLE_CLIENT_ID set
+// (Google Sign-In just returns 503 until it's configured).
+let googleClient = null;
+function getGoogleClient() {
+  if (!process.env.GOOGLE_CLIENT_ID) return null;
+  if (!googleClient) googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+  return googleClient;
+}
+async function verifyGoogleCredential(credential) {
+  const client = getGoogleClient();
+  if (!client) return { error: 'not_configured' };
+  try {
+    const ticket = await client.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    if (!payload?.email_verified) return { error: 'email_not_verified' };
+    return { payload };
+  } catch (err) {
+    return { error: 'invalid_token', detail: err.message };
+  }
+}
 
 function generateCode() {
   return crypto.randomInt(100000, 999999).toString();
@@ -337,6 +362,163 @@ router.post('/login', authLimiter, async (req, res) => {
   });
 });
 
+// ── Sign in with Google ──────────────────────────────────────────────
+//
+// Three behaviors in one endpoint:
+//   1. If a User matches by googleId → sign in.
+//   2. If a User matches by email (no googleId yet) → auto-link and sign in.
+//   3. Otherwise, if the Google email ends in ALLOWED_SIGNUP_DOMAIN, create
+//      a new JuniorAnalyst account. Non-school emails are rejected.
+//
+// Google sign-in skips our local 2FA — Google enforces its own and the
+// credential has already been verified cryptographically.
+router.post('/google', authLimiter, async (req, res) => {
+  const { credential } = req.body || {};
+  if (!credential) {
+    return res.status(400).json({ error: 'Google credential required' });
+  }
+  const { payload, error } = await verifyGoogleCredential(credential);
+  if (error === 'not_configured') {
+    return res.status(503).json({ error: 'Google Sign-In is not configured on the server' });
+  }
+  if (error === 'email_not_verified') {
+    return res.status(403).json({ error: 'Your Google account email is not verified' });
+  }
+  if (error) {
+    await auditReq(req, 'google.verify_failed', 'user', null, { reason: error });
+    return res.status(401).json({ error: 'Could not verify Google credentials' });
+  }
+
+  const email = String(payload.email).toLowerCase();
+  const googleId = payload.sub;
+  const name = payload.name || email.split('@')[0];
+
+  let user = await prisma.user.findUnique({ where: { googleId } });
+
+  if (!user) {
+    const byEmail = await prisma.user.findUnique({ where: { email } });
+    if (byEmail) {
+      user = await prisma.user.update({
+        where: { id: byEmail.id },
+        data: { googleId },
+      });
+      await auditReq(
+        { ...req, user: { id: user.id, name: user.name, role: user.role } },
+        'google.auto_linked',
+        'user',
+        user.id
+      );
+    }
+  }
+
+  if (!user) {
+    if (!email.endsWith(ALLOWED_SIGNUP_DOMAIN)) {
+      await auditReq(req, 'google.signup_rejected', 'user', null, {
+        email,
+        reason: 'domain',
+      });
+      return res.status(403).json({
+        error: `Sign-in is restricted to ${ALLOWED_SIGNUP_DOMAIN} Google accounts.`,
+      });
+    }
+    user = await prisma.user.create({
+      data: {
+        name,
+        email,
+        googleId,
+        role: 'JuniorAnalyst',
+        // passwordHash omitted — Google-only users can set one later via forgot-password
+      },
+    });
+    await auditReq(
+      { ...req, user: { id: user.id, name: user.name, role: user.role } },
+      'google.signup_completed',
+      'user',
+      user.id
+    );
+  }
+
+  // Account lockout from password brute-forcing shouldn't block a verified
+  // Google sign-in, but we do clear the counters so the user isn't locked
+  // out after they come back to password login.
+  if (user.failedLogins > 0 || user.lockedUntil) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { failedLogins: 0, lockedUntil: null },
+    });
+  }
+
+  const token = issueJwt(user);
+  await auditReq(
+    { ...req, user: { id: user.id, name: user.name, role: user.role } },
+    'login.google',
+    'user',
+    user.id
+  );
+  trackLogin(user, req).catch((err) =>
+    console.error('trackLogin failed:', err.message)
+  );
+  res.json({ token, user: serializeUser(user) });
+});
+
+// Link a Google account to the currently-signed-in user. Requires the Google
+// email to match the account email so you can't accidentally (or maliciously)
+// link someone else's Google account.
+router.post('/google/link', verifyJwt, async (req, res) => {
+  const { credential } = req.body || {};
+  if (!credential) {
+    return res.status(400).json({ error: 'Google credential required' });
+  }
+  const { payload, error } = await verifyGoogleCredential(credential);
+  if (error === 'not_configured') {
+    return res.status(503).json({ error: 'Google Sign-In is not configured on the server' });
+  }
+  if (error === 'email_not_verified') {
+    return res.status(403).json({ error: 'Your Google account email is not verified' });
+  }
+  if (error) {
+    return res.status(401).json({ error: 'Could not verify Google credentials' });
+  }
+
+  const current = await prisma.user.findUnique({ where: { id: req.user.id } });
+  if (String(payload.email).toLowerCase() !== current.email.toLowerCase()) {
+    return res.status(403).json({
+      error: 'Google account email must match your GCIG account email.',
+    });
+  }
+
+  const claimed = await prisma.user.findFirst({
+    where: { googleId: payload.sub, NOT: { id: req.user.id } },
+  });
+  if (claimed) {
+    return res.status(409).json({
+      error: 'This Google account is already linked to another member.',
+    });
+  }
+
+  await prisma.user.update({
+    where: { id: req.user.id },
+    data: { googleId: payload.sub },
+  });
+  await auditReq(req, 'google.linked', 'user', req.user.id);
+  res.json({ ok: true });
+});
+
+router.post('/google/unlink', verifyJwt, async (req, res) => {
+  const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+  if (!user.passwordHash) {
+    return res.status(400).json({
+      error: 'Set a password first (via Forgot Password) so you can still sign in after unlinking.',
+    });
+  }
+  await prisma.user.update({
+    where: { id: req.user.id },
+    data: { googleId: null },
+  });
+  await auditReq(req, 'google.unlinked', 'user', req.user.id);
+  res.json({ ok: true });
+});
+
 router.post('/logout', async (_req, res) => {
   // Client is responsible for discarding its token.
   res.json({ ok: true });
@@ -443,21 +625,36 @@ router.get('/me', verifyJwt, async (req, res) => {
       twoFactorEnabled: true,
       twoFactorTotpEnabled: true,
       twoFactorEmailEnabled: true,
+      googleId: true,
+      passwordHash: true,
       createdAt: true,
     },
   });
   if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json({ ...user, ...serializeUser(user) });
+  const { googleId, passwordHash, ...safe } = user;
+  res.json({
+    ...safe,
+    ...serializeUser(user),
+    googleLinked: !!googleId,
+    hasPassword: !!passwordHash,
+  });
 });
 
 router.post('/change-password', verifyJwt, async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
-  if (!currentPassword || !newPassword || newPassword.length < 8) {
+  if (!newPassword || newPassword.length < 8) {
     return res.status(400).json({ error: 'New password must be at least 8 characters' });
   }
   const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-  const ok = await bcrypt.compare(currentPassword, user.passwordHash);
-  if (!ok) return res.status(401).json({ error: 'Current password incorrect' });
+  // Google-only accounts have no password yet — they can set one without
+  // a currentPassword, since Google sign-in already authenticated them.
+  if (user.passwordHash) {
+    if (!currentPassword) {
+      return res.status(400).json({ error: 'Current password required' });
+    }
+    const ok = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!ok) return res.status(401).json({ error: 'Current password incorrect' });
+  }
 
   const passwordHash = await bcrypt.hash(newPassword, 10);
   await prisma.user.update({
