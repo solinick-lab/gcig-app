@@ -93,7 +93,10 @@ async function loadPersistedRankings(urls) {
 }
 
 // Upsert a batch of freshly-ranked URLs. Fire-and-forget — never throws.
-async function persistRankings(items, model) {
+// `ticker` is the context the article was fetched under. Stamped on insert
+// only — if the same URL surfaces again under a different ticker later we
+// keep the original so the Week in Review filter stays stable.
+async function persistRankings(items, model, ticker) {
   if (!items.length) return;
   try {
     // Prisma's upsert doesn't batch; use a transaction of upserts so one
@@ -108,6 +111,7 @@ async function persistRankings(items, model) {
             score: it.score,
             reason: it.reason,
             model,
+            ticker: ticker || null,
           },
         })
       )
@@ -216,7 +220,7 @@ export async function rankArticles(articles, { ticker } = {}) {
 
     // Fire-and-forget save. We don't await because the response is already
     // assembled; the write happens while the client gets its data.
-    persistRankings(toPersist, model).catch(() => {});
+    persistRankings(toPersist, model, ticker).catch(() => {});
 
     return applyAndSort(articles, persisted);
   } catch (err) {

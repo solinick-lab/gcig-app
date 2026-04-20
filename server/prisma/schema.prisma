@@ -324,8 +324,13 @@ model ArticleRanking {
   // AI-generated summary of the article body, filled lazily the first time
   // anyone opens the reader for this URL.
   summary   String?
+  // Ticker this article was first fetched under. Set on insert, never
+  // overwritten on update. Used to exclude broad-market ETF news (VOO,
+  // QQQ, etc.) from club-wide summaries like Week in Review.
+  ticker    String?
   model     String?
   createdAt DateTime @default(now())
 
   @@index([createdAt])
+  @@index([ticker])
 }

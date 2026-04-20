@@ -14,6 +14,13 @@ router.use(verifyJwt);
 const WIR_TTL_MS = 3 * 60 * 60 * 1000;
 const wirCache = { at: 0, text: null };
 
+// Broad-market / sector ETFs whose "news" is category headlines rather than
+// company-specific reporting. Excluded from Week in Review — they'd otherwise
+// fill it with Samsung/iPhone/Bayonetta-style noise via QQQ's tech-category
+// feed or random Fed blurbs via VOO's business-category feed. Keep in sync
+// with TICKER_TOPIC_OVERRIDES in services/news.js.
+const BROAD_MARKET_TICKERS = ['VOO', 'VGT', 'QQQ', 'SPY', 'XLK', 'XLV'];
+
 // Build the structured payload the LLM summarizes. Kept small and factual;
 // the prose is the model's job.
 async function buildWeekInReviewPayload() {
@@ -48,15 +55,26 @@ async function buildWeekInReviewPayload() {
         orderBy: { date: 'asc' },
         select: { date: true, totalValue: true },
       }),
-      // Highest-scored news articles from the last ~7 days across any ticker.
+      // Highest-scored news from the past 7 days — but NOT from broad-market
+      // ETF lookups (VOO/QQQ/etc.). Those fetches use newsapi's category
+      // headlines (general market/tech news) which don't represent news about
+      // the club's actual holdings and would muddy the Week in Review.
+      //
+      // The OR clause preserves rows with a NULL ticker (legacy entries
+      // created before the ticker column existed) so pre-migration NVDA /
+      // AAPL / etc. rankings still surface.
       prisma.articleRanking.findMany({
         where: {
           score: { gte: 7 },
           createdAt: { gte: weekAgo },
+          OR: [
+            { ticker: null },
+            { ticker: { notIn: BROAD_MARKET_TICKERS } },
+          ],
         },
         orderBy: { score: 'desc' },
         take: 6,
-        select: { url: true, reason: true, score: true, summary: true },
+        select: { url: true, reason: true, score: true, summary: true, ticker: true },
       }),
     ]);
 
