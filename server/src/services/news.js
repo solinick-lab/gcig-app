@@ -18,8 +18,11 @@ import sanitizeHtml from 'sanitize-html';
 import { rankArticles } from './articleRanker.js';
 import { summarizeTickerNews, summarizeArticle } from './articleSummarizer.js';
 
-// 6 hours — news doesn't move fast enough to justify tighter refreshes.
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+// 24 hours — news doesn't move fast enough for a long-term-hold investment
+// club to justify tighter refreshes, and longer caching also means fewer
+// LLM calls for ranking + narrative generation. Finnhub could support more
+// frequent polling but there's no user-visible benefit.
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const cache = new Map(); // key = ticker|name, value = { at, data }
 
 function cacheKey(ticker, name) {
