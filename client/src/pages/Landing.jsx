@@ -167,8 +167,9 @@ function Premise() {
                 real, multi-year capital pool on behalf of the school community.
               </p>
               <p className="mt-6">
-                Day-to-day decisions are made by students elected and promoted
-                through the fund's own ranks. Oversight comes from the school
+                Day-to-day decisions are made by students appointed and
+                promoted through the fund's own ranks. Oversight comes from the
+                school
                 and from an advisory board of parent volunteers who work in
                 finance. The fund invests only in publicly traded US equities,
                 ETFs, and cash equivalents — no derivatives, no commodities, no
@@ -274,11 +275,11 @@ function Leadership() {
             </div>
             <div className="mt-2 h-px w-10 bg-navy" />
             <h2 className="mt-6 font-serif text-3xl font-semibold leading-tight text-navy md:text-4xl">
-              Elected from within the ranks.
+              Led from within the club.
             </h2>
             <p className="mt-4 font-serif text-lg leading-relaxed text-navy-500">
-              Day-to-day leadership of the fund is elected by the membership
-              and rotates annually.
+              Led by founding members, with new leadership appointed as the
+              fund grows.
             </p>
           </div>
         </Reveal>
