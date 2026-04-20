@@ -70,8 +70,13 @@ export default function Sidebar({ onNavigate }) {
             }}
           />
         </div>
-        <div className="text-center text-[11px] uppercase tracking-[0.15em] text-gold font-semibold">
-          Investment Group
+        <div className="text-center leading-tight">
+          <div className="font-serif text-lg font-semibold text-white">
+            The Griffin Fund
+          </div>
+          <div className="mt-1 text-[10px] uppercase tracking-[0.2em] text-gold font-semibold">
+            Grace Church School
+          </div>
         </div>
       </div>
 
