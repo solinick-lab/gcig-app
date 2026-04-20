@@ -3,6 +3,7 @@ import prisma from '../db.js';
 import { verifyJwt } from '../middleware/auth.js';
 import { getSheetPortfolio } from '../services/sheetPortfolio.js';
 import { generateWeekInReview } from '../services/articleSummarizer.js';
+import { getNewsForTicker } from '../services/news.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -26,7 +27,9 @@ const BROAD_MARKET_TICKERS = ['VOO', 'VGT', 'QQQ', 'SPY', 'XLK', 'XLV'];
 async function buildWeekInReviewPayload() {
   const now = new Date();
   const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const weekAhead = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  // Look 14 days ahead for "upcoming" pitches so the WIR surfaces items
+  // scheduled for the next club meeting even if it's ~10 days out.
+  const lookahead = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
 
   // Pull the sheet first so we can use the actual holding list to gate
   // which news articles are allowed into the summary. No point surfacing
@@ -49,6 +52,21 @@ async function buildWeekInReviewPayload() {
   } catch {
     /* sheet unreachable — heldTickers stays null and we fall back to the
        broad filter below. */
+  }
+
+  // Proactively fetch + rank news for each held ticker. Without this the
+  // ArticleRanking table only has entries for tickers users have manually
+  // clicked, which means the WIR news section is empty if nobody's been
+  // browsing. getNewsForTicker respects its own 15-minute memory cache
+  // and the persistent DB ranking cache, so this is cheap on warm runs.
+  if (heldTickers && heldTickers.length > 0) {
+    await Promise.all(
+      heldTickers.map((t) =>
+        getNewsForTicker(t).catch((err) => {
+          console.warn(`WIR: prefetch news for ${t} failed:`, err.message);
+        })
+      )
+    );
   }
 
   // News query: restrict to held tickers (or a safe fallback when the
@@ -77,7 +95,7 @@ async function buildWeekInReviewPayload() {
         select: { ticker: true, pitcherName: true, date: true, votedOutcome: true },
       }),
       prisma.pitch.findMany({
-        where: { date: { gt: now, lte: weekAhead } },
+        where: { date: { gt: now, lte: lookahead } },
         orderBy: { date: 'asc' },
         select: { ticker: true, pitcherName: true, date: true },
       }),
@@ -134,21 +152,61 @@ async function buildWeekInReviewPayload() {
 
 router.get('/', async (_req, res) => {
   const now = new Date();
-  const [nextPitch, upcomingEvents, recentPitches, recentEvents, recentReports] =
-    await Promise.all([
-      prisma.pitch.findFirst({
-        where: { date: { gte: now } },
-        orderBy: { date: 'asc' },
-      }),
-      prisma.event.findMany({
-        where: { date: { gte: now } },
-        orderBy: { date: 'asc' },
-        take: 3,
-      }),
-      prisma.pitch.findMany({ orderBy: { createdAt: 'desc' }, take: 3 }),
-      prisma.event.findMany({ orderBy: { createdAt: 'desc' }, take: 3 }),
-      prisma.report.findMany({ orderBy: { createdAt: 'desc' }, take: 3 }),
-    ]);
+  const lookaheadDays = 30;
+  const lookaheadEnd = new Date(now.getTime() + lookaheadDays * 24 * 60 * 60 * 1000);
+  const [
+    nextPitch,
+    upcomingEventsRaw,
+    upcomingPitchesRaw,
+    recentPitches,
+    recentEvents,
+    recentReports,
+  ] = await Promise.all([
+    prisma.pitch.findFirst({
+      where: { date: { gte: now } },
+      orderBy: { date: 'asc' },
+    }),
+    prisma.event.findMany({
+      where: { date: { gte: now, lte: lookaheadEnd } },
+      orderBy: { date: 'asc' },
+      take: 10,
+    }),
+    prisma.pitch.findMany({
+      where: { date: { gte: now, lte: lookaheadEnd } },
+      orderBy: { date: 'asc' },
+      take: 10,
+      include: { industry: { select: { name: true } } },
+    }),
+    prisma.pitch.findMany({ orderBy: { createdAt: 'desc' }, take: 3 }),
+    prisma.event.findMany({ orderBy: { createdAt: 'desc' }, take: 3 }),
+    prisma.report.findMany({ orderBy: { createdAt: 'desc' }, take: 3 }),
+  ]);
+
+  // Merge upcoming pitches into the Upcoming Events feed the dashboard
+  // renders. Pitches are projected into the same {id, title, date, location}
+  // shape the client already expects, with a `kind` discriminator so the
+  // UI can style them differently later if it wants.
+  const upcomingEvents = [
+    ...upcomingEventsRaw.map((e) => ({
+      id: `event-${e.id}`,
+      kind: 'event',
+      title: e.title,
+      date: e.date,
+      location: e.location || null,
+    })),
+    ...upcomingPitchesRaw.map((p) => {
+      const presenter = p.pitcherName || p.industry?.name || 'TBD';
+      return {
+        id: `pitch-${p.id}`,
+        kind: 'pitch',
+        title: `${p.ticker} pitch — ${presenter}`,
+        date: p.date,
+        location: p.location || null,
+      };
+    }),
+  ]
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .slice(0, 5);
 
   // Count holdings from the sheet (source of truth). Fail soft.
   let holdingsCount = 0;
