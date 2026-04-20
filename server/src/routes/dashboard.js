@@ -69,22 +69,23 @@ async function buildWeekInReviewPayload() {
     );
   }
 
-  // News query: restrict to held tickers (or a safe fallback when the
-  // sheet is unreachable), then take the top-ranked items regardless of
-  // absolute score. Rationale: on quiet weeks there may not be any 8+
-  // articles — rather than silencing news entirely, we surface the most
-  // material stories available. The LLM is told (see summarizer prompt)
-  // that topNews is sorted by materiality and to prioritize the first
-  // entries, so low-score items at the bottom naturally get less airtime.
+  // News query: restrict to held tickers (or a safe fallback), then take
+  // the top-ranked items we've ever classified — no hard date bound, no
+  // hard score floor. Rationale: for thinly-covered holdings (MLAB, GD,
+  // NOC, etc.) legitimately material news can be weeks old and score
+  // 5-6 rather than 8+. Silencing news entirely made the WIR feel empty.
   //
-  // Hard floor at 4 — anything below that is genuinely noise (puff
-  // pieces, ticker collisions) and shouldn't appear even on a slow week.
+  // The summarizer prompt is calibrated so the LLM de-emphasizes
+  // low-score items (anything below 6 gets at most half a clause) and
+  // can skip them if the set is thin. Score-ordering is preserved via
+  // orderBy so the best-available news always leads.
   const newsWhere = {
-    score: { gte: 4 },
-    createdAt: { gte: weekAgo },
     ...(heldTickers && heldTickers.length > 0
       ? { ticker: { in: heldTickers } }
       : { ticker: { not: null, notIn: BROAD_MARKET_TICKERS } }),
+    // Include only rows the ranker actually scored — legacy priority-only
+    // rows would inject noise we can't rank-order properly.
+    score: { not: null },
   };
 
   const [newPitches, upcomingPitches, openVotes, closedVotes, snapshots, topNews] =
