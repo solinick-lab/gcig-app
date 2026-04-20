@@ -111,3 +111,58 @@ export async function llmChat({ messages, temperature, jsonMode } = {}) {
 
   return null;
 }
+
+// Live health check of each configured provider. Returns per-provider
+// { configured, ok, latencyMs, error } plus an `active` field — the provider
+// that would serve the next request (first reachable in priority order).
+// Short timeout on purpose: this drives a UI that shouldn't hang.
+export async function probeProviders({ timeoutMs = 6000 } = {}) {
+  const status = {
+    local: { configured: !!process.env.LOCAL_LLM_URL, ok: false, latencyMs: null, error: null, model: null },
+    openai: { configured: !!process.env.OPENAI_API_KEY, ok: false, latencyMs: null, error: null, model: null },
+    active: null,
+  };
+
+  const ping = { messages: [{ role: 'user', content: 'ok' }] };
+
+  if (status.local.configured) {
+    const t = Date.now();
+    const r = await callEndpoint({
+      endpoint: `${normalizeBase(process.env.LOCAL_LLM_URL)}/chat/completions`,
+      apiKey: process.env.LOCAL_LLM_API_KEY,
+      model: process.env.LOCAL_LLM_MODEL || DEFAULT_LOCAL_MODEL,
+      messages: ping.messages,
+      temperature: 0,
+      timeoutMs,
+    });
+    status.local.latencyMs = Date.now() - t;
+    status.local.model = process.env.LOCAL_LLM_MODEL || DEFAULT_LOCAL_MODEL;
+    if (r.ok) {
+      status.local.ok = true;
+    } else {
+      status.local.error = r.status ? `HTTP ${r.status}` : r.error?.message || 'unreachable';
+    }
+  }
+
+  if (status.openai.configured) {
+    const t = Date.now();
+    const r = await callEndpoint({
+      endpoint: 'https://api.openai.com/v1/chat/completions',
+      apiKey: process.env.OPENAI_API_KEY,
+      model: process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
+      messages: ping.messages,
+      temperature: 0,
+      timeoutMs,
+    });
+    status.openai.latencyMs = Date.now() - t;
+    status.openai.model = process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
+    if (r.ok) {
+      status.openai.ok = true;
+    } else {
+      status.openai.error = r.status ? `HTTP ${r.status}` : r.error?.message || 'unreachable';
+    }
+  }
+
+  status.active = status.local.ok ? 'local' : status.openai.ok ? 'openai' : null;
+  return status;
+}
