@@ -1,12 +1,14 @@
-// Thin wrapper around newsapi.org. Returns a normalized list of articles for
-// a ticker, cached in memory so repeat clicks on the same holding don't burn
-// free-tier quota.
+// News service backed by Finnhub. Returns a normalized list of articles for
+// a ticker, cached in memory so repeat clicks don't burn quota.
 //
-// Free tier is 100 requests/day and disallows browser-origin calls, so we
-// ALWAYS call from the server — the client talks to /api/holdings/news/:ticker.
+// We picked Finnhub over newsapi.org because:
+//   - Free tier is 60 req/minute with NO daily cap (newsapi = 100/day)
+//   - Financial-news-only → fewer irrelevant hits (no Bayonetta for QQQ)
+//   - Same API key already powers /holdings/info quote lookups
 //
-// Query strategy: search for the company name in quotes + ticker context, and
-// pin to English. We sort by publishedAt and cap to 10 to keep payloads light.
+// Endpoints:
+//   /company-news?symbol=AAPL&from=YYYY-MM-DD&to=YYYY-MM-DD   per-ticker
+//   /news?category=general                                     market-wide
 //
 // We also extract full article bodies server-side (see extractArticle below)
 // so members can read the whole story without leaving the app.
@@ -16,9 +18,7 @@ import sanitizeHtml from 'sanitize-html';
 import { rankArticles } from './articleRanker.js';
 import { summarizeTickerNews, summarizeArticle } from './articleSummarizer.js';
 
-// 6 hours — newsapi developer tier caps at 100 req/day, and holding news
-// doesn't move fast enough to justify tighter refreshes. Week in Review
-// refreshes on its own schedule regardless of this cache.
+// 6 hours — news doesn't move fast enough to justify tighter refreshes.
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const cache = new Map(); // key = ticker|name, value = { at, data }
 
@@ -26,47 +26,87 @@ function cacheKey(ticker, name) {
   return `${ticker}|${name || ''}`.toLowerCase();
 }
 
-// newsapi.org accepts a reasonably rich query syntax. We want articles about
-// the company, not unrelated ticker collisions ("AI" the ticker vs. the field).
-// Quoting the name and OR-ing with a "ticker: TSLA" style hint avoids most noise.
-function buildQuery(ticker, name) {
-  const safeName = (name || '').replace(/"/g, '').trim();
-  if (safeName) return `"${safeName}"`;
-  return ticker;
+// Format a JS date as YYYY-MM-DD for Finnhub's from/to params.
+function isoDate(d) {
+  return d.toISOString().slice(0, 10);
 }
 
-// Some tickers are broad-market or sector ETFs where "news about Vanguard
-// S&P 500 ETF" isn't what a member actually wants to read. For these we
-// switch to newsapi's top-headlines endpoint scoped to a topical category
-// so VOO readers see actual market news and QQQ readers see actual tech
-// news. Expand this map as other sector ETFs enter the portfolio.
+// Broad-market / sector ETFs that should use the general market feed rather
+// than per-symbol company news. Finnhub's "general" category is the curated
+// financial headlines stream — better than trying to search for "news about
+// the SPDR S&P 500 ETF", which mostly returns fund-mechanics articles.
 const TICKER_TOPIC_OVERRIDES = {
-  VOO: { category: 'business', topic: 'Market news' },
-  SPY: { category: 'business', topic: 'Market news' },
-  QQQ: { category: 'technology', topic: 'Tech news' },
-  XLK: { category: 'technology', topic: 'Tech news' },
-  XLV: { category: 'health', topic: 'Healthcare news' },
+  VOO: { topic: 'Market news' },
+  SPY: { topic: 'Market news' },
+  QQQ: { topic: 'Market news' },
+  VGT: { topic: 'Market news' },
+  XLK: { topic: 'Market news' },
+  XLV: { topic: 'Market news' },
 };
 
+// Pull 12 normalized articles from Finnhub. Throws with .status on error.
+async function fetchFinnhubArticles(ticker, key) {
+  const override = TICKER_TOPIC_OVERRIDES[ticker];
+  let url;
+  if (override) {
+    url = `https://finnhub.io/api/v1/news?category=general&token=${encodeURIComponent(key)}`;
+  } else {
+    const to = new Date();
+    const from = new Date(to.getTime() - 14 * 24 * 60 * 60 * 1000);
+    const params = new URLSearchParams({
+      symbol: ticker,
+      from: isoDate(from),
+      to: isoDate(to),
+      token: key,
+    });
+    url = `https://finnhub.io/api/v1/company-news?${params.toString()}`;
+  }
+
+  const res = await fetch(url, { headers: { 'User-Agent': 'GCIG/1.0' } });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    const err = new Error(`finnhub responded ${res.status}: ${body.slice(0, 200)}`);
+    err.status = res.status === 429 ? 429 : 502;
+    throw err;
+  }
+  const json = await res.json();
+  const raw = Array.isArray(json) ? json : [];
+
+  // Normalize to the shape the rest of the pipeline expects. Finnhub
+  // delivers: { headline, summary, url, source, datetime (unix seconds),
+  // image, id, category, related }. Dedupe by URL — Finnhub occasionally
+  // returns the same article under multiple sources.
+  const seen = new Set();
+  return raw
+    .filter((a) => a.headline && a.url && !seen.has(a.url) && seen.add(a.url))
+    .sort((a, b) => (b.datetime || 0) - (a.datetime || 0))
+    .slice(0, 12)
+    .map((a) => ({
+      title: a.headline,
+      description: a.summary || null,
+      url: a.url,
+      source: a.source || null,
+      author: null,
+      publishedAt: a.datetime ? new Date(a.datetime * 1000).toISOString() : null,
+      imageUrl: a.image || null,
+    }));
+}
+
 export async function getNewsForTicker(ticker, name) {
-  const key = process.env.NEWS_API_KEY;
+  const key = process.env.FINNHUB_API_KEY;
   if (!key) {
-    const err = new Error('NEWS_API_KEY is not set');
+    const err = new Error('FINNHUB_API_KEY is not set');
     err.status = 501;
     throw err;
   }
   const ck = cacheKey(ticker, name);
   const cached = cache.get(ck);
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
-    // If the cached batch was fetched while the LLM was unreachable (e.g.
-    // the tunnel was down), it'll be sitting here unranked for 15 minutes.
-    // Try to rank it again on cache hit — the ranker is cheap when every
-    // URL is already in the ArticleRanking DB, and will retry the LLM for
-    // the unknown ones if it's now available.
+    // If the cached batch was fetched while the LLM was unreachable, try to
+    // rank it again on cache hit — cheap when every URL is already in the
+    // ArticleRanking DB, and will retry the LLM for the unknown ones.
     const data = cached.data;
-    const hasRankings = data.articles.some(
-      (a) => typeof a.score === 'number'
-    );
+    const hasRankings = data.articles.some((a) => typeof a.score === 'number');
     if (!hasRankings && process.env.LOCAL_LLM_URL) {
       try {
         const retried = await rankArticles(data.articles, { ticker });
@@ -83,66 +123,19 @@ export async function getNewsForTicker(ticker, name) {
   }
 
   const override = TICKER_TOPIC_OVERRIDES[ticker];
-  let url;
-  let topic = null;
-  if (override) {
-    // top-headlines is curated by newsapi, so we just ask for US + category.
-    // Everything endpoint's free-text search for "market news" returns a mess.
-    const params = new URLSearchParams({
-      country: 'us',
-      category: override.category,
-      pageSize: '12',
-    });
-    url = `https://newsapi.org/v2/top-headlines?${params.toString()}`;
-    topic = override.topic;
-  } else {
-    const q = buildQuery(ticker, name);
-    const params = new URLSearchParams({
-      q,
-      language: 'en',
-      sortBy: 'publishedAt',
-      pageSize: '12',
-    });
-    url = `https://newsapi.org/v2/everything?${params.toString()}`;
-  }
+  const topic = override?.topic || null;
 
-  const res = await fetch(url, {
-    headers: {
-      'X-Api-Key': key,
-      // newsapi rejects requests without a User-Agent from some hosts.
-      'User-Agent': 'GCIG/1.0',
-    },
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    // On 429 (rate limit) — serve stale cache if we have one, flagged so the
+  let rawArticles;
+  try {
+    rawArticles = await fetchFinnhubArticles(ticker, key);
+  } catch (err) {
+    // On 429 (rate limit) serve stale cache if we have one, flagged so the
     // UI can say "news may be outdated". Better than a blank panel.
-    if (res.status === 429 && cached) {
+    if (err.status === 429 && cached) {
       return { ...cached.data, stale: true, staleReason: 'rate_limit' };
     }
-    const err = new Error(
-      `newsapi responded ${res.status}: ${body.slice(0, 200)}`
-    );
-    err.status = 502;
     throw err;
   }
-  const json = await res.json();
-  if (json.status !== 'ok') {
-    const err = new Error(json.message || 'newsapi error');
-    err.status = 502;
-    throw err;
-  }
-  const rawArticles = (json.articles || [])
-    .filter((a) => a.title && a.url)
-    .map((a) => ({
-      title: a.title,
-      description: a.description || null,
-      url: a.url,
-      source: a.source?.name || null,
-      author: a.author || null,
-      publishedAt: a.publishedAt || null,
-      imageUrl: a.urlToImage || null,
-    }));
 
   // Best-effort rank via the local LLM. Returns articles unchanged if
   // LOCAL_LLM_URL is unset or the call fails/times out. Ranking runs
