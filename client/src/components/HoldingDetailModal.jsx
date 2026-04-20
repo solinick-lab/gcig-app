@@ -777,13 +777,13 @@ function NewsSection({ loading, error, articles, topic, narrative, onOpen }) {
                 onClick={() => onOpen?.(a)}
                 className="flex w-full items-start gap-3 p-3 text-left transition hover:bg-navy-50/40"
               >
-                {/* Left rail: numeric score tile. Only rendered if the
-                    server LLM-ranked the batch. Non-ranked articles show
-                    a neutral newsapi icon instead. */}
+                {/* Left rail: numeric score tile. Shown on every screen size
+                    so mobile users still get the color-coded priority at a
+                    glance. Non-ranked articles show a neutral newsapi icon. */}
                 {typeof a.score === 'number' ? (
                   <ScoreTile score={a.score} />
                 ) : (
-                  <div className="hidden h-14 w-14 shrink-0 items-center justify-center rounded-md bg-navy-50 text-navy-400 sm:flex">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-navy-50 text-navy-400 sm:h-14 sm:w-14">
                     <Newspaper className="h-5 w-5" />
                   </div>
                 )}
@@ -835,9 +835,9 @@ function NewsSection({ loading, error, articles, topic, narrative, onOpen }) {
   );
 }
 
-// 14×14 square showing the article's 0-10 materiality score. Background
-// shifts from grey (low) to red (high) via gold in the middle so members
-// can triage a batch at a glance.
+// Colored tile showing the article's 0-10 materiality score. Responsive
+// size: 44×44 on phones, 56×56 on desktop. Color shifts from grey (low)
+// to red (high) through gold so members can triage a batch at a glance.
 function ScoreTile({ score }) {
   // Clamp into [0, 10] so weird inputs don't break color math.
   const s = Math.max(0, Math.min(10, score));
@@ -853,13 +853,13 @@ function ScoreTile({ score }) {
       : 'bg-navy-50 text-navy-400';
   return (
     <div
-      className={`hidden h-14 w-14 shrink-0 flex-col items-center justify-center rounded-md sm:flex ${tone}`}
+      className={`flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-md sm:h-14 sm:w-14 ${tone}`}
       title={`Materiality ${s.toFixed(1)} / 10`}
     >
-      <span className="text-lg font-bold leading-none tabular-nums">
+      <span className="text-sm font-bold leading-none tabular-nums sm:text-lg">
         {s.toFixed(1)}
       </span>
-      <span className="mt-0.5 text-[8px] uppercase tracking-widest opacity-70">
+      <span className="mt-0.5 text-[7px] uppercase tracking-widest opacity-70 sm:text-[8px]">
         / 10
       </span>
     </div>

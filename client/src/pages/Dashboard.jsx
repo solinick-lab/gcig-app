@@ -30,15 +30,15 @@ export default function Dashboard() {
         actions={<RoleBadge role={user?.role} className="text-sm" />}
       />
 
-      {/* AI-generated week-in-review. Refreshes every few hours server-side;
+      {/* AI-generated week-in-review. Refreshes every few days server-side;
           hides cleanly if the LLM hasn't produced a text for this cycle yet. */}
       {data?.weekInReview && (
-        <div className="mb-4 rounded-xl border border-gold-300 bg-gradient-to-br from-gold-100/60 to-white p-5 shadow-card">
-          <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gold-800">
+        <div className="mb-4 rounded-xl border border-gold-300 bg-gradient-to-br from-gold-100/60 to-white p-4 shadow-card md:p-5">
+          <div className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-gold-800 md:text-xs">
             <Sparkles className="h-4 w-4" />
             The Week in Review
           </div>
-          <p className="text-[15px] leading-relaxed text-navy">
+          <p className="text-[14px] leading-relaxed text-navy md:text-[15px]">
             {data.weekInReview}
           </p>
         </div>
