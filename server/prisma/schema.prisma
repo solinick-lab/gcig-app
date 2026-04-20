@@ -302,3 +302,19 @@ model HoldingLot {
 
   @@index([ticker])
 }
+
+// LLM-generated priority tag for a news article, keyed by URL. Lets us skip
+// re-ranking articles we've already classified — articles don't change after
+// publish, so the classification is stable. One row per unique URL. `model`
+// records which local model generated the tag; useful for invalidation later
+// (e.g. clear rows where model = '3b' after upgrading to 14b).
+model ArticleRanking {
+  id        Int      @id @default(autoincrement())
+  url       String   @unique
+  priority  String   // 'high' | 'medium' | 'low'
+  reason    String?
+  model     String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
