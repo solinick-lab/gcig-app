@@ -14,6 +14,7 @@ import { JSDOM } from 'jsdom';
 import { Readability, isProbablyReaderable } from '@mozilla/readability';
 import sanitizeHtml from 'sanitize-html';
 import { rankArticles } from './articleRanker.js';
+import { summarizeTickerNews, summarizeArticle } from './articleSummarizer.js';
 
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 min — headlines don't change minute-to-minute
 const cache = new Map(); // key = ticker|name, value = { at, data }
@@ -120,12 +121,17 @@ export async function getNewsForTicker(ticker, name) {
   // every request.
   const articles = await rankArticles(rawArticles, { ticker });
 
+  // Ticker-level narrative. Summarizer caches by URL set so repeat
+  // fetches don't re-call the LLM.
+  const narrative = await summarizeTickerNews(ticker, articles);
+
   const data = {
     ticker,
     topic,
     fetchedAt: new Date().toISOString(),
-    // Client uses this to decide whether to show priority pills.
-    ranked: articles.some((a) => a.priority),
+    // Client uses this to decide whether to show score badges.
+    ranked: articles.some((a) => typeof a.score === 'number'),
+    narrative,
     articles,
   };
   cache.set(ck, { at: Date.now(), data });
@@ -259,6 +265,11 @@ export async function extractArticle(url) {
 
   const safeContent = sanitizeHtml(parsed.content, SANITIZE_OPTS);
 
+  // Generate / load the AI summary for this article. Cached in DB so
+  // subsequent opens don't re-summarize. Best-effort; null if LLM off.
+  const plain = parsed.textContent || ''; // Readability gives clean plain text separately
+  const summary = await summarizeArticle(url, plain);
+
   const data = {
     url,
     title: parsed.title || null,
@@ -268,6 +279,7 @@ export async function extractArticle(url) {
     publishedTime: parsed.publishedTime || null,
     length: parsed.length || null,
     contentHtml: safeContent,
+    summary,
     fetchedAt: new Date().toISOString(),
   };
   articleCache.set(url, { at: Date.now(), data });

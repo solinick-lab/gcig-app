@@ -311,8 +311,15 @@ model HoldingLot {
 model ArticleRanking {
   id        Int      @id @default(autoincrement())
   url       String   @unique
-  priority  String   // 'high' | 'medium' | 'low'
+  // Legacy tier tag ('high' | 'medium' | 'low'). Nullable for backwards
+  // compat with rows written before the score column existed.
+  priority  String?
+  // Current-gen ranking: 0.0–10.0 with one decimal. Higher = more material.
+  score     Float?
   reason    String?
+  // AI-generated summary of the article body, filled lazily the first time
+  // anyone opens the reader for this URL.
+  summary   String?
   model     String?
   createdAt DateTime @default(now())
 

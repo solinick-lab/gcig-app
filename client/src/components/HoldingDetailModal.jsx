@@ -367,6 +367,7 @@ export default function HoldingDetailModal({ holding, onClose }) {
             error={newsError}
             articles={news?.articles || []}
             topic={news?.topic || null}
+            narrative={news?.narrative || null}
             onOpen={(article) => setReaderArticle(article)}
           />
           <ArticleReaderModal
@@ -730,7 +731,7 @@ function LotSection({ ticker, lots, currentPrice, currency, canEdit, onChange, o
 // Each card is a button that opens ArticleReaderModal in-app instead of
 // leaving for the publisher's site. The reader falls back to a clean link to
 // the original if extraction fails.
-function NewsSection({ loading, error, articles, topic, onOpen }) {
+function NewsSection({ loading, error, articles, topic, narrative, onOpen }) {
   if (!loading && !error && (!articles || articles.length === 0)) return null;
   // For broad-market / sector ETFs the server swaps in curated category
   // headlines; `topic` tells the UI what to advertise instead of the default.
@@ -748,6 +749,17 @@ function NewsSection({ loading, error, articles, topic, onOpen }) {
           </span>
         )}
       </div>
+
+      {/* Ticker-level narrative synthesized from the headlines. Shown above
+          the article list so members see the overall vibe before diving in. */}
+      {narrative && (
+        <div className="mb-3 rounded-lg border border-gold-200 bg-gold-100/30 px-3 py-2">
+          <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gold-800">
+            AI News Summary
+          </div>
+          <p className="text-sm leading-relaxed text-navy">{narrative}</p>
+        </div>
+      )}
       {loading ? (
         <div className="rounded-lg border border-navy-100 bg-white p-3 text-xs text-navy-400">
           Loading headlines…
@@ -765,17 +777,17 @@ function NewsSection({ loading, error, articles, topic, onOpen }) {
                 onClick={() => onOpen?.(a)}
                 className="flex w-full items-start gap-3 p-3 text-left transition hover:bg-navy-50/40"
               >
-                {/* Left rail: priority dot. Only rendered if the server
-                    did LLM-ranked the batch. Non-ranked articles show a
-                    neutral newsapi icon instead. */}
-                {a.priority ? (
-                  <PriorityDot priority={a.priority} />
+                {/* Left rail: numeric score tile. Only rendered if the
+                    server LLM-ranked the batch. Non-ranked articles show
+                    a neutral newsapi icon instead. */}
+                {typeof a.score === 'number' ? (
+                  <ScoreTile score={a.score} />
                 ) : (
                   <div className="hidden h-14 w-14 shrink-0 items-center justify-center rounded-md bg-navy-50 text-navy-400 sm:flex">
                     <Newspaper className="h-5 w-5" />
                   </div>
                 )}
-                {a.imageUrl && !a.priority ? (
+                {a.imageUrl && typeof a.score !== 'number' ? (
                   <img
                     src={a.imageUrl}
                     alt=""
@@ -791,7 +803,6 @@ function NewsSection({ loading, error, articles, topic, onOpen }) {
                     <div className="text-sm font-semibold leading-snug text-navy line-clamp-2 flex-1">
                       {a.title}
                     </div>
-                    {a.priority && <PriorityPill priority={a.priority} />}
                   </div>
                   {a.reason ? (
                     <div className="mt-1 text-xs italic text-navy-500 line-clamp-2">
@@ -824,34 +835,34 @@ function NewsSection({ loading, error, articles, topic, onOpen }) {
   );
 }
 
-// Small priority indicators used on ranked news cards.
-function PriorityDot({ priority }) {
-  const map = {
-    high: 'bg-red-500',
-    medium: 'bg-gold',
-    low: 'bg-navy-100',
-  };
+// 14×14 square showing the article's 0-10 materiality score. Background
+// shifts from grey (low) to red (high) via gold in the middle so members
+// can triage a batch at a glance.
+function ScoreTile({ score }) {
+  // Clamp into [0, 10] so weird inputs don't break color math.
+  const s = Math.max(0, Math.min(10, score));
+  const tone =
+    s >= 8.5
+      ? 'bg-red-600 text-white'
+      : s >= 7
+      ? 'bg-red-500 text-white'
+      : s >= 5.5
+      ? 'bg-gold text-navy'
+      : s >= 4
+      ? 'bg-gold-200 text-navy'
+      : 'bg-navy-50 text-navy-400';
   return (
-    <div className="hidden h-14 w-14 shrink-0 items-center justify-center rounded-md bg-navy-50 sm:flex">
-      <span className={`h-3 w-3 rounded-full ${map[priority] || 'bg-navy-100'}`} />
-    </div>
-  );
-}
-
-function PriorityPill({ priority }) {
-  const map = {
-    high: 'bg-red-50 text-red-700 border-red-200',
-    medium: 'bg-gold-100 text-gold-800 border-gold-200',
-    low: 'bg-navy-50 text-navy-400 border-navy-100',
-  };
-  return (
-    <span
-      className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
-        map[priority] || map.low
-      }`}
+    <div
+      className={`hidden h-14 w-14 shrink-0 flex-col items-center justify-center rounded-md sm:flex ${tone}`}
+      title={`Materiality ${s.toFixed(1)} / 10`}
     >
-      {priority}
-    </span>
+      <span className="text-lg font-bold leading-none tabular-nums">
+        {s.toFixed(1)}
+      </span>
+      <span className="mt-0.5 text-[8px] uppercase tracking-widest opacity-70">
+        / 10
+      </span>
+    </div>
   );
 }
 
@@ -924,6 +935,18 @@ function ArticleReaderModal({ article, onClose }) {
               e.currentTarget.style.display = 'none';
             }}
           />
+        )}
+
+        {/* AI summary of the article body, generated server-side the first
+            time this URL is opened and persisted for subsequent readers. */}
+        {data?.summary && (
+          <aside className="rounded-lg border border-gold-200 bg-gold-100/30 p-4">
+            <div className="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-gold-800">
+              <Newspaper className="h-3 w-3" />
+              AI Summary
+            </div>
+            <p className="text-sm leading-relaxed text-navy">{data.summary}</p>
+          </aside>
         )}
 
         {/* Body */}

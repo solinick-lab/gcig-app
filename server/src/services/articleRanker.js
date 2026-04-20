@@ -26,18 +26,19 @@ import prisma from '../db.js';
 const DEFAULT_MODEL = 'qwen2.5:14b-instruct-q4_K_M';
 const DEFAULT_TIMEOUT_MS = 25_000;
 
-const SYSTEM_PROMPT = `You are ranking news articles for a student-run investment club. For each article, score its priority as "high", "medium", or "low" based on how material it is for an equity investor:
+const SYSTEM_PROMPT = `You are ranking news articles for a student-run investment club. For each article, score its MATERIALITY on a 0.0 to 10.0 scale with one decimal place. Higher = more likely to move the stock or change the investment thesis.
 
-high   — Events that meaningfully move a stock or signal thesis change: earnings results, pre-announcements, guidance changes, M&A (completed or rumored with named parties), major analyst upgrades/downgrades from top-tier shops, SEC filings with substantive content (10-K/10-Q/8-K), lawsuits affecting core business, regulatory approvals/denials, C-suite changes, major product launches tied to financial impact, bankruptcy / restructuring.
-
-medium — Industry shifts that affect the company indirectly, analyst commentary without a rating change, product announcements without clear financial impact, second-tier media coverage of competitors, macro data points tied to the sector.
-
-low    — Generic press releases, minor product news, social-media chatter, stock-price recaps, unrelated company collisions with the ticker, opinion pieces without new information.
+Calibration:
+  9.0–10.0  Thesis-defining: earnings beats/misses with guidance change, completed or named-party M&A, major regulatory approval/denial, SEC enforcement, bankruptcy, CEO change.
+  7.0–8.9   Materially relevant: pre-announcements, top-tier analyst upgrade/downgrade, 10-K/10-Q/8-K with substantive content, major product launch with clear financial impact, lawsuits affecting core business.
+  5.0–6.9   Moderately relevant: industry shifts, analyst commentary without rating change, product announcements without clear $ impact, competitor news that reads across.
+  3.0–4.9   Weakly relevant: generic press releases, minor product news, conference appearances, partnership announcements without detail, stock-price recaps with light commentary.
+  0.0–2.9   Not relevant: ticker collision with an unrelated company, social-media chatter, opinion pieces with no new information, puff pieces.
 
 Return a JSON object of the form:
-{ "rankings": [ { "index": 0, "priority": "high", "reason": "Earnings beat, raised guidance" }, ... ] }
+{ "rankings": [ { "index": 0, "score": 8.3, "reason": "Earnings beat, raised guidance" }, ... ] }
 
-Each element's "index" MUST match the input array position. "reason" must be at most 12 words. Do not invent facts not present in the title or description.`;
+Each element's "index" MUST match the input array position. "score" MUST be a number between 0.0 and 10.0 with ONE decimal place. "reason" MUST be at most 12 words. Do not invent facts not present in the title or description.`;
 
 // Build a compact payload: only fields that matter for ranking. Reduces
 // tokens dramatically vs. sending the full article object.
@@ -57,6 +58,15 @@ function baseUrl(raw) {
   return `${s}/v1`;
 }
 
+// Translate the legacy 3-tier priority into a rough score so pre-score
+// rows still sort sensibly alongside score-based ones.
+function priorityToScore(priority) {
+  if (priority === 'high') return 8.0;
+  if (priority === 'medium') return 5.0;
+  if (priority === 'low') return 2.5;
+  return null;
+}
+
 // Load existing rankings for a list of URLs in one query. Returns a Map
 // keyed by URL. Silently returns an empty map if the query fails (DB
 // hiccups must never block news delivery).
@@ -65,11 +75,15 @@ async function loadPersistedRankings(urls) {
   try {
     const rows = await prisma.articleRanking.findMany({
       where: { url: { in: urls } },
-      select: { url: true, priority: true, reason: true },
+      select: { url: true, priority: true, score: true, reason: true },
     });
     const map = new Map();
     for (const r of rows) {
-      map.set(r.url, { priority: r.priority, reason: r.reason });
+      // Prefer explicit score; fall back to legacy priority mapping so old
+      // rows don't get re-ranked just because score column is empty.
+      const score = r.score ?? priorityToScore(r.priority);
+      if (score == null) continue;
+      map.set(r.url, { score, reason: r.reason });
     }
     return map;
   } catch (err) {
@@ -88,10 +102,10 @@ async function persistRankings(items, model) {
       items.map((it) =>
         prisma.articleRanking.upsert({
           where: { url: it.url },
-          update: { priority: it.priority, reason: it.reason, model },
+          update: { score: it.score, reason: it.reason, model },
           create: {
             url: it.url,
-            priority: it.priority,
+            score: it.score,
             reason: it.reason,
             model,
           },
@@ -190,11 +204,14 @@ export async function rankArticles(articles, { ticker } = {}) {
       if (typeof r?.index !== 'number') continue;
       const src = unknown[r.index];
       if (!src?.url) continue;
-      const p = String(r?.priority || '').toLowerCase();
-      if (!['high', 'medium', 'low'].includes(p)) continue;
+      const rawScore = Number(r?.score);
+      if (!Number.isFinite(rawScore)) continue;
+      // Clamp + round to one decimal; defend against the model returning
+      // 10.5 or -0.2 edge cases.
+      const score = Math.round(Math.max(0, Math.min(10, rawScore)) * 10) / 10;
       const reason = typeof r.reason === 'string' ? r.reason.slice(0, 120) : null;
-      persisted.set(src.url, { priority: p, reason });
-      toPersist.push({ url: src.url, priority: p, reason });
+      persisted.set(src.url, { score, reason });
+      toPersist.push({ url: src.url, score, reason });
     }
 
     // Fire-and-forget save. We don't await because the response is already
@@ -214,24 +231,21 @@ export async function rankArticles(articles, { ticker } = {}) {
   }
 }
 
-// Attach priority/reason from a URL→tag map onto each article, then sort
-// high → medium → low. Articles without a tag are treated as medium so
-// they don't all get buried under "low".
+// Attach score/reason from a URL→tag map onto each article, then sort
+// descending by score. Articles without a score stay at their newsapi
+// position relative to each other at the bottom.
 function applyAndSort(articles, rankingsByUrl) {
-  const withPriority = articles.map((a) => {
+  const scored = articles.map((a) => {
     const r = rankingsByUrl.get(a.url);
     if (!r) return { ...a };
-    return { ...a, priority: r.priority, reason: r.reason };
+    return { ...a, score: r.score, reason: r.reason };
   });
-  const order = { high: 0, medium: 1, low: 2 };
-  // Only sort if at least one article has a priority — otherwise leave
-  // newsapi's recency order alone.
-  const anyRanked = withPriority.some((a) => a.priority);
-  if (!anyRanked) return withPriority;
-  withPriority.sort((a, b) => {
-    const pa = order[a.priority] ?? 1;
-    const pb = order[b.priority] ?? 1;
-    return pa - pb;
+  const anyRanked = scored.some((a) => typeof a.score === 'number');
+  if (!anyRanked) return scored;
+  scored.sort((a, b) => {
+    const sa = typeof a.score === 'number' ? a.score : -1;
+    const sb = typeof b.score === 'number' ? b.score : -1;
+    return sb - sa;
   });
-  return withPriority;
+  return scored;
 }
