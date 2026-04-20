@@ -13,21 +13,31 @@ function ProviderRow({ label, data }) {
     : data.ok
     ? 'bg-emerald-500'
     : 'bg-red-500';
-  const text = !data?.configured
+  const fullText = !data?.configured
     ? 'Not configured'
     : data.ok
     ? `Up · ${data.latencyMs} ms`
     : `Down — ${data.error || 'no response'}`;
+  // Cap display to avoid a wall of HTML when the origin returns an error page.
+  const displayText =
+    fullText.length > 100 ? fullText.slice(0, 100).trim() + '…' : fullText;
   return (
-    <div className="flex items-center justify-between rounded-lg border border-navy-100 bg-white px-3 py-2 text-xs">
-      <div className="flex items-center gap-2">
-        <span className={`h-2.5 w-2.5 rounded-full ${dot}`} />
-        <span className="font-semibold text-navy">{label}</span>
+    <div
+      className="flex flex-col gap-1 rounded-lg border border-navy-100 bg-white px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+      title={fullText}
+    >
+      <div className="flex items-center gap-2 min-w-0">
+        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${dot}`} />
+        <span className="font-semibold text-navy shrink-0">{label}</span>
         {data?.model && (
-          <span className="text-[10px] text-navy-400">{data.model}</span>
+          <span className="truncate text-[10px] text-navy-400">{data.model}</span>
         )}
       </div>
-      <span className={data?.ok ? 'text-navy' : 'text-navy-400'}>{text}</span>
+      <span
+        className={`truncate text-left sm:text-right ${data?.ok ? 'text-navy' : 'text-navy-400'}`}
+      >
+        {displayText}
+      </span>
     </div>
   );
 }

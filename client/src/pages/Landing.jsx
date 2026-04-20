@@ -81,30 +81,33 @@ export default function Landing() {
 function Header() {
   return (
     <header className="border-b border-navy-50">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5 md:px-10 md:py-7">
-        <Link to="/" className="flex items-center gap-3">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-4 md:px-10 md:py-7">
+        <Link to="/" className="flex items-center gap-2 md:gap-3 min-w-0">
           <img
             src="/grace-logo.png"
             alt="Grace Church School"
-            className="h-10 w-auto"
+            className="h-8 w-auto shrink-0 md:h-10"
             onError={(e) => {
               e.currentTarget.style.display = 'none';
             }}
           />
-          <div className="leading-tight">
-            <div className="font-serif text-lg font-semibold tracking-tight text-navy">
+          <div className="leading-tight min-w-0">
+            <div className="font-serif text-base font-semibold tracking-tight text-navy md:text-lg">
               The Griffin Fund
             </div>
-            <div className="text-[10px] uppercase tracking-[0.25em] text-navy-400">
+            {/* Subtitle hidden on phones to keep the header on one line with
+                the Member Login button. */}
+            <div className="hidden text-[10px] uppercase tracking-[0.25em] text-navy-400 sm:block">
               Grace Church School
             </div>
           </div>
         </Link>
         <Link
           to="/login"
-          className="inline-flex items-center gap-2 border border-navy px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-navy transition hover:bg-navy hover:text-white"
+          className="shrink-0 inline-flex items-center gap-2 border border-navy px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-navy transition hover:bg-navy hover:text-white md:px-5 md:py-2 md:text-xs md:tracking-[0.2em]"
         >
-          Member Login
+          <span className="hidden sm:inline">Member Login</span>
+          <span className="sm:hidden">Sign In</span>
         </Link>
       </div>
     </header>
@@ -131,14 +134,14 @@ function Hero() {
 
       <div className="relative">
         <Reveal>
-          <div className="mx-auto max-w-5xl px-6 py-24 md:px-10 md:py-36">
-            <div className="mb-8 h-px w-16 bg-gold" />
-            <h1 className="font-serif text-4xl font-semibold leading-[1.15] tracking-tight text-navy md:text-6xl">
+          <div className="mx-auto max-w-5xl px-4 py-16 md:px-10 md:py-36">
+            <div className="mb-6 h-px w-12 bg-gold md:mb-8 md:w-16" />
+            <h1 className="font-serif text-3xl font-semibold leading-[1.15] tracking-tight text-navy md:text-6xl">
               The Griffin Fund was founded on the premise that disciplined
               investing is best learned by doing — with real capital, rigorous
               research, and accountability to the school community.
             </h1>
-            <div className="mt-10 text-[11px] font-semibold uppercase tracking-[0.3em] text-navy-400">
+            <div className="mt-8 text-[10px] font-semibold uppercase tracking-[0.25em] text-navy-400 md:mt-10 md:text-[11px] md:tracking-[0.3em]">
               Grace Church School · Est. 2021
             </div>
           </div>
@@ -151,16 +154,16 @@ function Hero() {
 function Premise() {
   return (
     <section className="border-b border-navy-50">
-      <div className="mx-auto max-w-5xl px-6 py-20 md:px-10 md:py-28">
+      <div className="mx-auto max-w-5xl px-4 py-14 md:px-10 md:py-28">
         <Reveal>
-          <div className="grid gap-12 md:grid-cols-[240px_1fr] md:gap-20">
+          <div className="grid gap-8 md:grid-cols-[240px_1fr] md:gap-20">
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-gold-700">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.25em] text-gold-700 md:text-[11px] md:tracking-[0.3em]">
                 The Fund
               </div>
               <div className="mt-2 h-px w-10 bg-navy" />
             </div>
-            <div className="font-serif text-lg leading-relaxed text-navy md:text-xl">
+            <div className="font-serif text-[17px] leading-relaxed text-navy md:text-xl">
               <p>
                 The Griffin Fund is the Grace Church School Investment Group — a
                 student-run investment fund established in 2021 to manage a
@@ -207,29 +210,29 @@ function Pillars() {
   ];
   return (
     <section className="border-b border-navy-50 bg-[#FAFAF7]">
-      <div className="mx-auto max-w-6xl px-6 py-20 md:px-10 md:py-28">
+      <div className="mx-auto max-w-6xl px-4 py-14 md:px-10 md:py-28">
         <Reveal>
-          <div className="mb-12 max-w-2xl md:mb-20">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-gold-700">
+          <div className="mb-10 max-w-2xl md:mb-20">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.25em] text-gold-700 md:text-[11px] md:tracking-[0.3em]">
               How we invest
             </div>
             <div className="mt-2 h-px w-10 bg-navy" />
-            <h2 className="mt-6 font-serif text-3xl font-semibold leading-tight text-navy md:text-4xl">
+            <h2 className="mt-5 font-serif text-2xl font-semibold leading-tight text-navy md:mt-6 md:text-4xl">
               Three principles guide everything the fund does.
             </h2>
           </div>
         </Reveal>
-        <div className="grid gap-12 md:grid-cols-3 md:gap-10">
+        <div className="grid gap-10 md:grid-cols-3 md:gap-10">
           {pillars.map((p, i) => (
             <Reveal key={p.heading} delay={i * 100}>
               <div>
-                <div className="font-serif text-5xl font-light text-gold">
+                <div className="font-serif text-4xl font-light text-gold md:text-5xl">
                   {String(i + 1).padStart(2, '0')}
                 </div>
-                <h3 className="mt-4 font-serif text-2xl font-semibold text-navy">
+                <h3 className="mt-3 font-serif text-xl font-semibold text-navy md:mt-4 md:text-2xl">
                   {p.heading}
                 </h3>
-                <p className="mt-3 text-[15px] leading-relaxed text-navy-500">
+                <p className="mt-3 text-[14px] leading-relaxed text-navy-500 md:text-[15px]">
                   {p.body}
                 </p>
               </div>
@@ -269,28 +272,28 @@ function Leadership() {
 
   return (
     <section className="border-b border-navy-50">
-      <div className="mx-auto max-w-6xl px-6 py-20 md:px-10 md:py-28">
+      <div className="mx-auto max-w-6xl px-4 py-14 md:px-10 md:py-28">
         <Reveal>
-          <div className="mb-12 max-w-2xl md:mb-16">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-gold-700">
+          <div className="mb-10 max-w-2xl md:mb-16">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.25em] text-gold-700 md:text-[11px] md:tracking-[0.3em]">
               Leadership
             </div>
             <div className="mt-2 h-px w-10 bg-navy" />
-            <h2 className="mt-6 font-serif text-3xl font-semibold leading-tight text-navy md:text-4xl">
+            <h2 className="mt-5 font-serif text-2xl font-semibold leading-tight text-navy md:mt-6 md:text-4xl">
               Led from within the club.
             </h2>
-            <p className="mt-4 font-serif text-lg leading-relaxed text-navy-500">
+            <p className="mt-3 font-serif text-base leading-relaxed text-navy-500 md:mt-4 md:text-lg">
               Led by founding members, with new leadership appointed as the
               fund grows.
             </p>
           </div>
         </Reveal>
 
-        <div className="grid gap-12 md:grid-cols-2 md:gap-16">
+        <div className="grid gap-10 md:grid-cols-2 md:gap-16">
           {groups.map((group, gi) => (
             <Reveal key={group.title} delay={gi * 100}>
               <div>
-                <div className="mb-6 text-[11px] font-semibold uppercase tracking-[0.25em] text-navy-400">
+                <div className="mb-4 text-[10px] font-semibold uppercase tracking-[0.2em] text-navy-400 md:mb-6 md:text-[11px] md:tracking-[0.25em]">
                   {group.title}
                 </div>
                 <div className="space-y-3">
@@ -300,7 +303,7 @@ function Leadership() {
                         <div className="font-serif text-lg font-semibold text-navy">
                           {m.name}
                         </div>
-                        <div className="text-[11px] uppercase tracking-[0.2em] text-navy-400">
+                        <div className="text-[10px] uppercase tracking-[0.15em] text-navy-400 md:text-[11px] md:tracking-[0.2em]">
                           {m.role}
                         </div>
                       </div>
@@ -313,7 +316,7 @@ function Leadership() {
         </div>
 
         <Reveal delay={700}>
-          <p className="mt-12 text-sm italic text-navy-400">
+          <p className="mt-10 text-sm italic text-navy-400 md:mt-12">
             Faculty advisor: Nicholas Kurian.
           </p>
         </Reveal>
@@ -331,15 +334,22 @@ function Numbers() {
   ];
   return (
     <section className="border-b border-navy-50">
-      <div className="mx-auto max-w-6xl px-6 py-16 md:px-10 md:py-20">
-        <div className="grid grid-cols-2 gap-y-10 md:grid-cols-4">
+      <div className="mx-auto max-w-6xl px-4 py-14 md:px-10 md:py-20">
+        <div className="grid grid-cols-2 gap-x-2 gap-y-10 md:grid-cols-4 md:gap-x-0">
           {stats.map((s, i) => (
             <Reveal key={s.label} delay={i * 100}>
-              <div className="border-l border-navy-100 px-6 first:border-l-0 md:first:border-l md:first:pl-6">
-                <div className="font-serif text-2xl font-semibold leading-tight text-navy md:text-3xl">
+              {/*
+                Left-side divider behavior:
+                  Mobile (2 cols): show a left border only on the RIGHT
+                  column items (1 and 3) — odd:border-l-0 hides it on the
+                  left-column items (0 and 2).
+                  Desktop (4 cols): show on every item except the first.
+              */}
+              <div className="border-l border-navy-100 px-4 odd:border-l-0 md:px-6 md:odd:border-l md:first:border-l-0">
+                <div className="font-serif text-xl font-semibold leading-tight text-navy md:text-3xl">
                   {s.value}
                 </div>
-                <div className="mt-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-navy-400">
+                <div className="mt-2 text-[9px] font-semibold uppercase tracking-[0.2em] text-navy-400 md:text-[10px] md:tracking-[0.25em]">
                   {s.label}
                 </div>
               </div>
@@ -354,7 +364,7 @@ function Numbers() {
 function Footer() {
   return (
     <footer className="bg-white">
-      <div className="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-10 md:flex-row md:items-center md:justify-between md:px-10">
+      <div className="mx-auto flex max-w-6xl flex-col gap-5 px-4 py-8 md:flex-row md:items-center md:justify-between md:gap-6 md:px-10 md:py-10">
         <div className="flex items-center gap-3">
           <img
             src="/grace-logo.png"
