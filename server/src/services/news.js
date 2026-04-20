@@ -54,8 +54,11 @@ async function fetchFinnhubArticles(ticker, key) {
   if (override) {
     url = `https://finnhub.io/api/v1/news?category=general&token=${encodeURIComponent(key)}`;
   } else {
+    // 60-day window. Small-caps (MLAB, GD, NOC etc.) often have stretches
+    // of quiet coverage; a tight window made them look newsless even when
+    // a material 30-day-old story was the best available.
     const to = new Date();
-    const from = new Date(to.getTime() - 14 * 24 * 60 * 60 * 1000);
+    const from = new Date(to.getTime() - 60 * 24 * 60 * 60 * 1000);
     const params = new URLSearchParams({
       symbol: ticker,
       from: isoDate(from),
@@ -159,7 +162,14 @@ export async function getNewsForTicker(ticker, name) {
     narrative,
     articles,
   };
-  cache.set(ck, { at: Date.now(), data });
+
+  // Only cache when we actually got something. An empty batch is usually
+  // a transient blip (Finnhub briefly returning nothing, or a small-cap
+  // ticker in a quiet week) — caching that for 24h would keep the News
+  // section empty long after new stories hit the wire.
+  if (articles.length > 0) {
+    cache.set(ck, { at: Date.now(), data });
+  }
   return data;
 }
 
