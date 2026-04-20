@@ -16,7 +16,10 @@ import sanitizeHtml from 'sanitize-html';
 import { rankArticles } from './articleRanker.js';
 import { summarizeTickerNews, summarizeArticle } from './articleSummarizer.js';
 
-const CACHE_TTL_MS = 15 * 60 * 1000; // 15 min — headlines don't change minute-to-minute
+// 6 hours — newsapi developer tier caps at 100 req/day, and holding news
+// doesn't move fast enough to justify tighter refreshes. Week in Review
+// refreshes on its own schedule regardless of this cache.
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const cache = new Map(); // key = ticker|name, value = { at, data }
 
 function cacheKey(ticker, name) {
@@ -112,6 +115,11 @@ export async function getNewsForTicker(ticker, name) {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
+    // On 429 (rate limit) — serve stale cache if we have one, flagged so the
+    // UI can say "news may be outdated". Better than a blank panel.
+    if (res.status === 429 && cached) {
+      return { ...cached.data, stale: true, staleReason: 'rate_limit' };
+    }
     const err = new Error(
       `newsapi responded ${res.status}: ${body.slice(0, 200)}`
     );
