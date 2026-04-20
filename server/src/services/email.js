@@ -35,7 +35,7 @@ function getTransporter() {
   return transporter;
 }
 
-const FROM_NAME = 'GCIG';
+const FROM_NAME = 'The Griffin Fund';
 
 function from() {
   return `${FROM_NAME} <${process.env.GMAIL_USER}>`;
@@ -45,11 +45,11 @@ export async function sendVerificationCode(toEmail, code) {
   await getTransporter().sendMail({
     from: from(),
     to: toEmail,
-    subject: `GCIG Verification Code: ${code}`,
+    subject: `Griffin Fund Verification Code: ${code}`,
     html: `
       <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
         <div style="text-align: center; margin-bottom: 24px;">
-          <h1 style="color: #1B2A4A; font-size: 24px; margin: 0;">GCIG</h1>
+          <h1 style="color: #1B2A4A; font-size: 20px; margin: 0; font-family: Georgia, serif; letter-spacing: -0.01em;">The Griffin Fund</h1>
           <p style="color: #C9A84C; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; margin: 4px 0 0;">
             Grace Church School Investment Group
           </p>
@@ -74,11 +74,11 @@ export async function sendNewDeviceLoginEmail(toEmail, { name, ip, userAgent, wh
   await getTransporter().sendMail({
     from: from(),
     to: toEmail,
-    subject: 'New sign-in to your GCIG account',
+    subject: 'New sign-in to your Griffin Fund account',
     html: `
       <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
         <div style="text-align: center; margin-bottom: 24px;">
-          <h1 style="color: #1B2A4A; font-size: 24px; margin: 0;">GCIG</h1>
+          <h1 style="color: #1B2A4A; font-size: 20px; margin: 0; font-family: Georgia, serif; letter-spacing: -0.01em;">The Griffin Fund</h1>
           <p style="color: #C9A84C; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; margin: 4px 0 0;">
             Grace Church School Investment Group
           </p>
@@ -86,7 +86,7 @@ export async function sendNewDeviceLoginEmail(toEmail, { name, ip, userAgent, wh
         <div style="background: #F7F8FB; border-radius: 12px; padding: 24px;">
           <p style="color: #1B2A4A; font-size: 14px; margin: 0 0 8px;">Hi ${name},</p>
           <p style="color: #1B2A4A; font-size: 14px; margin: 0 0 16px;">
-            Your GCIG account was just signed in from a device we haven't seen before. If this was you, you can ignore this email.
+            Your Griffin Fund account was just signed in from a device we haven't seen before. If this was you, you can ignore this email.
           </p>
           <div style="background: #1B2A4A; border-radius: 8px; padding: 16px; margin: 0 0 16px;">
             <p style="color: #8C99BB; font-size: 12px; margin: 0 0 4px;">When</p>
@@ -115,7 +115,7 @@ export async function sendTwoFactorCodeEmail(toEmail, { name, code, purpose = 'l
   const subject =
     purpose === 'setup'
       ? `Confirm 2FA setup: ${display}`
-      : `GCIG sign-in code: ${display}`;
+      : `Griffin Fund sign-in code: ${display}`;
   const intro =
     purpose === 'setup'
       ? 'Enter this code to finish setting up email 2FA on your account.'
@@ -127,7 +127,7 @@ export async function sendTwoFactorCodeEmail(toEmail, { name, code, purpose = 'l
     html: `
       <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
         <div style="text-align: center; margin-bottom: 24px;">
-          <h1 style="color: #1B2A4A; font-size: 24px; margin: 0;">GCIG</h1>
+          <h1 style="color: #1B2A4A; font-size: 20px; margin: 0; font-family: Georgia, serif; letter-spacing: -0.01em;">The Griffin Fund</h1>
           <p style="color: #C9A84C; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; margin: 4px 0 0;">
             Grace Church School Investment Group
           </p>
@@ -151,11 +151,11 @@ export async function sendPasswordResetEmail(toEmail, { name, resetUrl }) {
   await getTransporter().sendMail({
     from: from(),
     to: toEmail,
-    subject: 'Reset your GCIG password',
+    subject: 'Reset your Griffin Fund password',
     html: `
       <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
         <div style="text-align: center; margin-bottom: 24px;">
-          <h1 style="color: #1B2A4A; font-size: 24px; margin: 0;">GCIG</h1>
+          <h1 style="color: #1B2A4A; font-size: 20px; margin: 0; font-family: Georgia, serif; letter-spacing: -0.01em;">The Griffin Fund</h1>
           <p style="color: #C9A84C; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; margin: 4px 0 0;">
             Grace Church School Investment Group
           </p>
@@ -163,7 +163,7 @@ export async function sendPasswordResetEmail(toEmail, { name, resetUrl }) {
         <div style="background: #F7F8FB; border-radius: 12px; padding: 24px;">
           <p style="color: #1B2A4A; font-size: 14px; margin: 0 0 8px;">Hi ${name},</p>
           <p style="color: #1B2A4A; font-size: 14px; margin: 0 0 16px;">
-            Someone requested a password reset for your GCIG account. If this was you, click below to set a new password:
+            Someone requested a password reset for your Griffin Fund account. If this was you, click below to set a new password:
           </p>
           <div style="text-align: center; margin: 24px 0;">
             <a href="${resetUrl}" style="display: inline-block; background: #C9A84C; color: #1B2A4A; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 32px; border-radius: 8px;">
@@ -201,7 +201,7 @@ export async function sendPitchAssignmentEmail(
     html: `
       <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
         <div style="text-align: center; margin-bottom: 24px;">
-          <h1 style="color: #1B2A4A; font-size: 24px; margin: 0;">GCIG</h1>
+          <h1 style="color: #1B2A4A; font-size: 20px; margin: 0; font-family: Georgia, serif; letter-spacing: -0.01em;">The Griffin Fund</h1>
           <p style="color: #C9A84C; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; margin: 4px 0 0;">
             Grace Church School Investment Group
           </p>
@@ -226,7 +226,7 @@ export async function sendPitchAssignmentEmail(
             }
           </div>
           <a href="${dashboardUrl}" style="display: inline-block; background: #C9A84C; color: #1B2A4A; font-size: 14px; font-weight: 600; text-decoration: none; padding: 10px 24px; border-radius: 8px;">
-            Open GCIG
+            Open the Griffin Fund
           </a>
         </div>
       </div>
@@ -253,7 +253,7 @@ export async function sendBroadcastEmail(
     html: `
       <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 560px; margin: 0 auto; padding: 32px;">
         <div style="text-align: center; margin-bottom: 24px;">
-          <h1 style="color: #1B2A4A; font-size: 24px; margin: 0;">GCIG</h1>
+          <h1 style="color: #1B2A4A; font-size: 20px; margin: 0; font-family: Georgia, serif; letter-spacing: -0.01em;">The Griffin Fund</h1>
           <p style="color: #C9A84C; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; margin: 4px 0 0;">
             Grace Church School Investment Group
           </p>
@@ -270,7 +270,7 @@ export async function sendBroadcastEmail(
           </div>
         </div>
         <p style="color: #8C99BB; font-size: 11px; text-align: center; margin: 16px 0 0;">
-          You received this because you are a member of GCIG. Replies go to ${senderName}.
+          You received this because you are a member of the Griffin Fund. Replies go to ${senderName}.
         </p>
       </div>
     `,
@@ -281,11 +281,11 @@ export async function sendInviteEmail(toEmail, { name, role, inviteUrl }) {
   await getTransporter().sendMail({
     from: from(),
     to: toEmail,
-    subject: `You've been invited to GCIG`,
+    subject: `You've been invited to the Griffin Fund`,
     html: `
       <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
         <div style="text-align: center; margin-bottom: 24px;">
-          <h1 style="color: #1B2A4A; font-size: 24px; margin: 0;">GCIG</h1>
+          <h1 style="color: #1B2A4A; font-size: 20px; margin: 0; font-family: Georgia, serif; letter-spacing: -0.01em;">The Griffin Fund</h1>
           <p style="color: #C9A84C; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; margin: 4px 0 0;">
             Grace Church School Investment Group
           </p>

@@ -12,7 +12,7 @@ const { authenticator } = require('otplib');
 // the previous/next 30s window) to handle clock drift on phones.
 authenticator.options = { digits: 6, step: 30, window: 1 };
 
-const ISSUER = 'GCIG';
+const ISSUER = 'The Griffin Fund';
 
 export function generateSecret() {
   return authenticator.generateSecret();
