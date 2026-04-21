@@ -21,9 +21,18 @@ export default function ForgotPassword() {
   }
 
   return (
-    <div className="flex min-h-full items-center justify-center bg-gradient-to-br from-navy via-navy-700 to-navy-800 p-4">
-      <div className="w-full max-w-md">
-        <div className="mb-6 flex flex-col items-center text-center">
+    <div className="relative flex min-h-full items-center justify-center overflow-hidden bg-gradient-to-br from-navy via-navy-700 to-navy-800 p-4">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.06]"
+        style={{
+          backgroundImage:
+            'linear-gradient(to right, #C9A84C 1px, transparent 1px), linear-gradient(to bottom, #C9A84C 1px, transparent 1px)',
+          backgroundSize: '48px 48px',
+        }}
+      />
+      <div className="relative w-full max-w-md">
+        <div className="mb-8 flex flex-col items-center text-center">
           <div className="rounded-xl bg-white px-6 py-4">
             <img
               src="/grace-logo.png"
@@ -32,9 +41,12 @@ export default function ForgotPassword() {
               onError={(e) => { e.currentTarget.style.display = 'none'; }}
             />
           </div>
-          <p className="mt-4 text-xs uppercase tracking-[0.2em] text-gold font-semibold">
-            Investment Group
-          </p>
+          <div className="mt-4 font-serif text-2xl font-semibold text-white">
+            The Griffin Fund
+          </div>
+          <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.3em] text-gold">
+            Grace Church School
+          </div>
         </div>
 
         <div className="rounded-xl bg-white p-8 shadow-xl">

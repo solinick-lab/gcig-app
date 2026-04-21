@@ -7,6 +7,7 @@ import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
 import RoleBadge from '../components/RoleBadge.jsx';
+import EditorialMasthead from '../components/EditorialMasthead.jsx';
 
 const STATUSES = ['Present', 'Absent', 'Excused'];
 const STATUS_COLORS = {
@@ -55,25 +56,25 @@ function MineAttendance() {
         subtitle="Your attendance record across all club meetings and events."
       />
 
-      {/* Attendance summary */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Card>
-          <div className="text-xs uppercase text-navy-400">Attendance Rate</div>
-          <div className="mt-2 text-3xl font-bold text-navy">{data.percentage}%</div>
-        </Card>
-        <Card>
-          <div className="text-xs uppercase text-navy-400">Total Meetings</div>
-          <div className="mt-2 text-3xl font-bold text-navy">{data.total}</div>
-        </Card>
-        <Card>
-          <div className="text-xs uppercase text-navy-400">Present</div>
-          <div className="mt-2 text-3xl font-bold text-emerald-600">{data.present}</div>
-        </Card>
-        <Card>
-          <div className="text-xs uppercase text-navy-400">Excused</div>
-          <div className="mt-2 text-3xl font-bold text-gold-700">{data.excused}</div>
-        </Card>
-      </div>
+      <EditorialMasthead
+        stats={[
+          {
+            kicker: 'Attendance Rate',
+            value: `${data.percentage}%`,
+            sub: `${data.present} present of ${data.total}`,
+          },
+          {
+            kicker: 'Present',
+            value: data.present,
+            sub: 'Meetings attended',
+          },
+          {
+            kicker: 'Excused',
+            value: data.excused,
+            sub: 'Approved absences',
+          },
+        ]}
+      />
 
       <div className="mt-6">
         <Card title="History">
@@ -189,6 +190,39 @@ function AdminAttendance() {
           </Button>
         }
       />
+
+      {data.events.length > 0 && data.users.length > 0 && (
+        <div className="mb-6">
+          <EditorialMasthead
+            stats={(() => {
+              // Club-wide participation for the events we have records on.
+              const presentCount = data.records.filter(
+                (r) => r.status === 'Present'
+              ).length;
+              const possible = data.records.length;
+              const rate =
+                possible > 0 ? Math.round((presentCount / possible) * 100) : 0;
+              return [
+                {
+                  kicker: 'Club Attendance',
+                  value: `${rate}%`,
+                  sub: `${presentCount} present of ${possible} records`,
+                },
+                {
+                  kicker: 'Events Tracked',
+                  value: data.events.length,
+                  sub: 'Meetings + pitches with attendance',
+                },
+                {
+                  kicker: 'Active Members',
+                  value: data.users.length,
+                  sub: 'Counted in attendance',
+                },
+              ];
+            })()}
+          />
+        </div>
+      )}
 
       <Card>
         {loading ? (

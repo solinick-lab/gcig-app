@@ -7,6 +7,7 @@ import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
 import Modal from '../components/Modal.jsx';
 import RoleBadge, { ROLE_LABELS } from '../components/RoleBadge.jsx';
+import EditorialMasthead from '../components/EditorialMasthead.jsx';
 
 const ROLES = [
   'President',
@@ -93,6 +94,43 @@ export default function Members({ embedded = false } = {}) {
             </Button>
           }
         />
+      )}
+
+      {users.length > 0 && (
+        <div className="mb-6">
+          <EditorialMasthead
+            stats={(() => {
+              const executives = users.filter((u) =>
+                ['President', 'CIO'].includes(u.role)
+              ).length;
+              const managers = users.filter((u) =>
+                ['SeniorPortfolioManager', 'PortfolioManager'].includes(u.role)
+              ).length;
+              const analysts = users.filter((u) =>
+                ['SeniorAnalyst', 'Analyst', 'JuniorAnalyst'].includes(u.role)
+              ).length;
+              return [
+                {
+                  kicker: 'Total Members',
+                  value: users.length,
+                  sub: `${executives} leadership · ${managers} PM · ${analysts} analysts`,
+                },
+                {
+                  kicker: 'Two-Factor On',
+                  value: users.filter((u) => u.twoFactorEnabled).length,
+                  sub: `of ${users.length} members`,
+                },
+                {
+                  kicker: 'Industries',
+                  value: new Set(
+                    users.flatMap((u) => (u.industries || []).map((i) => i.id))
+                  ).size,
+                  sub: 'Sector pods represented',
+                },
+              ];
+            })()}
+          />
+        </div>
       )}
 
       <Card>

@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import api from '../api/client.js';
 import PageHeader from '../components/PageHeader.jsx';
+import EditorialMasthead from '../components/EditorialMasthead.jsx';
 import PreviousPitches from './PreviousPitches.jsx';
 import Reports from './Reports.jsx';
 
@@ -10,6 +12,18 @@ const TABS = [
 
 export default function Library() {
   const [tab, setTab] = useState('pitches');
+  const [stats, setStats] = useState({ pitches: null, reports: null });
+
+  // Small parallel fetch so the masthead can show real archive counts.
+  // Errors fall through silently — the masthead just hides.
+  useEffect(() => {
+    Promise.all([
+      api.get('/pitches').then((r) => r.data).catch(() => []),
+      api.get('/reports').then((r) => r.data).catch(() => []),
+    ]).then(([pitches, reports]) =>
+      setStats({ pitches: pitches.length, reports: reports.length })
+    );
+  }, []);
 
   return (
     <>
@@ -18,7 +32,30 @@ export default function Library() {
         title="Library"
         subtitle="Searchable reference content — pitch slideshows and research reports."
       />
-      <div className="mb-6 flex gap-6 border-b border-navy-100">
+
+      {stats.pitches != null && (
+        <EditorialMasthead
+          stats={[
+            {
+              kicker: 'Pitches Archived',
+              value: stats.pitches,
+              sub: 'Slide decks catalogued',
+            },
+            {
+              kicker: 'Research Reports',
+              value: stats.reports,
+              sub: 'Member-authored write-ups',
+            },
+            {
+              kicker: 'Total Records',
+              value: stats.pitches + stats.reports,
+              sub: 'Across pitches + reports',
+            },
+          ]}
+        />
+      )}
+
+      <div className="mb-6 mt-6 flex gap-6 border-b border-navy-100">
         {TABS.map((t) => (
           <button
             key={t.id}

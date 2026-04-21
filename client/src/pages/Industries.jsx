@@ -7,6 +7,7 @@ import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
 import Modal from '../components/Modal.jsx';
 import RoleBadge, { ROLE_LABELS } from '../components/RoleBadge.jsx';
+import EditorialMasthead from '../components/EditorialMasthead.jsx';
 
 const LEADER_ROLES = new Set(['President', 'CIO', 'SeniorPortfolioManager', 'PortfolioManager']);
 
@@ -135,6 +136,41 @@ export default function Industries() {
           )
         }
       />
+
+      {industries.length > 0 && (
+        <div className="mb-6">
+          <EditorialMasthead
+            stats={(() => {
+              const totalMembers = industries.reduce(
+                (s, i) => s + (i.members?.length || 0),
+                0
+              );
+              const withLeaders = industries.filter((i) => i.leader).length;
+              return [
+                {
+                  kicker: 'Active Pods',
+                  value: industries.length,
+                  sub: `${withLeaders} with a PM assigned`,
+                },
+                {
+                  kicker: 'Total Analysts',
+                  value: totalMembers,
+                  sub: 'Across every sector pod',
+                },
+                {
+                  kicker: 'Largest Pod',
+                  value:
+                    industries.reduce(
+                      (m, i) => Math.max(m, i.members?.length || 0),
+                      0
+                    ) || 0,
+                  sub: 'Members in the biggest pod',
+                },
+              ];
+            })()}
+          />
+        </div>
+      )}
 
       {industries.length === 0 ? (
         <Card>
