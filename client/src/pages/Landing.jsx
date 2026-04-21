@@ -120,7 +120,7 @@ function Hero() {
       {/* Parallax background — disabled on mobile (iOS fixed-bg bug) */}
       <style>{`
         .hero-bg {
-          background-image: url('https://images.unsplash.com/photo-1527305265013-ddd1054521d6?w=1920&q=80&fm=jpg&crop=entropy&cs=srgb');
+          background-image: url('/hero-skyline.jpg');
           background-size: cover;
           background-position: center;
           background-attachment: fixed;
