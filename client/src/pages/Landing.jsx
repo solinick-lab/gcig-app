@@ -249,13 +249,14 @@ function Leadership() {
     {
       title: 'Executive Leadership',
       // Ordered by rank (President > CIO); alphabetical by last name inside
-      // each rank.
+      // each rank. `photo` is optional — members without one get a serif
+      // monogram of their initials on navy.
       members: [
         { name: 'Grey Griscom', role: 'President' },
         { name: 'Sander Olinick', role: 'President' },
-        { name: 'Thomas Seirer', role: 'President' },
+        { name: 'Thomas Seirer', role: 'President', photo: '/leadership/thomas-seirer.jpg' },
         { name: 'Felix Westergaard', role: 'President' },
-        { name: 'Eric Winter', role: 'Chief Investment Officer' },
+        { name: 'Eric Winter', role: 'Chief Investment Officer', photo: '/leadership/eric-winter.jpg' },
       ],
     },
     {
@@ -298,20 +299,23 @@ function Leadership() {
                 <div className="mb-4 text-[10px] font-semibold uppercase tracking-[0.2em] text-navy-400 md:mb-6 md:text-[11px] md:tracking-[0.25em]">
                   {group.title}
                 </div>
-                <div className="space-y-3">
+                <ul className="space-y-4">
                   {group.members.map((m, mi) => (
                     <Reveal key={m.name} delay={gi * 100 + (mi + 1) * 100}>
-                      <div>
-                        <div className="font-serif text-lg font-semibold text-navy">
-                          {m.name}
+                      <li className="flex items-center gap-4">
+                        <MemberAvatar member={m} />
+                        <div className="min-w-0">
+                          <div className="font-serif text-lg font-semibold text-navy">
+                            {m.name}
+                          </div>
+                          <div className="text-[10px] uppercase tracking-[0.15em] text-navy-400 md:text-[11px] md:tracking-[0.2em]">
+                            {m.role}
+                          </div>
                         </div>
-                        <div className="text-[10px] uppercase tracking-[0.15em] text-navy-400 md:text-[11px] md:tracking-[0.2em]">
-                          {m.role}
-                        </div>
-                      </div>
+                      </li>
                     </Reveal>
                   ))}
-                </div>
+                </ul>
               </div>
             </Reveal>
           ))}
@@ -389,5 +393,40 @@ function Footer() {
         </div>
       </div>
     </footer>
+  );
+}
+
+// Circular avatar for the Leadership list. Uses a real photo when the
+// member object has `photo`, otherwise falls back to a gold-on-navy
+// monogram built from the member's initials. Keeps the list visually
+// consistent even when only some members have headshots.
+function MemberAvatar({ member }) {
+  const initials = member.name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+
+  return (
+    <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-full border border-navy-100 bg-navy">
+      {member.photo && (
+        <img
+          src={member.photo}
+          alt={member.name}
+          loading="lazy"
+          className="absolute inset-0 h-full w-full object-cover"
+          onError={(e) => {
+            e.currentTarget.style.display = 'none';
+          }}
+        />
+      )}
+      {/* Monogram sits behind the image; if the image fails or is absent,
+          it's visible. */}
+      <div className="flex h-full w-full items-center justify-center font-serif text-sm font-semibold text-gold">
+        {initials}
+      </div>
+    </div>
   );
 }
