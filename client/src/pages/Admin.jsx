@@ -127,18 +127,21 @@ export default function Admin() {
       <div className="mb-4">
         <LlmStatusCard />
       </div>
-      <div className="mb-4 flex gap-1 border-b border-navy-100">
+      <div className="mb-6 flex gap-6 border-b border-navy-100">
         {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`px-4 py-2 text-sm font-semibold transition ${
+            className={`relative pb-3 font-serif text-lg font-semibold transition ${
               tab === t.id
-                ? 'border-b-2 border-gold text-navy'
+                ? 'text-navy'
                 : 'text-navy-400 hover:text-navy'
             }`}
           >
             {t.label}
+            {tab === t.id && (
+              <span className="absolute -bottom-px left-0 h-[2px] w-full bg-gold" />
+            )}
           </button>
         ))}
       </div>

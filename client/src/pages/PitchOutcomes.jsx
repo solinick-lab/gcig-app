@@ -64,50 +64,59 @@ export default function PitchOutcomes() {
         subtitle="How pitches and research reports that became positions have performed."
       />
 
-      {/* Club-wide top stats */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Card>
-          <div className="flex items-center gap-3">
-            <Trophy className="h-6 w-6 text-gold" />
-            <div>
-              <div className="text-xs uppercase tracking-wider text-navy-400">
-                Club Avg Return
-              </div>
-              <div
-                className={`mt-1 text-2xl font-bold ${
-                  clubAvg >= 0 ? 'text-emerald-600' : 'text-red-600'
-                }`}
-              >
-                {fmtPct(clubAvg)}
-              </div>
+      {/* Editorial masthead — three hero stats in navy gradient. */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy-700 to-navy-800 text-white shadow-xl">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-[0.06]"
+          style={{
+            backgroundImage:
+              'linear-gradient(to right, #C9A84C 1px, transparent 1px), linear-gradient(to bottom, #C9A84C 1px, transparent 1px)',
+            backgroundSize: '48px 48px',
+          }}
+        />
+        <div className="relative grid gap-6 p-6 md:grid-cols-3 md:gap-10 md:p-8">
+          <div>
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-gold">
+              <span className="h-px w-5 bg-gold" />
+              Club Avg Return
+            </div>
+            <div
+              className={`mt-3 font-serif text-5xl font-semibold leading-none tabular-nums md:text-6xl ${
+                clubAvg >= 0 ? 'text-emerald-300' : 'text-red-300'
+              }`}
+            >
+              {fmtPct(clubAvg)}
+            </div>
+            <div className="mt-3 text-xs text-navy-100">
+              Weighted across tracked pitches & reports
             </div>
           </div>
-        </Card>
-        <Card>
-          <div className="flex items-center gap-3">
-            <Target className="h-6 w-6 text-gold" />
-            <div>
-              <div className="text-xs uppercase tracking-wider text-navy-400">
-                Hit Rate
-              </div>
-              <div className="mt-1 text-2xl font-bold text-navy">
-                {(clubHitRate * 100).toFixed(0)}%
-              </div>
-              <div className="text-[11px] text-navy-400">
-                of pitches voted Buy (vs. voted No)
-              </div>
+          <div>
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-gold">
+              <span className="h-px w-5 bg-gold" />
+              Hit Rate
+            </div>
+            <div className="mt-3 font-serif text-5xl font-semibold leading-none tabular-nums md:text-6xl">
+              {(clubHitRate * 100).toFixed(0)}%
+            </div>
+            <div className="mt-3 text-xs text-navy-100">
+              Pitches voted Buy (vs. voted No)
             </div>
           </div>
-        </Card>
-        <Card>
-          <div className="text-xs uppercase tracking-wider text-navy-400">
-            Tracked
+          <div>
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-gold">
+              <span className="h-px w-5 bg-gold" />
+              Tracked
+            </div>
+            <div className="mt-3 font-serif text-5xl font-semibold leading-none tabular-nums md:text-6xl">
+              {trackedCount}
+            </div>
+            <div className="mt-3 text-xs text-navy-100">
+              Pitches + reports tied to current holdings
+            </div>
           </div>
-          <div className="mt-1 text-3xl font-bold text-navy">{trackedCount}</div>
-          <div className="text-[11px] text-navy-400">
-            Pitches + reports tied to current holdings.
-          </div>
-        </Card>
+        </div>
       </div>
 
       {/* Leaderboard */}

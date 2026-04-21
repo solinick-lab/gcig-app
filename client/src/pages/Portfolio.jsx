@@ -335,11 +335,19 @@ export default function Portfolio() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <SummaryTile
-          kicker="Total Value"
-          value={fmtMoney(totals.totalValue)}
-        />
+      {/* Full-width editorial hero — big AUM + since-inception in a navy
+          gradient card, same vibe as the Dashboard hero but page-scoped. */}
+      <PortfolioHero
+        totalValue={totals.totalValue}
+        lifetimeGainLoss={lifetimeGainLoss}
+        lifetimeGainLossPct={lifetimeGainLossPct}
+        cashValue={totals.cashValue}
+        holdingsCount={holdings.filter((h) => !h.isCash).length}
+        history={fullHistory}
+      />
+
+      {/* Three supporting metrics below the hero. */}
+      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
         <SummaryTile
           kicker="Daily Change"
           value={dailyChange ? fmtMoney(dailyChange.diff) : '—'}
@@ -846,6 +854,167 @@ function SummaryTile({ kicker, value, sub, footnote, tone = 'neutral', icon: Ico
       {footnote && (
         <div className="mt-1 text-[10px] text-navy-400">{footnote}</div>
       )}
+    </div>
+  );
+}
+
+// ─── Portfolio hero ────────────────────────────────────────────────────
+// Full-width editorial banner at the top of the Portfolio page: big AUM in
+// serif, since-inception + WoW deltas as chips, 90-day sparkline, and a
+// bottom strip with cash / positions / invested. Same visual language as
+// the Dashboard hero so the two feel like siblings.
+function PortfolioHero({
+  totalValue,
+  lifetimeGainLoss,
+  lifetimeGainLossPct,
+  cashValue,
+  holdingsCount,
+  history,
+}) {
+  const isUp = (lifetimeGainLoss ?? 0) >= 0;
+  const cashPct = totalValue > 0 ? (cashValue / totalValue) * 100 : null;
+
+  // WoW delta — same logic as Dashboard: subtract cash flows inside the window.
+  const weekPct = useMemo(() => {
+    if (!history || history.length < 2 || totalValue == null) return null;
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const from =
+      [...history].reverse().find((h) => h.date <= weekAgo) || history[0];
+    if (!from || from.value <= 0) return null;
+    const cfInWindow = CASH_FLOWS.filter(
+      (cf) => cf.date > weekAgo && cf.date <= now
+    ).reduce((s, cf) => s + cf.amount, 0);
+    return ((totalValue - cfInWindow - from.value) / from.value) * 100;
+  }, [history, totalValue]);
+
+  // 90-day sparkline series.
+  const sparkData = useMemo(() => {
+    const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    return (history || [])
+      .filter((h) => h.date >= cutoff)
+      .map((h) => ({ ts: h.date.getTime(), value: h.value }));
+  }, [history]);
+
+  if (totalValue == null) return null;
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy-700 to-navy-800 text-white shadow-xl">
+      {/* faint gold grid */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.06]"
+        style={{
+          backgroundImage:
+            'linear-gradient(to right, #C9A84C 1px, transparent 1px), linear-gradient(to bottom, #C9A84C 1px, transparent 1px)',
+          backgroundSize: '48px 48px',
+        }}
+      />
+
+      <div className="relative grid gap-6 p-6 md:grid-cols-[1.3fr_1fr] md:gap-10 md:p-8">
+        {/* Left */}
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-gold">
+            <span className="h-px w-5 bg-gold" />
+            Fund Value
+          </div>
+          <div className="mt-3 font-serif text-4xl font-semibold leading-none tabular-nums md:text-6xl">
+            {fmtMoney(totalValue)}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${
+                isUp
+                  ? 'bg-emerald-500/20 text-emerald-300'
+                  : 'bg-red-500/20 text-red-300'
+              }`}
+            >
+              {isUp ? (
+                <TrendingUp className="h-3.5 w-3.5" />
+              ) : (
+                <TrendingDown className="h-3.5 w-3.5" />
+              )}
+              {fmtPct(lifetimeGainLossPct)} since inception
+            </span>
+            {weekPct != null && (
+              <span className="text-xs text-navy-100">
+                {fmtPct(weekPct)} WoW
+              </span>
+            )}
+          </div>
+
+          <div className="mt-6 flex flex-wrap gap-6 border-t border-white/10 pt-4 text-sm">
+            <HeroStat
+              label="Cash"
+              value={cashPct != null ? `${cashPct.toFixed(0)}%` : '—'}
+            />
+            <HeroStat label="Positions" value={holdingsCount} />
+            <HeroStat label="Invested" value={fmtMoney(TOTAL_INVESTED)} />
+          </div>
+        </div>
+
+        {/* Right — sparkline */}
+        <div className="flex flex-col justify-center">
+          {sparkData.length > 1 ? (
+            <div className="h-28 md:h-36 -mx-1">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart
+                  data={sparkData}
+                  margin={{ top: 4, right: 4, bottom: 4, left: 4 }}
+                >
+                  <defs>
+                    <linearGradient id="heroSparkGold" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#C9A84C" stopOpacity={0.55} />
+                      <stop offset="100%" stopColor="#C9A84C" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="ts" hide />
+                  <YAxis hide domain={['auto', 'auto']} />
+                  <Tooltip
+                    contentStyle={{
+                      borderRadius: 8,
+                      border: '1px solid #C9A84C',
+                      background: 'rgba(27,42,74,0.92)',
+                      color: 'white',
+                      fontSize: 11,
+                    }}
+                    labelFormatter={(ts) => format(new Date(ts), 'MMM d')}
+                    formatter={(v) => [fmtMoney(v), 'Value']}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="value"
+                    stroke="#C9A84C"
+                    strokeWidth={2}
+                    fill="url(#heroSparkGold)"
+                    dot={false}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="flex h-28 items-center justify-center text-xs text-navy-200 md:h-36">
+              Collecting snapshots…
+            </div>
+          )}
+          <div className="mt-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-gold/70">
+            Last 90 days · daily snapshots
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HeroStat({ label, value }) {
+  return (
+    <div>
+      <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gold">
+        {label}
+      </div>
+      <div className="mt-1 font-serif text-xl font-semibold tabular-nums">
+        {value}
+      </div>
     </div>
   );
 }

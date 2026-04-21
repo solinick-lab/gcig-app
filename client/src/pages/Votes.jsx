@@ -142,31 +142,49 @@ export default function Votes() {
         }
       />
 
+      {/* Editorial masthead: session counts + next deadline */}
+      <VotesMasthead
+        openSessions={openSessions}
+        closedSessions={closedSessions}
+      />
+
       {openSessions.length > 0 && (
-        <div className="mb-6 space-y-3">
-          <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-emerald-700">
-            <Clock className="h-4 w-4" />
-            Live Now
-          </h2>
-          {openSessions.map((s) => (
-            <SessionCard key={s.id} session={s} onClick={() => openDetail(s.id)} />
-          ))}
+        <div className="mt-6 mb-8">
+          <SectionKicker
+            label="Live Now"
+            count={openSessions.length}
+            accent="emerald"
+          />
+          <div className="mt-3 space-y-3">
+            {openSessions.map((s) => (
+              <SessionCard
+                key={s.id}
+                session={s}
+                onClick={() => openDetail(s.id)}
+              />
+            ))}
+          </div>
         </div>
       )}
 
-      <div className="space-y-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-navy-400">
-          <CheckCircle2 className="h-4 w-4" />
-          Past Sessions
-        </h2>
+      <div>
+        <SectionKicker label="Past Sessions" count={closedSessions.length} />
         {closedSessions.length === 0 ? (
           <Card>
-            <div className="py-8 text-center text-navy-400">No past voting sessions.</div>
+            <div className="py-8 text-center text-navy-400">
+              No past voting sessions.
+            </div>
           </Card>
         ) : (
-          closedSessions.map((s) => (
-            <SessionCard key={s.id} session={s} onClick={() => openDetail(s.id)} />
-          ))
+          <div className="mt-3 space-y-3">
+            {closedSessions.map((s) => (
+              <SessionCard
+                key={s.id}
+                session={s}
+                onClick={() => openDetail(s.id)}
+              />
+            ))}
+          </div>
         )}
       </div>
 
@@ -685,6 +703,99 @@ function TallyDisplay({ tally, isOpen }) {
             Range: ${buyAmountStats.min.toLocaleString()} – ${buyAmountStats.max.toLocaleString()}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Editorial helpers (masthead + section kicker) ─────────────────────
+
+function VotesMasthead({ openSessions, closedSessions }) {
+  const totalThisMonth = closedSessions.filter((s) => {
+    const d = new Date(s.closedAt || s.createdAt);
+    const now = new Date();
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  }).length;
+  const nextDeadline = openSessions[0]?.deadline
+    ? new Date(openSessions[0].deadline)
+    : null;
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy via-navy-700 to-navy-800 text-white shadow-xl">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.06]"
+        style={{
+          backgroundImage:
+            'linear-gradient(to right, #C9A84C 1px, transparent 1px), linear-gradient(to bottom, #C9A84C 1px, transparent 1px)',
+          backgroundSize: '48px 48px',
+        }}
+      />
+      <div className="relative grid gap-4 p-6 md:grid-cols-3 md:gap-8 md:p-8">
+        <div>
+          <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-gold">
+            <span className="h-px w-5 bg-gold" />
+            Open Now
+          </div>
+          <div className="mt-3 font-serif text-5xl font-semibold tabular-nums md:text-6xl">
+            {openSessions.length}
+          </div>
+          <div className="mt-2 text-xs text-navy-100">
+            {openSessions.length === 0
+              ? 'No votes in progress'
+              : `Active voting session${openSessions.length === 1 ? '' : 's'}`}
+          </div>
+        </div>
+        <div>
+          <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-gold">
+            <span className="h-px w-5 bg-gold" />
+            This Month
+          </div>
+          <div className="mt-3 font-serif text-5xl font-semibold tabular-nums md:text-6xl">
+            {totalThisMonth}
+          </div>
+          <div className="mt-2 text-xs text-navy-100">
+            Decisions recorded in {format(new Date(), 'MMMM')}
+          </div>
+        </div>
+        <div>
+          <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-gold">
+            <span className="h-px w-5 bg-gold" />
+            Next Deadline
+          </div>
+          <div className="mt-3 font-serif text-2xl font-semibold leading-tight md:text-3xl">
+            {nextDeadline
+              ? formatDistanceToNow(nextDeadline, { addSuffix: true })
+              : '—'}
+          </div>
+          <div className="mt-2 text-xs text-navy-100">
+            {nextDeadline
+              ? `${openSessions[0].ticker} · ${format(nextDeadline, 'MMM d, h:mm a')}`
+              : 'Nothing scheduled'}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SectionKicker({ label, count, accent }) {
+  const toneClass =
+    accent === 'emerald' ? 'text-emerald-700' : 'text-gold-700';
+  const ruleClass =
+    accent === 'emerald' ? 'bg-emerald-500' : 'bg-gold';
+  return (
+    <div className="flex items-end justify-between border-b border-navy-100 pb-2">
+      <div className="flex items-center gap-2">
+        <span className={`h-px w-6 ${ruleClass}`} />
+        <h2 className={`text-[10px] font-semibold uppercase tracking-[0.25em] ${toneClass}`}>
+          {label}
+        </h2>
+      </div>
+      {count != null && count > 0 && (
+        <span className="font-serif text-sm font-semibold text-navy tabular-nums">
+          {count}
+        </span>
       )}
     </div>
   );
