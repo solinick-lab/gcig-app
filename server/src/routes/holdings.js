@@ -586,4 +586,49 @@ router.get('/history', async (_req, res) => {
   res.json(snapshots);
 });
 
+// ── Investment thesis per ticker ──────────────────────────────────────
+// Readable by any authed member. Editable by super-admin only (same tier
+// that manages lots and snapshot overrides).
+
+function normalizeTicker(raw) {
+  return String(raw || '').trim().toUpperCase();
+}
+
+router.get('/:ticker/thesis', async (req, res) => {
+  const ticker = normalizeTicker(req.params.ticker);
+  if (!ticker) return res.status(400).json({ error: 'Ticker required' });
+  const row = await prisma.holdingThesis.findUnique({ where: { ticker } });
+  // 200 + empty so the UI can render an "Add thesis" affordance cleanly
+  // instead of having to handle a 404.
+  res.json(row || { ticker, thesis: null });
+});
+
+router.put('/:ticker/thesis', requireSuperAdmin, async (req, res) => {
+  const ticker = normalizeTicker(req.params.ticker);
+  if (!ticker) return res.status(400).json({ error: 'Ticker required' });
+  const raw = req.body?.thesis;
+  if (typeof raw !== 'string') {
+    return res.status(400).json({ error: 'thesis (string) required' });
+  }
+  const thesis = raw.trim();
+  if (!thesis) return res.status(400).json({ error: 'thesis cannot be empty' });
+  if (thesis.length > 5000) {
+    return res.status(400).json({ error: 'thesis must be 5000 characters or fewer' });
+  }
+  const updatedByName = req.user?.name || null;
+  const row = await prisma.holdingThesis.upsert({
+    where: { ticker },
+    update: { thesis, updatedByName },
+    create: { ticker, thesis, updatedByName },
+  });
+  res.json(row);
+});
+
+router.delete('/:ticker/thesis', requireSuperAdmin, async (req, res) => {
+  const ticker = normalizeTicker(req.params.ticker);
+  if (!ticker) return res.status(400).json({ error: 'Ticker required' });
+  await prisma.holdingThesis.deleteMany({ where: { ticker } });
+  res.json({ ok: true });
+});
+
 export default router;

@@ -310,6 +310,18 @@ model HoldingLot {
   @@index([ticker])
 }
 
+// Free-text investment thesis for a ticker we hold. One row per ticker.
+// Editable only by super-admin. Consumed by the holding detail modal and
+// (eventually) by the thesis-vs-news drift check in the risk panel.
+model HoldingThesis {
+  id            Int      @id @default(autoincrement())
+  ticker        String   @unique
+  thesis        String
+  updatedByName String?
+  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now())
+}
+
 // LLM-generated priority tag for a news article, keyed by URL. Lets us skip
 // re-ranking articles we've already classified — articles don't change after
 // publish, so the classification is stable. One row per unique URL. `model`

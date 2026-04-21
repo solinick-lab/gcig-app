@@ -58,6 +58,11 @@ export default function HoldingDetailModal({ holding, onClose }) {
   const [lots, setLots] = useState([]);
   const [news, setNews] = useState(null);
   const [newsError, setNewsError] = useState('');
+  const [thesis, setThesis] = useState(null);
+  const [thesisEditing, setThesisEditing] = useState(false);
+  const [thesisDraft, setThesisDraft] = useState('');
+  const [thesisSaving, setThesisSaving] = useState(false);
+  const [thesisError, setThesisError] = useState('');
   const [newsLoading, setNewsLoading] = useState(false);
   const [readerArticle, setReaderArticle] = useState(null); // article passed to ArticleReaderModal
   const [loading, setLoading] = useState(true);
@@ -81,6 +86,18 @@ export default function HoldingDetailModal({ holding, onClose }) {
     setLots([]);
     setNews(null);
     setNewsError('');
+    setThesis(null);
+    setThesisEditing(false);
+    setThesisDraft('');
+    setThesisError('');
+    api
+      .get(`/holdings/${encodeURIComponent(ticker)}/thesis`)
+      .then(({ data }) => {
+        if (!cancelled) setThesis(data);
+      })
+      .catch(() => {
+        /* thesis is optional — swallow */
+      });
     Promise.all([
       api
         .get(`/holdings/info/${encodeURIComponent(ticker)}`)
@@ -135,6 +152,48 @@ export default function HoldingDetailModal({ holding, onClose }) {
     if (!confirm('Delete this lot?')) return;
     await api.delete(`/holdings/lots/${id}`);
     refreshLots();
+  }
+
+  function beginThesisEdit() {
+    setThesisDraft(thesis?.thesis || '');
+    setThesisEditing(true);
+    setThesisError('');
+  }
+
+  async function handleSaveThesis() {
+    const trimmed = thesisDraft.trim();
+    if (!trimmed) {
+      setThesisError('Thesis cannot be empty — use Delete to clear it.');
+      return;
+    }
+    setThesisSaving(true);
+    setThesisError('');
+    try {
+      const { data } = await api.put(
+        `/holdings/${encodeURIComponent(ticker)}/thesis`,
+        { thesis: trimmed }
+      );
+      setThesis(data);
+      setThesisEditing(false);
+    } catch (err) {
+      setThesisError(err.response?.data?.error || 'Failed to save thesis');
+    } finally {
+      setThesisSaving(false);
+    }
+  }
+
+  async function handleDeleteThesis() {
+    if (!confirm('Delete the investment thesis for this ticker?')) return;
+    setThesisSaving(true);
+    try {
+      await api.delete(`/holdings/${encodeURIComponent(ticker)}/thesis`);
+      setThesis({ ticker, thesis: null });
+      setThesisEditing(false);
+    } catch (err) {
+      setThesisError(err.response?.data?.error || 'Failed to delete thesis');
+    } finally {
+      setThesisSaving(false);
+    }
   }
 
   // Our position math — pulled from the sheet-derived holding object.
@@ -360,6 +419,25 @@ export default function HoldingDetailModal({ holding, onClose }) {
                 </div>
               </div>
             )}
+
+          {/* Investment thesis — editable by super-admin, visible to all */}
+          <ThesisSection
+            ticker={ticker}
+            thesis={thesis}
+            isSuperAdmin={isSuperAdmin}
+            editing={thesisEditing}
+            draft={thesisDraft}
+            onDraftChange={setThesisDraft}
+            onBeginEdit={beginThesisEdit}
+            onCancelEdit={() => {
+              setThesisEditing(false);
+              setThesisError('');
+            }}
+            onSave={handleSaveThesis}
+            onDelete={handleDeleteThesis}
+            saving={thesisSaving}
+            error={thesisError}
+          />
 
           {/* Recent news — from newsapi.org, cached 15 min server-side */}
           <NewsSection
@@ -718,6 +796,116 @@ function LotSection({ ticker, lots, currentPrice, currency, canEdit, onChange, o
             </button>
           </div>
         </form>
+      )}
+    </div>
+  );
+}
+
+// Investment thesis display + super-admin edit. Collapsed by default when
+// no thesis exists and the viewer can't write one.
+function ThesisSection({
+  ticker,
+  thesis,
+  isSuperAdmin,
+  editing,
+  draft,
+  onDraftChange,
+  onBeginEdit,
+  onCancelEdit,
+  onSave,
+  onDelete,
+  saving,
+  error,
+}) {
+  const hasThesis = !!thesis?.thesis;
+  if (!hasThesis && !isSuperAdmin) return null;
+
+  const updatedStamp =
+    thesis?.updatedAt && hasThesis
+      ? formatDistanceToNow(new Date(thesis.updatedAt), { addSuffix: true })
+      : null;
+
+  return (
+    <div className="mt-6 rounded-lg border border-navy-100 bg-white p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-navy-400">
+          <BookOpen className="h-3.5 w-3.5" />
+          Investment Thesis · {ticker}
+        </div>
+        {!editing && isSuperAdmin && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onBeginEdit}
+              className="text-xs font-semibold text-gold-700 underline"
+            >
+              {hasThesis ? 'Edit' : 'Add thesis'}
+            </button>
+            {hasThesis && (
+              <button
+                onClick={onDelete}
+                disabled={saving}
+                className="text-xs font-semibold text-red-600 underline disabled:opacity-50"
+              >
+                Delete
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {editing ? (
+        <div className="mt-3 space-y-2">
+          <textarea
+            value={draft}
+            onChange={(e) => onDraftChange(e.target.value)}
+            rows={8}
+            maxLength={5000}
+            placeholder="Why we own this. Key drivers, valuation anchor, what would change the thesis."
+            className="w-full rounded-lg border border-navy-100 px-3 py-2 text-sm text-navy focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
+          />
+          <div className="flex items-center justify-between text-[11px] text-navy-400">
+            <span>{draft.length} / 5000</span>
+          </div>
+          {error && (
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+              {error}
+            </div>
+          )}
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={onCancelEdit}
+              disabled={saving}
+              className="rounded border border-navy-100 px-3 py-1 text-xs font-semibold text-navy disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={saving || !draft.trim()}
+              className="rounded bg-navy px-3 py-1 text-xs font-semibold text-white disabled:opacity-60"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      ) : hasThesis ? (
+        <>
+          <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-navy">
+            {thesis.thesis}
+          </p>
+          {(updatedStamp || thesis.updatedByName) && (
+            <div className="mt-3 text-[11px] text-navy-400">
+              Updated {updatedStamp}
+              {thesis.updatedByName ? ` by ${thesis.updatedByName}` : ''}
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="mt-3 text-xs italic text-navy-400">
+          No thesis yet. Click "Add thesis" to write one.
+        </p>
       )}
     </div>
   );
