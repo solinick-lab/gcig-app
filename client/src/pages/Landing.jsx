@@ -265,7 +265,7 @@ function Leadership() {
       // each rank.
       members: [
         { name: 'Cole H. Fader', role: 'Senior Portfolio Manager · Technology' },
-        { name: 'Carter Bayerd', role: 'Portfolio Manager · Industrials' },
+        { name: 'Carter Bayerd', role: 'Portfolio Manager · Industrials', photo: '/leadership/carter-bayerd.jpg' },
         { name: 'Harry de Mendonca', role: 'Portfolio Manager · ETF' },
         { name: 'Eli Friedman', role: 'Portfolio Manager · Consumers' },
         { name: 'Elliot Meyers-Kane', role: 'Portfolio Manager · Energy' },
