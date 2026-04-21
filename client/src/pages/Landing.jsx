@@ -253,7 +253,7 @@ function Leadership() {
       // monogram of their initials on navy.
       members: [
         { name: 'Grey Griscom', role: 'President' },
-        { name: 'Sander Olinick', role: 'President' },
+        { name: 'Sander Olinick', role: 'President', photo: '/leadership/sander-olinick.jpg' },
         { name: 'Thomas Seirer', role: 'President', photo: '/leadership/thomas-seirer.jpg' },
         { name: 'Felix Westergaard', role: 'President' },
         { name: 'Eric Winter', role: 'Chief Investment Officer', photo: '/leadership/eric-winter.jpg' },
