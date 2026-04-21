@@ -248,24 +248,24 @@ function Leadership() {
   const groups = [
     {
       title: 'Executive Leadership',
-      // Alphabetical by last name.
+      // Alphabetical by first name.
       members: [
+        { name: 'Eric Winter', role: 'Chief Investment Officer' },
+        { name: 'Felix Westergaard', role: 'President' },
         { name: 'Grey Griscom', role: 'President' },
         { name: 'Sander Olinick', role: 'President' },
         { name: 'Thomas Seirer', role: 'President' },
-        { name: 'Felix Westergaard', role: 'President' },
-        { name: 'Eric Winter', role: 'Chief Investment Officer' },
       ],
     },
     {
       title: 'Portfolio Managers',
-      // Alphabetical by last name.
+      // Alphabetical by first name.
       members: [
         { name: 'Carter Bayerd', role: 'Portfolio Manager · Industrials' },
-        { name: 'Harry de Mendonca', role: 'Portfolio Manager · ETF' },
         { name: 'Cole H. Fader', role: 'Senior Portfolio Manager · Technology' },
         { name: 'Eli Friedman', role: 'Portfolio Manager · Consumers' },
         { name: 'Elliot Meyers-Kane', role: 'Portfolio Manager · Energy' },
+        { name: 'Harry de Mendonca', role: 'Portfolio Manager · ETF' },
       ],
     },
   ];
