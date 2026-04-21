@@ -7,6 +7,7 @@ import {
   Trophy,
   FileText,
   BookOpen,
+  ShieldCheck,
 } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
 import api from '../api/client.js';
@@ -292,129 +293,173 @@ export default function Profile() {
         </div>
       )}
 
-      {GOOGLE_ENABLED && (
-        <div className="mt-6">
-          <Card title="Sign in with Google">
-            {authInfo?.googleLinked ? (
-              <div className="max-w-md space-y-3">
-                <p className="text-sm text-navy">
-                  Your Google account is linked. You can sign in with one click
-                  from the login page.
-                </p>
-                <Button variant="danger" onClick={unlinkGoogle}>
-                  Unlink Google
-                </Button>
-                {!authInfo?.hasPassword && (
-                  <p className="text-xs text-navy-400">
-                    You don't have a password set. Unlink only after setting one
-                    via Forgot Password, or you'll be locked out.
-                  </p>
+      {/* One consolidated Security section — Google link, password,
+          2FA, and active sessions all under a single editorial card
+          with small-caps sub-section kickers. */}
+      <div className="mt-6">
+        <Card
+          kicker="Account Security"
+          title={
+            <span className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-gold" />
+              Security
+            </span>
+          }
+        >
+          <div className="space-y-8">
+            {GOOGLE_ENABLED && (
+              <SecuritySubsection label="Sign-in Method">
+                {authInfo?.googleLinked ? (
+                  <div className="max-w-md space-y-3">
+                    <p className="text-sm text-navy">
+                      Your Google account is linked. You can sign in with one
+                      click from the login page.
+                    </p>
+                    <Button variant="danger" onClick={unlinkGoogle}>
+                      Unlink Google
+                    </Button>
+                    {!authInfo?.hasPassword && (
+                      <p className="text-xs text-navy-400">
+                        You don't have a password set. Unlink only after setting
+                        one via Forgot Password, or you'll be locked out.
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="max-w-md space-y-3">
+                    <p className="text-sm text-navy">
+                      Link your Google account to skip the password on future
+                      logins. The Google email must match your account email.
+                    </p>
+                    <GoogleLogin
+                      onSuccess={(res) =>
+                        res?.credential && linkGoogle(res.credential)
+                      }
+                      onError={() =>
+                        setGoogleMsg({
+                          kind: 'err',
+                          text: 'Google prompt was cancelled',
+                        })
+                      }
+                      text="continue_with"
+                      shape="pill"
+                      theme="outline"
+                    />
+                  </div>
                 )}
-              </div>
-            ) : (
-              <div className="max-w-md space-y-3">
-                <p className="text-sm text-navy">
-                  Link your Google account to skip the password on future logins.
-                  The Google email must match your account email.
-                </p>
-                <GoogleLogin
-                  onSuccess={(res) => res?.credential && linkGoogle(res.credential)}
-                  onError={() =>
-                    setGoogleMsg({ kind: 'err', text: 'Google prompt was cancelled' })
-                  }
-                  text="continue_with"
-                  shape="pill"
-                  theme="outline"
-                />
-              </div>
+                {googleMsg.text && (
+                  <div
+                    className={`mt-3 rounded-lg px-3 py-2 text-sm ${
+                      googleMsg.kind === 'ok'
+                        ? 'bg-emerald-50 text-emerald-800'
+                        : 'bg-red-50 text-red-700'
+                    }`}
+                  >
+                    {googleMsg.text}
+                  </div>
+                )}
+              </SecuritySubsection>
             )}
-            {googleMsg.text && (
-              <div
-                className={`mt-3 rounded-lg px-3 py-2 text-sm ${
-                  googleMsg.kind === 'ok'
-                    ? 'bg-emerald-50 text-emerald-800'
-                    : 'bg-red-50 text-red-700'
-                }`}
+
+            <SecuritySubsection
+              label={
+                authInfo?.hasPassword === false ? 'Set Password' : 'Change Password'
+              }
+            >
+              <form
+                onSubmit={handleChangePassword}
+                className="max-w-md space-y-3"
               >
-                {googleMsg.text}
-              </div>
-            )}
-          </Card>
-        </div>
-      )}
+                {authInfo?.hasPassword !== false && (
+                  <div>
+                    <label className="block text-sm font-medium text-navy">
+                      Current Password
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={form.currentPassword}
+                      onChange={(e) =>
+                        setForm({ ...form, currentPassword: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
+                    />
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium text-navy">
+                    {authInfo?.hasPassword === false ? 'Password' : 'New Password'}
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    minLength={8}
+                    value={form.newPassword}
+                    onChange={(e) =>
+                      setForm({ ...form, newPassword: e.target.value })
+                    }
+                    className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
+                  />
+                  <p className="mt-1 text-xs text-navy-400">Minimum 8 characters.</p>
+                </div>
+                {message && (
+                  <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                    {message}
+                  </div>
+                )}
+                {error && (
+                  <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {error}
+                  </div>
+                )}
+                <Button type="submit">
+                  {authInfo?.hasPassword === false ? 'Set Password' : 'Update Password'}
+                </Button>
+              </form>
+            </SecuritySubsection>
 
-      <div className="mt-6">
-        <Card title={authInfo?.hasPassword === false ? 'Set Password' : 'Change Password'}>
-          <form onSubmit={handleChangePassword} className="max-w-md space-y-3">
-            {authInfo?.hasPassword !== false && (
-              <div>
-                <label className="block text-sm font-medium text-navy">Current Password</label>
-                <input
-                  type="password"
-                  required
-                  value={form.currentPassword}
-                  onChange={(e) => setForm({ ...form, currentPassword: e.target.value })}
-                  className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
-                />
-              </div>
-            )}
-            <div>
-              <label className="block text-sm font-medium text-navy">
-                {authInfo?.hasPassword === false ? 'Password' : 'New Password'}
-              </label>
-              <input
-                type="password"
-                required
-                minLength={8}
-                value={form.newPassword}
-                onChange={(e) => setForm({ ...form, newPassword: e.target.value })}
-                className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
-              />
-              <p className="mt-1 text-xs text-navy-400">Minimum 8 characters.</p>
-            </div>
-            {message && (
-              <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-                {message}
-              </div>
-            )}
-            {error && (
-              <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-                {error}
-              </div>
-            )}
-            <Button type="submit">
-              {authInfo?.hasPassword === false ? 'Set Password' : 'Update Password'}
-            </Button>
-          </form>
-        </Card>
-      </div>
+            <SecuritySubsection label="Two-Factor Authentication">
+              <TwoFactorPanel />
+            </SecuritySubsection>
 
-      <div className="mt-6">
-        <Card title="Two-Factor Authentication">
-          <TwoFactorPanel />
-        </Card>
-      </div>
-
-      <div className="mt-6">
-        <Card title="Session Security">
-          <p className="text-sm text-navy-400">
-            If you suspect your account has been accessed from another device,
-            sign out of all sessions immediately. You'll need to sign in again
-            on every device.
-          </p>
-          <Button
-            variant="danger"
-            className="mt-4"
-            onClick={async () => {
-              if (!confirm('Sign out of every device you are logged in on?')) return;
-              await logoutEverywhere();
-              window.location.href = '/login';
-            }}
-          >
-            Sign out everywhere
-          </Button>
+            <SecuritySubsection label="Active Sessions">
+              <p className="max-w-md text-sm text-navy-400">
+                If you suspect your account has been accessed from another
+                device, sign out of all sessions immediately. You'll need to
+                sign in again on every device, including this one.
+              </p>
+              <Button
+                variant="danger"
+                className="mt-4"
+                onClick={async () => {
+                  if (
+                    !confirm('Sign out of every device you are logged in on?')
+                  )
+                    return;
+                  await logoutEverywhere();
+                  window.location.href = '/login';
+                }}
+              >
+                Sign out everywhere
+              </Button>
+            </SecuritySubsection>
+          </div>
         </Card>
       </div>
     </>
+  );
+}
+
+// Small-caps section label with a gold hairline, used inside the Security
+// card to separate sign-in method / password / 2FA / sessions.
+function SecuritySubsection({ label, children }) {
+  return (
+    <section>
+      <div className="mb-4 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-gold-700">
+        <span className="h-px w-6 bg-gold" />
+        {label}
+      </div>
+      {children}
+    </section>
   );
 }

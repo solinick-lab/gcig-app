@@ -15,35 +15,152 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* react-big-calendar theming to match navy/gold palette */
+/* react-big-calendar — editorial theming to match the app's navy/gold
+   institutional feel. */
 .rbc-calendar {
   font-family: 'Inter', sans-serif;
+  color: #1B2A4A;
+}
+
+/* Toolbar (month label + nav buttons) */
+.rbc-toolbar {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #E8EBF2;
+  align-items: center;
+}
+.rbc-toolbar .rbc-toolbar-label {
+  font-family: 'Source Serif 4', Georgia, serif;
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: #1B2A4A;
+  letter-spacing: -0.01em;
 }
 .rbc-toolbar button {
   color: #1B2A4A;
-  border-color: #E8EBF2;
+  border: 1px solid #E8EBF2;
+  background: white;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 6px 14px;
+  border-radius: 6px;
+  transition: all 150ms ease;
+}
+.rbc-toolbar button:hover,
+.rbc-toolbar button:focus {
+  background-color: #F7F8FB !important;
+  color: #1B2A4A !important;
+  border-color: #C9A84C !important;
+  box-shadow: none;
 }
 .rbc-toolbar button.rbc-active,
-.rbc-toolbar button:hover {
+.rbc-toolbar button.rbc-active:hover,
+.rbc-toolbar button.rbc-active:focus {
   background-color: #1B2A4A !important;
-  color: white !important;
+  color: #C9A84C !important;
   border-color: #1B2A4A !important;
 }
+
+/* Grid + headers */
+.rbc-month-view,
+.rbc-time-view {
+  border: 1px solid #E8EBF2;
+  border-radius: 12px;
+  overflow: hidden;
+  background: white;
+}
+.rbc-header {
+  color: #8C99BB;
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  padding: 12px 6px;
+  border-bottom: 1px solid #E8EBF2;
+  background: #FAFAF7;
+}
+.rbc-month-row + .rbc-month-row,
+.rbc-day-bg + .rbc-day-bg,
+.rbc-header + .rbc-header {
+  border-color: #F0F2F7 !important;
+}
+.rbc-date-cell {
+  padding: 6px 8px;
+  font-family: 'Source Serif 4', Georgia, serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: #1B2A4A;
+  text-align: right;
+}
+.rbc-off-range,
+.rbc-off-range-bg {
+  background: #FCFCFB !important;
+}
+.rbc-off-range .rbc-date-cell,
+.rbc-off-range-bg {
+  color: #C6CDDD !important;
+}
+
+/* Today */
+.rbc-today {
+  background-color: rgba(201, 168, 76, 0.08) !important;
+}
+.rbc-now.rbc-current .rbc-button-link {
+  background: #1B2A4A;
+  color: #C9A84C;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-weight: 700;
+}
+
+/* Events — thinner, magazine-like instead of solid blocks */
 .rbc-event {
   background-color: #1B2A4A !important;
   border: none !important;
   color: white !important;
+  border-radius: 4px !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  padding: 2px 6px !important;
+  box-shadow: 0 1px 2px rgba(27, 42, 74, 0.1);
 }
 .rbc-event.rbc-selected {
   background-color: #C9A84C !important;
   color: #1B2A4A !important;
+  font-weight: 600 !important;
 }
-.rbc-today {
-  background-color: #F4E9C6 !important;
-}
-.rbc-header {
-  color: #1B2A4A;
+.rbc-show-more {
+  color: #9B7F2E !important;
   font-weight: 600;
+  font-size: 10px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  background: transparent !important;
+}
+.rbc-show-more:hover {
+  color: #1B2A4A !important;
+}
+
+/* Time grid (week/day views) */
+.rbc-time-header .rbc-row {
+  min-height: 42px;
+}
+.rbc-time-content {
+  border-top: 1px solid #E8EBF2;
+}
+.rbc-timeslot-group {
+  border-color: #F0F2F7 !important;
+}
+.rbc-time-slot {
+  color: #8C99BB;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+.rbc-current-time-indicator {
+  background-color: #C9A84C !important;
+  height: 2px;
 }
 
 /* In-app news article reader. Styles the sanitized HTML returned by
