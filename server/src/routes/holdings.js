@@ -113,6 +113,10 @@ import prisma from '../db.js';
 import { verifyJwt, requireSuperAdmin, requireRole } from '../middleware/auth.js';
 import { getSheetPortfolio } from '../services/sheetPortfolio.js';
 import { getNewsForTicker, extractArticle } from '../services/news.js';
+import {
+  generateRiskCommentary,
+  detectThesisDrift,
+} from '../services/riskCommentary.js';
 
 const router = Router();
 
@@ -629,6 +633,111 @@ router.delete('/:ticker/thesis', requireSuperAdmin, async (req, res) => {
   if (!ticker) return res.status(400).json({ error: 'Ticker required' });
   await prisma.holdingThesis.deleteMany({ where: { ticker } });
   res.json({ ok: true });
+});
+
+// ── AI risk commentary ───────────────────────────────────────────────
+// Client POSTs the already-computed risk metrics (weights, beta, vol,
+// drawdown, HHI, cash %). Server calls the LLM, caches daily, returns a
+// 3-4 sentence narrative or null if the LLM is unreachable.
+router.post(
+  '/risk-commentary',
+  requireRole('PortfolioManager'),
+  async (req, res) => {
+    try {
+      const metrics = req.body || {};
+      const result = await generateRiskCommentary(metrics);
+      res.json(result || { commentary: null });
+    } catch (err) {
+      console.error('risk-commentary failed:', err.message);
+      // Fail open — panel keeps showing metrics without the narrative.
+      res.json({ commentary: null });
+    }
+  }
+);
+
+// ── Thesis-vs-news drift ─────────────────────────────────────────────
+// For each held non-cash ticker with both a thesis and recent ranked
+// news, ask the LLM whether the news materially contradicts the thesis.
+// Returns an array of flagged tickers only — tickers with drift:false
+// are omitted so the UI can render a clean alert list.
+router.get('/thesis-drift', requireRole('PortfolioManager'), async (_req, res) => {
+  try {
+    const portfolio = await getSheetPortfolio();
+    const tickers = portfolio.holdings
+      .filter((h) => !h.isCash && h.ticker)
+      .map((h) => h.ticker);
+    if (tickers.length === 0) return res.json({ alerts: [] });
+
+    const theses = await prisma.holdingThesis.findMany({
+      where: { ticker: { in: tickers } },
+      select: { ticker: true, thesis: true },
+    });
+    const thesisByTicker = new Map(theses.map((t) => [t.ticker, t.thesis]));
+    const tickersWithThesis = tickers.filter((t) => thesisByTicker.has(t));
+    if (tickersWithThesis.length === 0) return res.json({ alerts: [] });
+
+    // 30-day window for materiality. Articles the club never surfaced
+    // (no ranking) are ignored — we don't want the drift check to drive
+    // new newsapi calls.
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const articles = await prisma.articleRanking.findMany({
+      where: {
+        ticker: { in: tickersWithThesis },
+        createdAt: { gte: since },
+        score: { gte: 5 },
+      },
+      orderBy: { score: 'desc' },
+      take: 100,
+    });
+
+    const articlesByTicker = new Map();
+    for (const a of articles) {
+      if (!articlesByTicker.has(a.ticker)) articlesByTicker.set(a.ticker, []);
+      articlesByTicker.get(a.ticker).push({
+        // ArticleRanking stores the rank + reason, not the headline text.
+        // Pull from summary when present; fall back to ranker's 12-word reason.
+        title: a.reason || a.summary?.slice(0, 120) || null,
+        description: a.summary || null,
+        score: a.score,
+        reason: a.reason,
+        url: a.url,
+      });
+    }
+
+    // Concurrency-limited LLM fan-out so we don't spam the provider.
+    const alerts = [];
+    const CHUNK = 3;
+    for (let i = 0; i < tickersWithThesis.length; i += CHUNK) {
+      const slice = tickersWithThesis.slice(i, i + CHUNK);
+      const results = await Promise.all(
+        slice.map(async (t) => {
+          const arts = articlesByTicker.get(t);
+          if (!arts || arts.length === 0) return null;
+          const drift = await detectThesisDrift({
+            ticker: t,
+            thesis: thesisByTicker.get(t),
+            articles: arts,
+          });
+          if (!drift?.drift) return null;
+          return {
+            ticker: t,
+            severity: drift.severity,
+            reason: drift.reason,
+            articleCount: arts.length,
+          };
+        })
+      );
+      for (const r of results) if (r) alerts.push(r);
+    }
+
+    // High severity first, then medium, then low.
+    const rank = { high: 3, medium: 2, low: 1 };
+    alerts.sort((a, b) => (rank[b.severity] || 0) - (rank[a.severity] || 0));
+    res.json({ alerts, checkedAt: new Date().toISOString() });
+  } catch (err) {
+    console.error('thesis-drift failed:', err.message);
+    res.json({ alerts: [] });
+  }
 });
 
 export default router;

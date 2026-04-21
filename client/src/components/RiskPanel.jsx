@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ShieldAlert, Activity, TrendingDown, Scale, Target } from 'lucide-react';
+import {
+  ShieldAlert,
+  Activity,
+  TrendingDown,
+  Scale,
+  Target,
+  Sparkles,
+  AlertTriangle,
+} from 'lucide-react';
 import api from '../api/client.js';
 import Card from './Card.jsx';
 
@@ -29,6 +37,9 @@ function fmtPct(n, digits = 1) {
 export default function RiskPanel({ holdings, totals, history, cashFlows = [] }) {
   const [betas, setBetas] = useState(null);
   const [error, setError] = useState('');
+  const [commentary, setCommentary] = useState(null);
+  const [commentaryLoading, setCommentaryLoading] = useState(false);
+  const [driftAlerts, setDriftAlerts] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,6 +50,16 @@ export default function RiskPanel({ holdings, totals, history, cashFlows = [] })
       })
       .catch((err) => {
         if (!cancelled) setError(err.response?.data?.error || 'Could not load betas');
+      });
+    // Thesis drift is server-computed and cached 24h, so we can fire it
+    // immediately in parallel with the rest of the panel.
+    api
+      .get('/holdings/thesis-drift')
+      .then(({ data }) => {
+        if (!cancelled) setDriftAlerts(data?.alerts || []);
+      })
+      .catch(() => {
+        if (!cancelled) setDriftAlerts([]);
       });
     return () => {
       cancelled = true;
@@ -185,6 +206,47 @@ export default function RiskPanel({ holdings, totals, history, cashFlows = [] })
     return out;
   }, [concentration, weightedBeta, cashPct, holdings, totalValue]);
 
+  // Fire the AI commentary request once the full metrics payload is ready.
+  // Gated on concentration because it's the single most-dependent piece —
+  // if it's null we don't have enough to say anything useful.
+  useEffect(() => {
+    if (!concentration?.weights?.length) return;
+    let cancelled = false;
+    const payload = {
+      totals: { totalValue, cashValue },
+      cashPct,
+      portfolioBeta: weightedBeta?.value ?? null,
+      betaCoverage: weightedBeta?.coverage ?? null,
+      annualizedVolPct: vol ?? null,
+      maxDrawdownPct: maxDrawdown ?? null,
+      hhi: concentration.hhi,
+      topTicker: concentration.top?.ticker,
+      topPct: concentration.top?.pct,
+      top3Pct: concentration.top3,
+      weights: concentration.weights.map((w) => ({
+        ticker: w.ticker,
+        pct: Number(w.pct.toFixed(2)),
+        sector: w.sector || null,
+        beta: betas?.[w.ticker]?.beta ?? null,
+      })),
+    };
+    setCommentaryLoading(true);
+    api
+      .post('/holdings/risk-commentary', payload)
+      .then(({ data }) => {
+        if (!cancelled) setCommentary(data?.commentary || null);
+      })
+      .catch(() => {
+        if (!cancelled) setCommentary(null);
+      })
+      .finally(() => {
+        if (!cancelled) setCommentaryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [concentration, weightedBeta, vol, maxDrawdown, cashPct, totalValue, cashValue, betas]);
+
   return (
     <div className="mt-6">
       <Card>
@@ -257,6 +319,53 @@ export default function RiskPanel({ holdings, totals, history, cashFlows = [] })
             }
           />
         </div>
+
+        {/* AI risk commentary — 3-4 sentence interpretation of the metrics
+            above with one concrete suggested action. Cached daily server-side;
+            silently hidden if the LLM is unreachable. */}
+        {(commentaryLoading || commentary) && (
+          <div className="mt-5 rounded-lg border border-gold-200 bg-gold-50/40 p-3">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gold-700">
+              <Sparkles className="h-3.5 w-3.5" />
+              AI Risk Read
+            </div>
+            {commentaryLoading && !commentary ? (
+              <div className="text-xs italic text-navy-400">
+                Analyzing portfolio…
+              </div>
+            ) : (
+              <p className="text-sm leading-relaxed text-navy">{commentary}</p>
+            )}
+          </div>
+        )}
+
+        {/* Thesis drift — tickers whose recent news contradicts their stored
+            thesis. Only renders when there are alerts. */}
+        {driftAlerts && driftAlerts.length > 0 && (
+          <div className="mt-5">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-navy-400">
+              <AlertTriangle className="h-3.5 w-3.5 text-red-600" />
+              Thesis Drift
+            </div>
+            <ul className="space-y-1.5">
+              {driftAlerts.map((a) => (
+                <li
+                  key={a.ticker}
+                  className={`rounded-lg border px-3 py-2 text-xs ${
+                    a.severity === 'high'
+                      ? 'border-red-300 bg-red-50 text-red-800'
+                      : a.severity === 'medium'
+                      ? 'border-gold-300 bg-gold-100/40 text-navy'
+                      : 'border-navy-100 bg-navy-50 text-navy'
+                  }`}
+                >
+                  <span className="font-bold">{a.ticker}</span>
+                  {a.reason ? <> — {a.reason}</> : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Per-position rebalancing table */}
         {concentration?.weights?.length ? (
