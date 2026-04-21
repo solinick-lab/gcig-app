@@ -116,6 +116,7 @@ import { getNewsForTicker, extractArticle } from '../services/news.js';
 import {
   generateRiskCommentary,
   detectThesisDrift,
+  checkThesisAgainstNews,
 } from '../services/riskCommentary.js';
 
 const router = Router();
@@ -633,6 +634,40 @@ router.delete('/:ticker/thesis', requireSuperAdmin, async (req, res) => {
   if (!ticker) return res.status(400).json({ error: 'Ticker required' });
   await prisma.holdingThesis.deleteMany({ where: { ticker } });
   res.json({ ok: true });
+});
+
+// 1-2 sentence AI read on whether recent news supports or challenges the
+// stored thesis. Readable by any authed member (same tier as thesis GET).
+router.get('/:ticker/thesis-check', async (req, res) => {
+  const ticker = normalizeTicker(req.params.ticker);
+  if (!ticker) return res.status(400).json({ error: 'Ticker required' });
+  try {
+    const row = await prisma.holdingThesis.findUnique({ where: { ticker } });
+    if (!row?.thesis) return res.json({ reading: null });
+
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const articles = await prisma.articleRanking.findMany({
+      where: { ticker, createdAt: { gte: since }, score: { gte: 5 } },
+      orderBy: { score: 'desc' },
+      take: 5,
+    });
+    const normalizedArticles = articles.map((a) => ({
+      title: a.reason || a.summary?.slice(0, 120) || null,
+      description: a.summary || null,
+      score: a.score,
+      reason: a.reason,
+      url: a.url,
+    }));
+    const result = await checkThesisAgainstNews({
+      ticker,
+      thesis: row.thesis,
+      articles: normalizedArticles,
+    });
+    res.json(result || { reading: null });
+  } catch (err) {
+    console.error('thesis-check failed:', err.message);
+    res.json({ reading: null });
+  }
 });
 
 // ── AI risk commentary ───────────────────────────────────────────────

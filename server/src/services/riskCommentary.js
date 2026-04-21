@@ -98,6 +98,57 @@ export async function generateRiskCommentary(metrics) {
 
 // ── Thesis-vs-news drift ─────────────────────────────────────────────
 
+// Always-on 1-2 sentence reading: does recent news support, challenge, or
+// not touch the thesis? Rendered inline under each ticker's thesis so a
+// member can tell at a glance whether to re-read the thesis or not.
+const THESIS_CHECK_PROMPT = `You are giving a 1-2 sentence state-of-the-thesis update based on recent news coverage.
+
+Output rules:
+- Plain prose, 1-2 short sentences, max 45 words.
+- If news supports the thesis: lead with "News supports the thesis —" and cite a specific fact.
+- If news is neutral or doesn't touch the thesis's claims: return exactly "No material news affecting the thesis."
+- If news contradicts a specific claim in the thesis: lead with "Thesis pressure —" and cite the specific contradicting fact.
+- Never invent facts. Use only facts present in the news payload.
+- No markdown, no labels, no quotes around your output.`;
+
+export async function checkThesisAgainstNews({ ticker, thesis, articles }) {
+  if (!thesis) return null;
+  if (!Array.isArray(articles) || articles.length === 0) {
+    return { reading: 'No recent news to check against the thesis.' };
+  }
+  const headlines = articles.slice(0, 5).map((a, i) => ({
+    index: i,
+    title: a.title,
+    description: (a.description || '').slice(0, 300),
+    reason: a.reason || null,
+    score: a.score ?? null,
+  }));
+  const key = `thesis-check:${todayUtcKey()}:${ticker}:${hashPayload({ thesis, headlines })}`;
+  const cached = cacheGet(key);
+  if (cached) return cached;
+
+  const out = await llmChat({
+    messages: [
+      { role: 'system', content: THESIS_CHECK_PROMPT },
+      {
+        role: 'user',
+        content: `Ticker: ${ticker}\n\nThesis:\n${thesis}\n\nRecent news:\n${JSON.stringify(headlines, null, 2)}`,
+      },
+    ],
+    temperature: 0.2,
+  });
+  if (!out) return null;
+  const cleaned = out
+    .replace(/^["'“”]\s*|\s*["'“”]$/g, '')
+    .replace(/^\s*(reading|update|summary)\s*:\s*/i, '')
+    .trim();
+  if (cleaned.length < 10) return null;
+
+  const result = { reading: cleaned };
+  cacheSet(key, result);
+  return result;
+}
+
 const DRIFT_PROMPT = `You are checking whether recent news contradicts a stored investment thesis for a stock. The club owns this stock based on the thesis below.
 
 Return a JSON object exactly of the form:

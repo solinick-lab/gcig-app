@@ -63,6 +63,8 @@ export default function HoldingDetailModal({ holding, onClose }) {
   const [thesisDraft, setThesisDraft] = useState('');
   const [thesisSaving, setThesisSaving] = useState(false);
   const [thesisError, setThesisError] = useState('');
+  const [thesisCheck, setThesisCheck] = useState(null);
+  const [thesisCheckLoading, setThesisCheckLoading] = useState(false);
   const [newsLoading, setNewsLoading] = useState(false);
   const [readerArticle, setReaderArticle] = useState(null); // article passed to ArticleReaderModal
   const [loading, setLoading] = useState(true);
@@ -90,10 +92,28 @@ export default function HoldingDetailModal({ holding, onClose }) {
     setThesisEditing(false);
     setThesisDraft('');
     setThesisError('');
+    setThesisCheck(null);
     api
       .get(`/holdings/${encodeURIComponent(ticker)}/thesis`)
       .then(({ data }) => {
-        if (!cancelled) setThesis(data);
+        if (cancelled) return;
+        setThesis(data);
+        // If a thesis exists, ask the server for the 1-2 sentence news read.
+        // Cached 24h server-side so repeat opens are free.
+        if (data?.thesis) {
+          setThesisCheckLoading(true);
+          api
+            .get(`/holdings/${encodeURIComponent(ticker)}/thesis-check`)
+            .then(({ data: check }) => {
+              if (!cancelled) setThesisCheck(check?.reading || null);
+            })
+            .catch(() => {
+              if (!cancelled) setThesisCheck(null);
+            })
+            .finally(() => {
+              if (!cancelled) setThesisCheckLoading(false);
+            });
+        }
       })
       .catch(() => {
         /* thesis is optional — swallow */
@@ -437,6 +457,8 @@ export default function HoldingDetailModal({ holding, onClose }) {
             onDelete={handleDeleteThesis}
             saving={thesisSaving}
             error={thesisError}
+            check={thesisCheck}
+            checkLoading={thesisCheckLoading}
           />
 
           {/* Recent news — from newsapi.org, cached 15 min server-side */}
@@ -816,6 +838,8 @@ function ThesisSection({
   onDelete,
   saving,
   error,
+  check,
+  checkLoading,
 }) {
   const hasThesis = !!thesis?.thesis;
   if (!hasThesis && !isSuperAdmin) return null;
@@ -895,6 +919,26 @@ function ThesisSection({
           <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-navy">
             {thesis.thesis}
           </p>
+          {(check || checkLoading) && (
+            <div
+              className={`mt-3 rounded-md border px-3 py-2 text-xs leading-relaxed ${
+                check && /thesis pressure/i.test(check)
+                  ? 'border-red-200 bg-red-50 text-red-800'
+                  : check && /supports the thesis/i.test(check)
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                  : 'border-navy-100 bg-navy-50 text-navy'
+              }`}
+            >
+              <span className="mr-1 font-semibold uppercase tracking-wider text-[10px]">
+                News check
+              </span>
+              {checkLoading && !check ? (
+                <span className="italic text-navy-400">Checking recent news…</span>
+              ) : (
+                <span>{check}</span>
+              )}
+            </div>
+          )}
           {(updatedStamp || thesis.updatedByName) && (
             <div className="mt-3 text-[11px] text-navy-400">
               Updated {updatedStamp}
