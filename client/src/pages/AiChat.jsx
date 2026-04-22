@@ -339,7 +339,12 @@ export default function AiChat() {
                   <Bot className="h-8 w-8 text-navy" />
                 </div>
                 <h2 className="mt-4 font-serif text-xl font-semibold text-navy">
-                  Hi {user?.name?.split(' ')[0] || 'there'} — ask me anything
+                  {`Hi ${
+                    user?.honorificName ||
+                    user?.firstName ||
+                    user?.name?.split(' ')[0] ||
+                    'there'
+                  } — ask me anything`}
                 </h2>
                 <p className="mt-2 max-w-md text-sm leading-relaxed text-navy-400">
                   Try: "What's our current cash position?" · "Who's voting on

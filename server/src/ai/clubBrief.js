@@ -727,16 +727,38 @@ async function buildBrief() {
 
 function buildUserContext(user) {
   if (!user) return '';
-  const firstName = String(user.name || '').trim().split(/\s+/)[0] || user.name;
-  return [
+  const firstName =
+    user.firstName || String(user.name || '').trim().split(/\s+/)[0] || user.name;
+  const honorificName = user.honorificName; // e.g. "Mr. Seirer" or null
+  const pronouns = user.pronouns; // { subject, object, possessive }
+  const lines = [
     '',
     '---',
     '',
     '## Current User',
     `You are chatting with **${user.name}** (role: ${user.role}).`,
-    `When drafting a message, email, or note on their behalf (e.g. "write a message to X"), sign it with "${firstName}" — never leave a placeholder like [Your Name] or [Name]. Address them as ${firstName} if a greeting is natural.`,
-    'Use this to personalize responses where appropriate, but do not reveal the user\'s full account details unless asked.',
-  ].join('\n');
+  ];
+  if (honorificName) {
+    lines.push(
+      `Address them formally as **${honorificName}** for greetings / salutations / document openings (e.g. "Good afternoon, ${honorificName}"). Use their first name **${firstName}** in casual prose where an honorific would feel stiff.`
+    );
+  } else {
+    lines.push(
+      `Address them as **${firstName}**. Do not invent an honorific — we couldn't infer one confidently from their name.`
+    );
+  }
+  if (pronouns) {
+    lines.push(
+      `Pronouns when referring to them in third person: **${pronouns.subject}/${pronouns.object}/${pronouns.possessive}** (best-effort inference — if the user tells you different pronouns, use what they say).`
+    );
+  }
+  lines.push(
+    `When drafting a message, email, or note on their behalf (e.g. "write a message to X"), sign it with "${firstName}" — never leave a placeholder like [Your Name] or [Name].`
+  );
+  lines.push(
+    "Use this to personalize responses where appropriate, but do not reveal the user's full account details unless asked."
+  );
+  return lines.join('\n');
 }
 
 export async function getClubSystemPrompt({ forceFresh = false, user = null } = {}) {

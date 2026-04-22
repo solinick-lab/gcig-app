@@ -89,7 +89,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6 md:space-y-8">
-      <Masthead firstName={firstName} user={user} />
+      <Masthead user={user} />
 
       <PortfolioHero
         totals={quotes?.totals}
@@ -120,8 +120,14 @@ export default function Dashboard() {
 
 // ─── Masthead ───────────────────────────────────────────────────────────
 
-function Masthead({ firstName, user }) {
+function Masthead({ user }) {
   const today = new Date();
+  // Personalize with "Mr. Seirer" / "Ms. Austin" when the server's
+  // name-gender inference came back confident. Otherwise fall back to
+  // the first name — still warm, not generic. Final fallback is "friend"
+  // on the vanishingly rare case neither field is present.
+  const firstName = user?.firstName || user?.name?.split(' ')[0] || '';
+  const greetName = user?.honorificName || firstName || 'friend';
   return (
     <div className="flex flex-wrap items-end justify-between gap-4 border-b border-navy-100 pb-4 md:pb-6">
       <div>
@@ -129,7 +135,7 @@ function Masthead({ firstName, user }) {
           {format(today, 'EEEE · MMMM d, yyyy')}
         </div>
         <h1 className="mt-2 font-serif text-3xl font-semibold leading-tight text-navy md:text-5xl">
-          Welcome back, <span className="italic">{firstName || 'friend'}</span>.
+          Welcome back, <span className="italic">{greetName}</span>.
         </h1>
       </div>
       <div className="flex items-center gap-3">

@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import prisma from '../db.js';
+import { nameProfile } from '../services/nameGender.js';
 
 // We're on cross-origin hosts (onrender.com is a public suffix, so
 // gcig-client and gcig-api are "cross-site" — browsers block cross-site
@@ -41,6 +42,10 @@ export async function verifyJwt(req, res, next) {
     if ((payload.v ?? 0) !== (user.tokenVersion ?? 0)) {
       return res.status(401).json({ error: 'Session revoked, please sign in again' });
     }
+    // Attach honorific / pronouns derived from the first name. Lets
+    // downstream services (AI Assistant, broadcast templating, etc.)
+    // personalize without re-running the name-gender lookup every time.
+    const profile = nameProfile(user.name || '');
     req.user = {
       id: user.id,
       name: user.name,
@@ -48,6 +53,11 @@ export async function verifyJwt(req, res, next) {
       role: user.role,
       extraRoles: user.extraRoles || [],
       isSuperAdmin: isSuperAdminEmail(user.email),
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      honorific: profile.honorific,
+      honorificName: profile.honorificName,
+      pronouns: profile.pronouns,
     };
     next();
   } catch {
@@ -77,13 +87,24 @@ export function isSuperAdminEmail(email) {
 
 // Canonical "user" shape sent to the client in every auth response.
 // Includes the isSuperAdmin flag so the UI can gate owner-only features.
+//
+// `honorific` / `honorificName` / `pronouns` come from a best-effort
+// first-name → gender inference (see services/nameGender.js). They're
+// null / neutral when the name doesn't give a confident signal, so the
+// client should always fall back to the first name / they-them.
 export function serializeUser(user) {
+  const profile = nameProfile(user.name || '');
   return {
     id: user.id,
     name: user.name,
     email: user.email,
     role: user.role,
     isSuperAdmin: isSuperAdminEmail(user.email),
+    firstName: profile.firstName,
+    lastName: profile.lastName,
+    honorific: profile.honorific, // "Mr." / "Ms." / null
+    honorificName: profile.honorificName, // "Mr. Seirer" / null
+    pronouns: profile.pronouns, // { subject, object, possessive }
   };
 }
 

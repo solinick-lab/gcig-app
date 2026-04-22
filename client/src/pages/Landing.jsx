@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import api from '../api/client.js';
 
 // Public landing for The Griffin Fund. Modeled on Select Equity Group's
 // website: text-forward, institutional, restrained palette (white page, navy
@@ -250,7 +251,7 @@ function Leadership() {
       title: 'Executive Leadership',
       // Ordered by rank (President > CIO); alphabetical by last name inside
       // each rank. `photo` is optional — members without one get a serif
-      // monogram of their initials on navy.
+      // monogram of their initials tinted by inferred gender.
       members: [
         { name: 'Grey Griscom', role: 'President' },
         { name: 'Sander Olinick', role: 'President', photo: '/leadership/sander-olinick.jpg' },
@@ -272,6 +273,36 @@ function Leadership() {
       ],
     },
   ];
+
+  // Batch-look up inferred gender for every member name — used to tint
+  // the monogram fallback. Public endpoint, single request.
+  const allNames = useMemo(
+    () => groups.flatMap((g) => g.members.map((m) => m.name)),
+    // `groups` is defined inline every render but its content is static
+    // for this page, so the dependency list is intentionally empty.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+  const [genderMap, setGenderMap] = useState(() => new Map());
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .post('/public/name-gender', { names: allNames })
+      .then((res) => {
+        if (cancelled) return;
+        const m = new Map();
+        for (const r of res.data?.results || []) {
+          m.set(r.name, r.gender);
+        }
+        setGenderMap(m);
+      })
+      .catch(() => {
+        /* fall back to the default (neutral) tint — harmless if this fails. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [allNames]);
 
   return (
     <section className="border-b border-navy-50">
@@ -303,7 +334,7 @@ function Leadership() {
                   {group.members.map((m, mi) => (
                     <Reveal key={m.name} delay={gi * 100 + (mi + 1) * 100}>
                       <li className="flex items-center gap-4">
-                        <MemberAvatar member={m} />
+                        <MemberAvatar member={m} gender={genderMap.get(m.name)} />
                         <div className="min-w-0">
                           <div className="font-serif text-lg font-semibold text-navy">
                             {m.name}
@@ -400,7 +431,17 @@ function Footer() {
 // member object has `photo`, otherwise falls back to a gold-on-navy
 // monogram built from the member's initials. Keeps the list visually
 // consistent even when only some members have headshots.
-function MemberAvatar({ member }) {
+// Tint the monogram backdrop + glyph color by inferred gender. Only
+// visible on members without a headshot (the photo layer covers the
+// backdrop when it loads). Keeps both variants inside the brand
+// palette — no pink/blue stereotype, just a cool / warm split.
+const AVATAR_TINT = {
+  M: { bg: 'bg-navy', fg: 'text-gold' },
+  F: { bg: 'bg-gold-200', fg: 'text-navy' },
+  U: { bg: 'bg-navy-100', fg: 'text-navy' },
+};
+
+function MemberAvatar({ member, gender }) {
   const initials = member.name
     .split(/\s+/)
     .filter(Boolean)
@@ -408,9 +449,12 @@ function MemberAvatar({ member }) {
     .slice(0, 2)
     .join('')
     .toUpperCase();
+  const tint = AVATAR_TINT[gender] || AVATAR_TINT.U;
 
   return (
-    <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-full border border-navy-100 bg-navy">
+    <div
+      className={`relative h-12 w-12 shrink-0 overflow-hidden rounded-full border border-navy-100 ${tint.bg}`}
+    >
       {member.photo && (
         <img
           src={member.photo}
@@ -423,8 +467,12 @@ function MemberAvatar({ member }) {
         />
       )}
       {/* Monogram sits behind the image; if the image fails or is absent,
-          it's visible. */}
-      <div className="flex h-full w-full items-center justify-center font-serif text-sm font-semibold text-gold">
+          it's visible. Color tint signals inferred gender; if we couldn't
+          infer (or haven't fetched yet), the neutral navy-100 variant is
+          used so the tile still reads. */}
+      <div
+        className={`flex h-full w-full items-center justify-center font-serif text-sm font-semibold ${tint.fg}`}
+      >
         {initials}
       </div>
     </div>
