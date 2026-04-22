@@ -65,6 +65,7 @@ model User {
   twoFactorCodes    TwoFactorCode[]
   knownLogins       KnownLogin[]
   chatMessages      ChatMessage[]
+  aiChatSessions    AiChatSession[]
 }
 
 // Chat channels are addressed by a simple string:
@@ -329,6 +330,39 @@ model HoldingThesis {
   updatedByName String?
   updatedAt     DateTime @updatedAt
   createdAt     DateTime @default(now())
+}
+
+// Persistent conversations with the in-house AI Assistant. The client
+// never ships history back — every turn the server reads the full thread
+// from these tables so a forged "assistant" message can't be used as
+// precedent against the scope directive. Cascade from User so account
+// deletion cleans up the whole chat history.
+model AiChatSession {
+  id        Int             @id @default(autoincrement())
+  userId    Int
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Auto-derived from the first user message (truncated). Nullable until
+  // the first turn completes.
+  title     String?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  messages  AiChatMessage[]
+
+  @@index([userId, updatedAt])
+}
+
+model AiChatMessage {
+  id        Int           @id @default(autoincrement())
+  sessionId Int
+  session   AiChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String        // 'user' | 'assistant'
+  content   String
+  // Per-reply telemetry for abuse review / debugging. Null on user rows.
+  model     String?       // which provider served the turn
+  latencyMs Int?
+  createdAt DateTime      @default(now())
+
+  @@index([sessionId, createdAt])
 }
 
 // LLM-generated priority tag for a news article, keyed by URL. Lets us skip

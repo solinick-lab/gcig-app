@@ -48,7 +48,7 @@ const NAV_SECTIONS = [
   {
     items: [
       { to: '/admin', label: 'Admin', icon: ShieldAlert, executiveOnly: true },
-      { to: '/ai-chat', label: 'AI Sandbox', icon: Bot, superAdminOnly: true },
+      { to: '/ai-chat', label: 'AI Assistant', icon: Bot },
     ],
   },
   {

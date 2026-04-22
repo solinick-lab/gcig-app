@@ -1,112 +1,231 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { verifyJwt, requireSuperAdmin } from '../middleware/auth.js';
+import prisma from '../db.js';
+import { verifyJwt } from '../middleware/auth.js';
 import { llmChat } from '../services/llm.js';
 import { getClubSystemPrompt } from '../ai/clubBrief.js';
 
-// ChatGPT-style conversational endpoint backed by the club's own local
-// Ollama model (with OpenAI fallback). Super-admin only for now — this is
-// an experimental sandbox that costs real GPU time and shouldn't be open
-// to every member until we have a usage model. History is client-owned:
-// each turn ships the full message array back; the server is stateless.
+// The Griffin Fund AI Assistant — conversational endpoint backed by the
+// club's own local Ollama model (with OpenAI fallback). Open to every
+// authenticated member.
 //
-// The system prompt is NOT client-controllable. We build it server-side
-// from the club's IPS, internal policies, and live portfolio/voting data
-// so the model always answers in-scope and on-topic. Any `role: 'system'`
-// messages the client sends are dropped.
+// Conversations are server-owned: each turn the client sends only a
+// sessionId + a new user message. The full history is loaded from the
+// DB server-side before calling the model. This prevents a malicious
+// client from forging "assistant" turns and asking the model to treat
+// them as precedent. The system prompt (IPS + policies + live club
+// data) is built by ai/clubBrief.js and is never client-controllable.
 
 const router = Router();
 router.use(verifyJwt);
-router.use(requireSuperAdmin);
 
-// 30 requests / 5 minutes per user. Generous for a single person iterating,
-// tight enough to catch a runaway client-side loop.
+// 60 requests / 10 minutes per user. Generous for normal Q&A, tight
+// enough to catch a runaway client or bulk-prompt abuse.
 const chatLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000,
-  max: 30,
+  windowMs: 10 * 60 * 1000,
+  max: 60,
   keyGenerator: (req) => `ai-chat:${req.user?.id || req.ip}`,
-  message: { error: 'AI chat rate limit reached. Try again in a few minutes.' },
+  message: { error: 'AI Assistant rate limit reached. Try again in a few minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// Only user/assistant turns are accepted from the client. Any `system`
-// messages are silently dropped — the server owns the system prompt.
-const CLIENT_ROLES = new Set(['user', 'assistant']);
-const MAX_MESSAGES = 40;
-const MAX_MESSAGE_CHARS = 8000;
-// Total-conversation cap. Without this a client could ship 40 × 8K = 320K
-// chars of content (~80K tokens) and push the system prompt out of the
-// model's 32K context window — which would effectively wipe our scope
-// directive and safety instructions. 60K chars ~= 15K tokens leaves
-// plenty of headroom for the club brief + reply.
-const MAX_TOTAL_CHARS = 60_000;
+const MAX_MESSAGE_CHARS = 8_000;
+const MAX_TURNS_PER_SESSION = 80; // 40 user + 40 assistant
+const MAX_TOTAL_SESSION_CHARS = 60_000; // matches the model's usable context
 
-function validateMessages(raw) {
-  if (!Array.isArray(raw)) return { error: 'messages must be an array' };
-  if (raw.length === 0) return { error: 'messages cannot be empty' };
-  if (raw.length > MAX_MESSAGES) {
-    return { error: `Conversation too long (max ${MAX_MESSAGES} turns)` };
-  }
-  const cleaned = [];
-  let totalChars = 0;
-  for (const m of raw) {
-    if (!m || typeof m !== 'object') return { error: 'Each message must be an object' };
-    // Skip client-sent system messages — those are advisory only; the
-    // server's club brief is the authoritative system prompt.
-    if (m.role === 'system') continue;
-    if (!CLIENT_ROLES.has(m.role)) {
-      return { error: `Invalid role "${m.role}" — must be user or assistant` };
-    }
-    if (typeof m.content !== 'string' || !m.content.trim()) {
-      return { error: 'Each message must have non-empty string content' };
-    }
-    if (m.content.length > MAX_MESSAGE_CHARS) {
-      return { error: `Message too long (max ${MAX_MESSAGE_CHARS} chars)` };
-    }
-    totalChars += m.content.length;
-    if (totalChars > MAX_TOTAL_CHARS) {
-      return {
-        error: `Conversation is too long in total. Start a new chat.`,
-      };
-    }
-    cleaned.push({ role: m.role, content: m.content });
-  }
-  if (cleaned.length === 0) {
-    return { error: 'No user/assistant messages provided' };
-  }
-  // Last turn must be from the user — otherwise there's nothing to respond to.
-  if (cleaned[cleaned.length - 1].role !== 'user') {
-    return { error: 'Conversation must end with a user message' };
-  }
-  return { messages: cleaned };
+function truncateTitle(s, n = 80) {
+  const t = String(s || '').replace(/\s+/g, ' ').trim();
+  if (t.length <= n) return t;
+  return t.slice(0, n - 1).trimEnd() + '…';
 }
 
-router.post('/', chatLimiter, async (req, res) => {
-  const { temperature } = req.body || {};
-  const { messages, error } = validateMessages(req.body?.messages);
-  if (error) return res.status(400).json({ error });
+// ------------------------------------------------------------
+// Session listing + management
+// ------------------------------------------------------------
 
+router.get('/sessions', async (req, res) => {
+  const sessions = await prisma.aiChatSession.findMany({
+    where: { userId: req.user.id },
+    orderBy: { updatedAt: 'desc' },
+    take: 100,
+    select: {
+      id: true,
+      title: true,
+      createdAt: true,
+      updatedAt: true,
+      _count: { select: { messages: true } },
+    },
+  });
+  res.json(
+    sessions.map((s) => ({
+      id: s.id,
+      title: s.title || 'New conversation',
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      messageCount: s._count.messages,
+    }))
+  );
+});
+
+router.get('/sessions/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Bad session id' });
+  const session = await prisma.aiChatSession.findUnique({
+    where: { id },
+    include: {
+      messages: {
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, role: true, content: true, createdAt: true },
+      },
+    },
+  });
+  if (!session || session.userId !== req.user.id) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  res.json({
+    id: session.id,
+    title: session.title || 'New conversation',
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    messages: session.messages,
+  });
+});
+
+router.delete('/sessions/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Bad session id' });
+  const session = await prisma.aiChatSession.findUnique({
+    where: { id },
+    select: { userId: true },
+  });
+  if (!session || session.userId !== req.user.id) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  await prisma.aiChatSession.delete({ where: { id } });
+  res.json({ ok: true });
+});
+
+// ------------------------------------------------------------
+// Send a turn
+// ------------------------------------------------------------
+
+router.post('/', chatLimiter, async (req, res) => {
+  const { sessionId, message, temperature } = req.body || {};
+  if (typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ error: 'message is required' });
+  }
+  if (message.length > MAX_MESSAGE_CHARS) {
+    return res
+      .status(400)
+      .json({ error: `Message too long (max ${MAX_MESSAGE_CHARS} chars)` });
+  }
   const temp =
     typeof temperature === 'number' && temperature >= 0 && temperature <= 2
       ? temperature
       : 0.7;
 
-  // Prepend the club's authoritative system prompt (IPS + internal policies
-  // + live portfolio/votes/pitches data). The club brief is cached 60s; the
-  // per-user addendum (name + role) is appended fresh each call so drafted
-  // messages sign with the right name.
-  const systemPrompt = await getClubSystemPrompt({ user: req.user });
-  const fullMessages = [{ role: 'system', content: systemPrompt }, ...messages];
+  // Resolve (or create) the session. A client-supplied sessionId must
+  // belong to the current user — otherwise we treat it as "start new".
+  let session = null;
+  if (sessionId != null) {
+    const id = Number(sessionId);
+    if (Number.isFinite(id)) {
+      session = await prisma.aiChatSession.findUnique({ where: { id } });
+      if (session && session.userId !== req.user.id) session = null;
+    }
+  }
+  if (!session) {
+    session = await prisma.aiChatSession.create({
+      data: { userId: req.user.id },
+    });
+  }
 
-  const reply = await llmChat({ messages: fullMessages, temperature: temp });
+  // Load the existing thread. If it's already past the turn / size caps,
+  // refuse — the user should start a new conversation.
+  const priorMessages = await prisma.aiChatMessage.findMany({
+    where: { sessionId: session.id },
+    orderBy: { createdAt: 'asc' },
+    select: { role: true, content: true },
+  });
+  if (priorMessages.length >= MAX_TURNS_PER_SESSION) {
+    return res.status(400).json({
+      error: 'This conversation is at the turn limit. Start a new chat.',
+    });
+  }
+  const priorChars = priorMessages.reduce((s, m) => s + m.content.length, 0);
+  if (priorChars + message.length > MAX_TOTAL_SESSION_CHARS) {
+    return res.status(400).json({
+      error: 'This conversation has grown too long. Start a new chat.',
+    });
+  }
+
+  // Persist the user turn before calling the model — that way if the LLM
+  // errors we still have a record + the UI can retry against the same
+  // session without losing the message.
+  await prisma.aiChatMessage.create({
+    data: { sessionId: session.id, role: 'user', content: message.trim() },
+  });
+
+  // Build the model input: server system prompt + thread from DB.
+  const systemPrompt = await getClubSystemPrompt({ user: req.user });
+  const modelMessages = [
+    { role: 'system', content: systemPrompt },
+    ...priorMessages.map((m) => ({ role: m.role, content: m.content })),
+    { role: 'user', content: message.trim() },
+  ];
+
+  const startedAt = Date.now();
+  const reply = await llmChat({ messages: modelMessages, temperature: temp });
+  const latencyMs = Date.now() - startedAt;
+
   if (!reply) {
     return res.status(503).json({
       error:
         'AI provider unavailable. Check the local LLM tunnel and OpenAI fallback.',
+      sessionId: session.id,
     });
   }
-  res.json({ reply });
+
+  // Persist the assistant turn. Provider identification is best-effort —
+  // llmChat currently returns just the content string, so we tag based on
+  // which env is configured (local preferred, fallback to openai).
+  const providerTag = process.env.LOCAL_LLM_URL
+    ? 'local?'
+    : process.env.OPENAI_API_KEY
+      ? 'openai'
+      : 'unknown';
+  await prisma.aiChatMessage.create({
+    data: {
+      sessionId: session.id,
+      role: 'assistant',
+      content: reply,
+      model: providerTag,
+      latencyMs,
+    },
+  });
+
+  // Title the session from the first user message if still blank.
+  let title = session.title;
+  if (!title) {
+    title = truncateTitle(message, 80);
+    await prisma.aiChatSession.update({
+      where: { id: session.id },
+      data: { title, updatedAt: new Date() },
+    });
+  } else {
+    // Bump updatedAt so the sidebar orders by last activity.
+    await prisma.aiChatSession.update({
+      where: { id: session.id },
+      data: { updatedAt: new Date() },
+    });
+  }
+
+  res.json({
+    sessionId: session.id,
+    title,
+    reply,
+  });
 });
 
 export default router;
