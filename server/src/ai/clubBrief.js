@@ -3,6 +3,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import prisma from '../db.js';
 import { getSheetPortfolio } from '../services/sheetPortfolio.js';
+import { getNewsForTicker } from '../services/news.js';
+
+// Broad-market ETFs whose "news" is category headlines rather than
+// company-specific reporting. Excluded from the News section — they'd
+// otherwise fill it with Samsung/iPhone/Fed noise via QQQ / VOO feeds.
+// Keep in sync with TICKER_TOPIC_OVERRIDES in services/news.js.
+const BROAD_MARKET_TICKERS = ['VOO', 'VGT', 'QQQ', 'SPY', 'XLK', 'XLV'];
 
 // Builds the system prompt for the AI Sandbox. Combines:
 //   1. A tight scope directive (investing + Griffin Fund only)
@@ -197,7 +204,14 @@ async function buildLiveContext() {
           .map((h) => h.ticker.toUpperCase())
       : [];
 
-  const [thesesRes, pitchHistoryRes, closedVotesForHoldingsRes] =
+  // For news we strip broad-market ETFs — their "news" is category
+  // noise (iPhone announcements via QQQ, Fed headlines via VOO) that
+  // doesn't move thesis.
+  const newsTickers = heldTickers.filter(
+    (t) => !BROAD_MARKET_TICKERS.includes(t)
+  );
+
+  const [thesesRes, pitchHistoryRes, closedVotesForHoldingsRes, newsRes] =
     heldTickers.length > 0
       ? await Promise.allSettled([
           prisma.holdingThesis.findMany({
@@ -224,8 +238,43 @@ async function buildLiveContext() {
             orderBy: { closedAt: 'desc' },
             select: { ticker: true, title: true, closedAt: true, synthesis: true },
           }),
+          // News: prefetch each ticker (respects the service's 15-min
+          // cache + persistent ranking cache, so this is cheap on warm
+          // runs) then pull the top-ranked recent items from the DB.
+          (async () => {
+            if (newsTickers.length === 0) return [];
+            await Promise.all(
+              newsTickers.map((t) =>
+                getNewsForTicker(t).catch((err) => {
+                  console.warn(
+                    `clubBrief: news prefetch ${t} failed:`,
+                    err.message
+                  );
+                })
+              )
+            );
+            const newsCutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            return prisma.articleRanking.findMany({
+              where: {
+                ticker: { in: newsTickers },
+                score: { not: null },
+                createdAt: { gte: newsCutoff },
+              },
+              orderBy: [{ score: 'desc' }, { createdAt: 'desc' }],
+              take: 30,
+              select: {
+                ticker: true,
+                url: true,
+                summary: true,
+                score: true,
+                reason: true,
+                createdAt: true,
+              },
+            });
+          })(),
         ])
       : [
+          { status: 'fulfilled', value: [] },
           { status: 'fulfilled', value: [] },
           { status: 'fulfilled', value: [] },
           { status: 'fulfilled', value: [] },
@@ -482,6 +531,39 @@ async function buildLiveContext() {
     performanceBlock = lines.join('\n');
   }
 
+  // News on holdings — grouped by ticker, top 3 per ticker, score-ordered.
+  // Summaries are truncated so a few long articles can't balloon the brief.
+  let newsBlock =
+    '_No recent news articles on file for current holdings. The pipeline may still be warming up._';
+  if (newsRes.status === 'fulfilled' && newsRes.value.length > 0) {
+    const byTicker = new Map();
+    for (const a of newsRes.value) {
+      const key = (a.ticker || '').toUpperCase();
+      if (!key) continue;
+      if (!byTicker.has(key)) byTicker.set(key, []);
+      if (byTicker.get(key).length < 3) byTicker.get(key).push(a);
+    }
+    const sections = [];
+    // Preserve the order from the DB result (score desc) — most-material
+    // tickers first in the rendered block.
+    const seenKeys = new Set();
+    for (const a of newsRes.value) {
+      const key = (a.ticker || '').toUpperCase();
+      if (!key || seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      const articles = byTicker.get(key) || [];
+      const lines = [`**${key}**`];
+      for (const art of articles) {
+        const score = art.score != null ? `score ${art.score.toFixed(1)}` : 'unscored';
+        const when = art.createdAt ? fmtDate(art.createdAt) : '—';
+        const body = truncate(art.summary || art.reason || '_no summary available_', 280);
+        lines.push(`  - (${score} · indexed ${when}) ${body}`);
+      }
+      sections.push(lines.join('\n'));
+    }
+    if (sections.length > 0) newsBlock = sections.join('\n\n');
+  }
+
   // Open votes.
   let openBlock = '_No open votes right now._';
   if (openVotes.status === 'fulfilled' && openVotes.value.length > 0) {
@@ -542,6 +624,15 @@ async function buildLiveContext() {
     '',
     intelBlock,
     '',
+    '### Recent News on Holdings (last 30 days)',
+    '_Top-ranked articles from the club\'s news pipeline. Score is 0–10;_',
+    '_higher = more material. Use these when a user asks "what\'s the latest on X?"_',
+    '_or "any news on our holdings?". Summaries are AI-generated — when citing_',
+    '_one, note it as "per a recent article" rather than quoting verbatim. If a_',
+    '_user wants the source, tell them to open the app\'s news feed for that ticker._',
+    '',
+    newsBlock,
+    '',
     '### Open Votes',
     openBlock,
     '',
@@ -579,8 +670,12 @@ If the ticker isn't in our holdings and the user doesn't specify, ask them which
 ## Answering about held tickers
 When asked about a ticker we hold ("tell me about X", "what's our thesis on X", "who pitched X"):
   1. Start with our own coverage from **Holdings Intel**: the thesis (if any), who pitched it, when, and how the vote went.
-  2. Then add market context you know about the actual company (the one named in the holdings list).
-  3. If we have no internal thesis / pitch / vote records, say so explicitly before giving generic commentary.
+  2. Pull in fresh context from **Recent News on Holdings** if it's there. When you quote an article-derived fact, preface it with something like "per a recent article indexed {date}" so the user knows it came from the pipeline, not your training data.
+  3. Then add market context you know about the actual company (the one named in the holdings list).
+  4. If we have no internal thesis / pitch / vote records AND no recent news, say so explicitly before giving generic commentary.
+
+## Answering "what's the news?"
+Questions like "any news on our portfolio?", "what's happening with X?", "anything material this week?" should be answered primarily from **Recent News on Holdings**. Lead with the highest-scored items. If the section is empty, say so plainly — do not invent headlines. Do NOT hallucinate URLs; if someone wants to read a specific article, direct them to the app's news feed.
 
 ## Authority of sources
 If the IPS and Internal Policies differ on an operational detail (e.g. vote counts, role names), the **Internal Policies document is authoritative** — it reflects how the club actually runs. The app itself uses role names like "JuniorAnalyst", "Analyst", "PortfolioManager" (matching the Internal Policies) rather than the older IPS wording of "Traders".
