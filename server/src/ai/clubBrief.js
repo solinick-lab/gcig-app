@@ -59,18 +59,99 @@ function truncate(s, n) {
   return t.slice(0, n - 1).trimEnd() + '…';
 }
 
+// Starting capital + subsequent infusions. Mirrors client/src/pages/Portfolio.jsx
+// so performance % matches what members see in the app. Without subtracting
+// in-window cash flows, YTD would show "+31%" just from the Jan infusion.
+const INITIAL_CAPITAL = 100_000;
+const CASH_FLOWS = [
+  { date: new Date('2026-01-29T12:00:00Z'), amount: 25_000, label: 'Capital infusion' },
+];
+
+function fmtSignedMoney(n) {
+  if (n == null || Number.isNaN(n)) return '—';
+  const sign = n >= 0 ? '+' : '−';
+  return `${sign}$${Math.abs(Math.round(n)).toLocaleString()}`;
+}
+
+function fmtSignedPct(n) {
+  if (n == null || Number.isNaN(n)) return '—';
+  const sign = n >= 0 ? '+' : '−';
+  return `${sign}${Math.abs(n).toFixed(1)}%`;
+}
+
+// Latest snapshot on or before `target`. Snapshots assumed ascending by date.
+function findOnOrBefore(snapshots, target) {
+  for (let i = snapshots.length - 1; i >= 0; i--) {
+    if (new Date(snapshots[i].date) <= target) return snapshots[i];
+  }
+  return null;
+}
+
+// Return for a window between two snapshots, adjusted for cash flows that
+// landed inside the window (so a $25K infusion doesn't masquerade as gain).
+function windowReturn(snapshots, fromDate, toDate) {
+  if (!snapshots || snapshots.length === 0) return null;
+  const from = findOnOrBefore(snapshots, fromDate);
+  const to = findOnOrBefore(snapshots, toDate);
+  if (!from || !to || !from.totalValue || from.totalValue <= 0) return null;
+  const cfInside = CASH_FLOWS.filter(
+    (cf) => cf.date > new Date(from.date) && cf.date <= new Date(to.date)
+  ).reduce((s, cf) => s + cf.amount, 0);
+  const effectiveEnd = to.totalValue - cfInside;
+  const delta = effectiveEnd - from.totalValue;
+  return {
+    fromDate: from.date,
+    toDate: to.date,
+    from: from.totalValue,
+    to: to.totalValue,
+    dollarChange: delta,
+    percentChange: (delta / from.totalValue) * 100,
+    cashFlowAdjusted: cfInside > 0,
+  };
+}
+
+// Best / worst day-over-day deltas across the snapshot series. Skips days
+// that coincide with a cash-flow event so the infusion isn't reported
+// as the best single day.
+function extremeDays(snapshots) {
+  if (snapshots.length < 2) return { best: null, worst: null };
+  let best = null;
+  let worst = null;
+  const cfDates = new Set(
+    CASH_FLOWS.map((cf) => new Date(cf.date).toISOString().slice(0, 10))
+  );
+  for (let i = 1; i < snapshots.length; i++) {
+    const prev = snapshots[i - 1];
+    const curr = snapshots[i];
+    const currKey = new Date(curr.date).toISOString().slice(0, 10);
+    if (cfDates.has(currKey)) continue;
+    if (prev.totalValue <= 0) continue;
+    const delta = curr.totalValue - prev.totalValue;
+    const pct = (delta / prev.totalValue) * 100;
+    const entry = { date: curr.date, delta, pct };
+    if (!best || pct > best.pct) best = entry;
+    if (!worst || pct < worst.pct) worst = entry;
+  }
+  return { best, worst };
+}
+
 async function buildLiveContext() {
   const now = new Date();
   const in14 = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
   const days30Ago = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
   // First pass: grab sheet + baseline Prisma data in parallel.
+  // Portfolio snapshots go back to Jan 1 of the current year so we can
+  // compute YTD returns; the "best / worst single day" calc uses the full
+  // fetched range.
+  const yearStart = new Date(`${now.getFullYear()}-01-01T00:00:00Z`);
   const [
     sheetRes,
     openVotes,
     closedVotes,
     upcomingPitches,
     upcomingEvents,
+    snapshotsRes,
   ] = await Promise.allSettled([
     getSheetPortfolio(),
     prisma.votingSession.findMany({
@@ -95,6 +176,11 @@ async function buildLiveContext() {
       orderBy: { date: 'asc' },
       take: 8,
       select: { title: true, date: true, location: true },
+    }),
+    prisma.portfolioSnapshot.findMany({
+      where: { date: { gte: yearStart } },
+      orderBy: { date: 'asc' },
+      select: { date: true, totalValue: true, cashValue: true },
     }),
   ]);
 
@@ -182,17 +268,55 @@ async function buildLiveContext() {
       '',
       'Current equity holdings (ordered by market value):',
     ];
-    const heldLines = cap(
-      nonCash.map((h) => {
-        const label = h.name && h.name !== h.ticker ? `${h.ticker} — ${h.name}` : h.ticker;
-        const bits = [`${fmtMoney(h.marketValue)}`];
-        if (h.portfolioPct != null) bits.push(`${fmtPct(h.portfolioPct)} of portfolio`);
-        if (h.sector) bits.push(h.sector);
-        return `  - **${label}** — ${bits.join(', ')}`;
-      }),
-      20
-    );
+    // Two lines per holding: identity on top, performance/pricing below.
+    // Format chosen so the model can scan "which positions are up vs down"
+    // at a glance and can answer "best / worst performer" questions.
+    const heldLines = [];
+    const shown = nonCash.slice(0, 20);
+    for (const h of shown) {
+      const label = h.name && h.name !== h.ticker ? `${h.ticker} — ${h.name}` : h.ticker;
+      const topBits = [];
+      if (h.sector) topBits.push(h.sector);
+      if (h.portfolioPct != null) topBits.push(`${fmtPct(h.portfolioPct)} of book`);
+      heldLines.push(
+        `  - **${label}**${topBits.length > 0 ? ' · ' + topBits.join(' · ') : ''}`
+      );
+
+      const perfBits = [`value ${fmtMoney(h.marketValue)}`];
+      if (h.price != null) perfBits.push(`price $${h.price.toFixed(2)}`);
+      if (h.costBasis != null) perfBits.push(`cost $${h.costBasis.toFixed(2)}/sh`);
+      if (h.percentReturn != null) {
+        const rtnDollar = h.dollarReturn != null ? ` (${fmtSignedMoney(h.dollarReturn)})` : '';
+        perfBits.push(`total return ${fmtSignedPct(h.percentReturn)}${rtnDollar}`);
+      } else if (h.dollarReturn != null) {
+        perfBits.push(`total return ${fmtSignedMoney(h.dollarReturn)}`);
+      }
+      if (h.ytdReturn != null) perfBits.push(`YTD ${fmtSignedMoney(h.ytdReturn)}`);
+      if (h.dayChange != null) perfBits.push(`today ${fmtSignedMoney(h.dayChange)}`);
+      heldLines.push(`      ${perfBits.join(' · ')}`);
+    }
+    if (nonCash.length > 20) {
+      heldLines.push(`  - …(+${nonCash.length - 20} more)`);
+    }
     summaryLines.push(...heldLines);
+
+    // Best / worst current holdings by total return % — lets the model
+    // answer "which holdings are doing best?" without re-scanning the list.
+    const ranked = nonCash
+      .filter((h) => h.percentReturn != null)
+      .sort((a, b) => b.percentReturn - a.percentReturn);
+    if (ranked.length >= 2) {
+      const top = ranked[0];
+      const bottom = ranked[ranked.length - 1];
+      summaryLines.push('');
+      summaryLines.push(
+        `Best performing holding: **${top.ticker}** (${fmtSignedPct(top.percentReturn)} total return)`
+      );
+      summaryLines.push(
+        `Worst performing holding: **${bottom.ticker}** (${fmtSignedPct(bottom.percentReturn)} total return)`
+      );
+    }
+
     portfolioBlock = summaryLines.join('\n');
 
     // Per-holding coverage: thesis + pitch history + prior vote outcomes.
@@ -250,6 +374,85 @@ async function buildLiveContext() {
     }
   }
 
+  // Portfolio performance — windows + recent daily snapshots + extremes.
+  // Uses the PortfolioSnapshot time series, cash-flow-adjusted so a
+  // capital infusion doesn't masquerade as a return.
+  let performanceBlock = '_No portfolio snapshot history on file._';
+  if (snapshotsRes.status === 'fulfilled' && snapshotsRes.value.length > 0) {
+    const snaps = snapshotsRes.value;
+    const latest = snaps[snaps.length - 1];
+    const dayAgo = new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000);
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const win1d = windowReturn(snaps, dayAgo, now);
+    const win7d = windowReturn(snaps, weekAgo, now);
+    const win30d = windowReturn(snaps, monthAgo, now);
+    const winYTD = windowReturn(snaps, yearStart, now);
+
+    const lines = [];
+    const fmtWindow = (label, w) => {
+      if (!w) return `- ${label}: _not enough history_`;
+      const cf = w.cashFlowAdjusted ? ' (cash-flow adjusted)' : '';
+      return `- **${label}** (${fmtDate(w.fromDate)} → ${fmtDate(w.toDate)}): ${fmtSignedMoney(
+        w.dollarChange
+      )}, ${fmtSignedPct(w.percentChange)}${cf}`;
+    };
+    lines.push(fmtWindow('1-day', win1d));
+    lines.push(fmtWindow('7-day', win7d));
+    lines.push(fmtWindow('30-day', win30d));
+    lines.push(fmtWindow('YTD', winYTD));
+
+    // Best / worst single session.
+    const { best, worst } = extremeDays(snaps);
+    if (best) {
+      lines.push(
+        `- Best single session: ${fmtDate(best.date)} (${fmtSignedMoney(
+          best.delta
+        )}, ${fmtSignedPct(best.pct)})`
+      );
+    }
+    if (worst) {
+      lines.push(
+        `- Worst single session: ${fmtDate(worst.date)} (${fmtSignedMoney(
+          worst.delta
+        )}, ${fmtSignedPct(worst.pct)})`
+      );
+    }
+
+    // Recent daily snapshots — bounded to the last 10 so the brief doesn't
+    // balloon. Each row shows total value + change vs the prior session.
+    const recent = snaps.slice(-10);
+    if (recent.length > 0) {
+      lines.push('');
+      lines.push('Recent daily snapshots (newest last):');
+      for (let i = 0; i < recent.length; i++) {
+        const s = recent[i];
+        const prev = i > 0 ? recent[i - 1] : snaps[snaps.length - recent.length - 1];
+        let deltaBit = '';
+        if (prev && prev.totalValue > 0) {
+          const delta = s.totalValue - prev.totalValue;
+          const pct = (delta / prev.totalValue) * 100;
+          deltaBit = ` — ${fmtSignedMoney(delta)}, ${fmtSignedPct(pct)} vs prior`;
+        }
+        const cashBit = s.cashValue != null ? ` (cash ${fmtMoney(s.cashValue)})` : '';
+        lines.push(
+          `  - ${fmtDate(s.date)}: ${fmtMoney(s.totalValue)}${cashBit}${deltaBit}`
+        );
+      }
+    }
+    lines.push('');
+    lines.push(
+      `_Capital structure: started at ${fmtMoney(INITIAL_CAPITAL)}; infusions on file: ${
+        CASH_FLOWS.map((cf) => `${fmtMoney(cf.amount)} on ${fmtDate(cf.date)}`).join(
+          ', '
+        ) || 'none'
+      }._`
+    );
+
+    performanceBlock = lines.join('\n');
+  }
+
   // Open votes.
   let openBlock = '_No open votes right now._';
   if (openVotes.status === 'fulfilled' && openVotes.value.length > 0) {
@@ -299,6 +502,9 @@ async function buildLiveContext() {
     '',
     '### Portfolio',
     portfolioBlock,
+    '',
+    '### Portfolio Performance',
+    performanceBlock,
     '',
     '### Holdings Intel',
     '_Per-ticker coverage from our own records. When a user asks about a_',
