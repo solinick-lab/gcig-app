@@ -23,12 +23,15 @@ const RECURRING_MEETINGS = [
     durationMinutes: 30, // 1:50 – 2:20 PM
     location: null,
     description: 'Weekly club meeting (1:50 – 2:20 PM)',
-    // First real club meeting. Anything earlier in the DB is a leftover
-    // from the initial 3-month backfill and gets pruned on startup.
-    startDate: new Date('2026-04-29T00:00:00'),
+    // First real club meeting (Apr 15, 2026). Anything earlier in the
+    // DB is a leftover from the initial 3-month backfill and gets
+    // pruned on startup. The Apr 15 row itself stays — it matches the
+    // generated schedule — so its attendance records survive.
+    startDate: new Date('2026-04-15T00:00:00'),
     // One-off cancellations as YYYY-MM-DD (local). Instances on these
     // dates are neither created nor kept.
-    skipDates: [],
+    //   2026-04-22 — no meeting that week.
+    skipDates: ['2026-04-22'],
   },
 ];
 
