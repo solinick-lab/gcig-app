@@ -35,6 +35,12 @@ const chatLimiter = rateLimit({
 const CLIENT_ROLES = new Set(['user', 'assistant']);
 const MAX_MESSAGES = 40;
 const MAX_MESSAGE_CHARS = 8000;
+// Total-conversation cap. Without this a client could ship 40 × 8K = 320K
+// chars of content (~80K tokens) and push the system prompt out of the
+// model's 32K context window — which would effectively wipe our scope
+// directive and safety instructions. 60K chars ~= 15K tokens leaves
+// plenty of headroom for the club brief + reply.
+const MAX_TOTAL_CHARS = 60_000;
 
 function validateMessages(raw) {
   if (!Array.isArray(raw)) return { error: 'messages must be an array' };
@@ -43,6 +49,7 @@ function validateMessages(raw) {
     return { error: `Conversation too long (max ${MAX_MESSAGES} turns)` };
   }
   const cleaned = [];
+  let totalChars = 0;
   for (const m of raw) {
     if (!m || typeof m !== 'object') return { error: 'Each message must be an object' };
     // Skip client-sent system messages — those are advisory only; the
@@ -56,6 +63,12 @@ function validateMessages(raw) {
     }
     if (m.content.length > MAX_MESSAGE_CHARS) {
       return { error: `Message too long (max ${MAX_MESSAGE_CHARS} chars)` };
+    }
+    totalChars += m.content.length;
+    if (totalChars > MAX_TOTAL_CHARS) {
+      return {
+        error: `Conversation is too long in total. Start a new chat.`,
+      };
     }
     cleaned.push({ role: m.role, content: m.content });
   }
