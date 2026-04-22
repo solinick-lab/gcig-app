@@ -263,10 +263,10 @@ async function buildLiveContext() {
       .filter((h) => !h.isCash && h.ticker)
       .sort((a, b) => (b.marketValue || 0) - (a.marketValue || 0));
 
-    // Equity-only return + adjusted-to-10%-cash return. The club meets
+    // Equity-only return + adjusted-to-5%-cash return. The club meets
     // once a week so cash sits higher than a steady-state manager would
     // hold — the headline return understates how the picks are actually
-    // performing. Adjusted figure normalizes to a 90/10 book.
+    // performing. Adjusted figure normalizes to a 95/5 book.
     let equityCost = 0;
     let equityMV = 0;
     for (const h of nonCash) {
@@ -278,7 +278,7 @@ async function buildLiveContext() {
     const equityReturnPct =
       equityCost > 0 ? ((equityMV - equityCost) / equityCost) * 100 : null;
     const adjustedReturnPct =
-      equityReturnPct != null ? 0.9 * equityReturnPct : null;
+      equityReturnPct != null ? 0.95 * equityReturnPct : null;
 
     const summaryLines = [
       `- Total portfolio value: **${fmtMoney(totals.totalValue)}**`,
@@ -292,7 +292,7 @@ async function buildLiveContext() {
         `- Equity-only return (picks vs. cost basis): **${fmtSignedPct(equityReturnPct)}**`
       );
       summaryLines.push(
-        `- Adjusted return at 10% cash baseline: **${fmtSignedPct(adjustedReturnPct)}** (normalizes for weekly-meeting cash drag — what the book would return if we held the steady-state 10% cash rather than our actual idle pile)`
+        `- Adjusted return at 5% cash baseline: **${fmtSignedPct(adjustedReturnPct)}** (normalizes for weekly-meeting cash drag — what the book would return if we held the steady-state 5% cash rather than our actual idle pile)`
       );
     }
     summaryLines.push('');

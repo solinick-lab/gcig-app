@@ -72,9 +72,9 @@ const RISK_FREE_RATE = 0.0425;
 // meets once a week, so we often sit on more cash than an always-on
 // manager would — that cash drag makes the headline number understate
 // how the actual stock picks are performing. The adjusted figure shows
-// what the whole book would return if 10% were cash and the other 90%
+// what the whole book would return if 5% were cash and the other 95%
 // were deployed at the same blended rate as our current equity sleeve.
-const TARGET_CASH_RATIO = 0.1;
+const TARGET_CASH_RATIO = 0.05;
 
 function fmtMoney(n) {
   if (n == null) return '—';
@@ -136,7 +136,7 @@ export default function Portfolio() {
   // completely ignoring cash drag. Computed from per-holding shares ×
   // avg cost basis vs market value, summed across non-cash rows.
   //
-  // Adjusted return: apply that equity return to a 90/10 book — the
+  // Adjusted return: apply that equity return to a 95/5 book — the
   // allocation the club would be at if we could deploy faster than
   // once a week. Useful for "our picks are up X% but the cash pile
   // drags the headline to Y%."
@@ -163,7 +163,7 @@ export default function Portfolio() {
 
   const adjustedReturn = useMemo(() => {
     if (!equityReturn) return null;
-    // 90% of the book at the equity's actual return, 10% at 0%.
+    // 95% of the book at the equity's actual return, 5% at 0%.
     const pct = (1 - TARGET_CASH_RATIO) * equityReturn.pct;
     return { pct };
   }, [equityReturn]);
@@ -412,7 +412,7 @@ export default function Portfolio() {
           kicker="Adjusted Return"
           value={adjustedReturn ? fmtPct(adjustedReturn.pct) : '—'}
           sub={equityReturn ? `${fmtPct(equityReturn.pct)} equity-only` : null}
-          footnote="At 10% cash baseline · normalizes for weekly-meeting cash drag"
+          footnote="At 5% cash baseline · normalizes for weekly-meeting cash drag"
           tone={
             adjustedReturn == null
               ? 'neutral'
