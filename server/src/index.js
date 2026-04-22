@@ -21,6 +21,7 @@ import twoFactorRoutes from './routes/twoFactor.js';
 import chatRoutes from './routes/chat.js';
 import broadcastRoutes from './routes/broadcasts.js';
 import systemRoutes from './routes/system.js';
+import aiChatRoutes from './routes/aiChat.js';
 import { ensureRecurringMeetings } from './services/recurringMeetings.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -82,6 +83,7 @@ app.use('/api/2fa', twoFactorRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/broadcasts', broadcastRoutes);
 app.use('/api/system', systemRoutes);
+app.use('/api/ai-chat', aiChatRoutes);
 
 // Generic error handler. Logs the full error server-side for debugging but
 // never leaks internal details (stack traces, Prisma error bodies, etc.) to

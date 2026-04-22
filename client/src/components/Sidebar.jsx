@@ -13,6 +13,7 @@ import {
   MessageSquare,
   Trophy,
   Megaphone,
+  Bot,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import RoleBadge from './RoleBadge.jsx';
@@ -47,6 +48,7 @@ const NAV_SECTIONS = [
   {
     items: [
       { to: '/admin', label: 'Admin', icon: ShieldAlert, executiveOnly: true },
+      { to: '/ai-chat', label: 'AI Sandbox', icon: Bot, superAdminOnly: true },
     ],
   },
   {
@@ -55,7 +57,7 @@ const NAV_SECTIONS = [
 ];
 
 export default function Sidebar({ onNavigate }) {
-  const { user, logout, isAdmin, isExecutive, isAdvisory } = useAuth();
+  const { user, logout, isAdmin, isExecutive, isAdvisory, isSuperAdmin } = useAuth();
 
   return (
     <aside className="flex h-full w-64 flex-col bg-navy text-white">
@@ -86,6 +88,7 @@ export default function Sidebar({ onNavigate }) {
             (i) =>
               (!i.adminOnly || isAdmin) &&
               (!i.executiveOnly || isExecutive) &&
+              (!i.superAdminOnly || isSuperAdmin) &&
               (!i.hideForAdvisory || !isAdvisory)
           );
           if (visible.length === 0) return null;
