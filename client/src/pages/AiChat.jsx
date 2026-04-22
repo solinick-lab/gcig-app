@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Bot, Send, RotateCcw, Sparkles, User, AlertTriangle } from 'lucide-react';
+import {
+  Bot,
+  Send,
+  RotateCcw,
+  User,
+  AlertTriangle,
+  BookOpen,
+  LineChart,
+  Vote,
+  CalendarDays,
+} from 'lucide-react';
 import api from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
@@ -13,9 +23,10 @@ import Button from '../components/Button.jsx';
 // History lives in component state — no DB persistence yet. A page reload
 // wipes the conversation. Good enough for a first pass; we can upgrade to
 // a Conversation/Message model later.
-
-const DEFAULT_SYSTEM_PROMPT =
-  "You are a helpful assistant for The Griffin Fund, Grace Church School's student investment club. Be concise, accurate, and professional. If asked about stocks or markets, give balanced views and note you're not a licensed advisor.";
+//
+// The system prompt is owned server-side (see server/src/ai/clubBrief.js).
+// It prepends the IPS, Internal Policies, and live portfolio/voting data
+// to every turn and constrains the model to investing + club topics.
 
 function formatTime(iso) {
   try {
@@ -30,8 +41,6 @@ function formatTime(iso) {
 
 export default function AiChat() {
   const { isSuperAdmin } = useAuth();
-  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
-  const [systemOpen, setSystemOpen] = useState(false);
   const [messages, setMessages] = useState([]); // [{ role, content, at }]
   const [input, setInput] = useState('');
   const [pending, setPending] = useState(false);
@@ -67,14 +76,9 @@ export default function AiChat() {
     setError('');
     setPending(true);
 
-    // Build the payload: optional system prompt, then user/assistant turns.
-    const payload = [];
-    if (systemPrompt.trim()) {
-      payload.push({ role: 'system', content: systemPrompt.trim() });
-    }
-    for (const m of nextHistory) {
-      payload.push({ role: m.role, content: m.content });
-    }
+    // Ship only user/assistant turns — the server owns the system prompt
+    // (club IPS + internal policies + live holdings/votes/pitches).
+    const payload = nextHistory.map((m) => ({ role: m.role, content: m.content }));
 
     try {
       const res = await api.post('/ai-chat', { messages: payload });
@@ -115,7 +119,7 @@ export default function AiChat() {
       <PageHeader
         kicker="Experimental"
         title="AI Sandbox"
-        subtitle="ChatGPT-style conversation powered by the club's own model. Super admin only — not yet open to the general body."
+        subtitle="Scoped to investing + Griffin Fund topics only. Grounded on the club's IPS, Internal Policies, and live portfolio / voting data."
         actions={
           <Button variant="outline" onClick={reset} disabled={messages.length === 0}>
             <RotateCcw className="h-4 w-4" />
@@ -124,36 +128,60 @@ export default function AiChat() {
         }
       />
 
-      {/* Collapsible system prompt — lets the super admin steer tone/role
-          without leaving the page. Defaults to a sensible Griffin Fund voice. */}
-      <div className="mb-4 rounded-xl border border-navy-100 bg-white">
-        <button
-          type="button"
-          onClick={() => setSystemOpen((v) => !v)}
-          className="flex w-full items-center justify-between px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.2em] text-navy-400 hover:text-navy"
-        >
-          <span className="flex items-center gap-2">
-            <Sparkles className="h-3.5 w-3.5 text-gold-700" />
-            System prompt
-          </span>
-          <span className="text-[10px] text-navy-300">
-            {systemOpen ? 'Hide' : 'Show'}
-          </span>
-        </button>
-        {systemOpen && (
-          <div className="border-t border-navy-100 px-4 py-3">
-            <textarea
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              rows={3}
-              className="w-full resize-y rounded-lg border border-navy-100 bg-white px-3 py-2 text-sm text-navy placeholder:text-navy-300 focus:border-gold focus:outline-none"
-              placeholder="Instructions that shape how the model responds…"
-            />
-            <p className="mt-2 text-[11px] text-navy-400">
-              Applied to every turn. Edits take effect on the next send.
-            </p>
+      {/* What the AI knows. Read-only — the system prompt is assembled
+          server-side from club docs + live data (see ai/clubBrief.js). */}
+      <div className="mb-4 rounded-xl border border-navy-100 bg-white px-4 py-4 md:px-5">
+        <div className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-gold-700">
+          <span className="h-px w-6 bg-gold" />
+          What the AI knows
+        </div>
+        <div className="grid gap-3 text-xs text-navy-500 md:grid-cols-2">
+          <div className="flex items-start gap-2">
+            <BookOpen className="mt-0.5 h-4 w-4 flex-shrink-0 text-navy-400" />
+            <div>
+              <div className="font-semibold text-navy">IPS &amp; Internal Policies</div>
+              <div>
+                Full text of both club documents — roles, voting rules,
+                attendance expectations, permitted / prohibited assets.
+              </div>
+            </div>
           </div>
-        )}
+          <div className="flex items-start gap-2">
+            <LineChart className="mt-0.5 h-4 w-4 flex-shrink-0 text-navy-400" />
+            <div>
+              <div className="font-semibold text-navy">Current portfolio</div>
+              <div>
+                Live holdings, cash position, and sector mix from the Google
+                Sheet (cached ~60s).
+              </div>
+            </div>
+          </div>
+          <div className="flex items-start gap-2">
+            <Vote className="mt-0.5 h-4 w-4 flex-shrink-0 text-navy-400" />
+            <div>
+              <div className="font-semibold text-navy">Votes &amp; pitches</div>
+              <div>
+                Open voting sessions, recently closed votes, and pitches
+                scheduled for the next two weeks.
+              </div>
+            </div>
+          </div>
+          <div className="flex items-start gap-2">
+            <CalendarDays className="mt-0.5 h-4 w-4 flex-shrink-0 text-navy-400" />
+            <div>
+              <div className="font-semibold text-navy">Upcoming events</div>
+              <div>
+                Regular (audience = all) events in the next two weeks.
+                Advisory Board meetings stay private to the board.
+              </div>
+            </div>
+          </div>
+        </div>
+        <p className="mt-3 border-t border-navy-50 pt-3 text-[11px] text-navy-400">
+          Off-topic questions (homework, personal advice, general trivia)
+          will be politely declined. This is a research tool, not financial
+          advice.
+        </p>
       </div>
 
       <div className="flex min-h-[60vh] flex-col rounded-xl border border-navy-100 bg-white">
@@ -172,9 +200,12 @@ export default function AiChat() {
                 Ask the house model
               </h2>
               <p className="mt-2 max-w-md text-sm leading-relaxed text-navy-400">
-                Conversation history lives only in this tab — reload the page
-                to start fresh. Responses come from the local model when the
-                tunnel is up, OpenAI otherwise.
+                Try: "What's our current cash position?" · "Who's voting
+                on what right now?" · "Summarize the IPS rules on asset
+                allocation." · "Walk me through how a pitch gets approved."
+              </p>
+              <p className="mt-3 max-w-md text-xs text-navy-300">
+                History lives only in this tab — reload to start fresh.
               </p>
             </div>
           )}
