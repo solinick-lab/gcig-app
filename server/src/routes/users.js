@@ -11,6 +11,7 @@ import {
 } from '../middleware/auth.js';
 import { sendInviteEmail, primaryClientOrigin } from '../services/email.js';
 import { auditReq } from '../services/audit.js';
+import { nameProfile } from '../services/nameGender.js';
 
 const router = Router();
 
@@ -56,6 +57,35 @@ router.get('/', async (_req, res) => {
     industries: u.industries.map((ui) => ui.industry),
   }));
   res.json(shaped);
+});
+
+// Super-admin-only: name-gender inference readout for every member.
+// Exposes what the app THINKS each person's first name implies
+// (honorific, pronouns, gender, confidence) so the owner can spot
+// wrong guesses — e.g. a unisex name that flipped the wrong way. Not
+// visible to regular members; treat as internal-only telemetry.
+router.get('/name-inference', requireSuperAdmin, async (_req, res) => {
+  const users = await prisma.user.findMany({
+    select: { id: true, name: true, email: true, role: true },
+    orderBy: { name: 'asc' },
+  });
+  const rows = users.map((u) => {
+    const p = nameProfile(u.name || '');
+    return {
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      firstName: p.firstName,
+      lastName: p.lastName,
+      gender: p.gender, // 'M' | 'F' | 'U'
+      confidence: p.confidence,
+      honorific: p.honorific,
+      honorificName: p.honorificName,
+      pronouns: p.pronouns,
+    };
+  });
+  res.json(rows);
 });
 
 // Invite a new member. No account is created yet — just a PendingInvite record

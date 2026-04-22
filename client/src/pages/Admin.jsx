@@ -109,11 +109,17 @@ function LlmStatusCard() {
 
 export default function Admin() {
   const { isSuperAdmin } = useAuth();
-  // Audit Log is only visible to the super admin (app owner). Other Presidents
-  // see only the Members tab — no tab strip rendered if there's nothing to switch to.
+  // Audit Log + Name Inference are only visible to the super admin (app
+  // owner). Other Presidents see only the Members tab — no tab strip
+  // rendered if there's nothing to switch to.
   const tabs = [
     { id: 'members', label: 'Members' },
-    ...(isSuperAdmin ? [{ id: 'audit', label: 'Audit Log' }] : []),
+    ...(isSuperAdmin
+      ? [
+          { id: 'audit', label: 'Audit Log' },
+          { id: 'inference', label: 'Name Inference' },
+        ]
+      : []),
   ];
   const [tab, setTab] = useState('members');
 
@@ -145,7 +151,161 @@ export default function Admin() {
           </button>
         ))}
       </div>
-      {tab === 'audit' && isSuperAdmin ? <AuditLog embedded /> : <Members embedded />}
+      {tab === 'audit' && isSuperAdmin ? (
+        <AuditLog embedded />
+      ) : tab === 'inference' && isSuperAdmin ? (
+        <NameInferenceTable />
+      ) : (
+        <Members embedded />
+      )}
     </>
+  );
+}
+
+// ─── Name Inference (super-admin only) ─────────────────────────────────
+// Readout of what the name-gender service thinks for each member:
+// inferred gender, pronouns, honorific, and confidence. Useful for
+// spotting wrong guesses (unisex / international / nicknames) before
+// they land in a drafted AI message or a Landing page avatar tint.
+function NameInferenceTable() {
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    setError('');
+    try {
+      const { data } = await api.get('/users/name-inference');
+      setRows(data);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to load name inference');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+        {error}
+      </div>
+    );
+  }
+
+  if (!rows) {
+    return (
+      <div className="p-6 text-center text-sm text-navy-400">Loading…</div>
+    );
+  }
+
+  return (
+    <Card>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-navy">
+            What the app thinks about each member's name
+          </div>
+          <p className="mt-1 max-w-2xl text-xs text-navy-400">
+            Inferred from a US-frequency dataset, using the member's first
+            name. Below 85% confidence the app falls back to they/them and
+            drops the honorific — those rows show "Mx." below. This view is
+            super-admin-only so wrong guesses can be caught before they
+            surface in the AI Assistant or avatar tints.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={load}
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-navy-100 bg-white px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-50 disabled:opacity-50"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-navy-100 text-left text-[10px] font-semibold uppercase tracking-[0.18em] text-navy-400">
+              <th className="py-2 pr-3">Member</th>
+              <th className="py-2 pr-3">First name</th>
+              <th className="py-2 pr-3">Gender</th>
+              <th className="py-2 pr-3">Confidence</th>
+              <th className="py-2 pr-3">Honorific</th>
+              <th className="py-2 pr-3">Pronouns</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const g = r.gender;
+              const genderClass =
+                g === 'F'
+                  ? 'bg-rose-50 text-rose-800 border-rose-200'
+                  : g === 'M'
+                    ? 'bg-sky-50 text-sky-800 border-sky-200'
+                    : 'bg-navy-50 text-navy-500 border-navy-100';
+              const pronouns = r.pronouns
+                ? `${r.pronouns.subject} / ${r.pronouns.object} / ${r.pronouns.possessive}`
+                : '—';
+              const confPct = r.confidence != null
+                ? `${(r.confidence * 100).toFixed(1)}%`
+                : '—';
+              const lowConfidence =
+                r.confidence != null && r.confidence < 0.85;
+              return (
+                <tr
+                  key={r.id}
+                  className="border-b border-navy-50 last:border-b-0"
+                >
+                  <td className="py-2 pr-3">
+                    <div className="font-semibold text-navy">{r.name}</div>
+                    <div className="text-[10px] text-navy-400">{r.role}</div>
+                  </td>
+                  <td className="py-2 pr-3 text-navy-500">
+                    {r.firstName || '—'}
+                  </td>
+                  <td className="py-2 pr-3">
+                    <span
+                      className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${genderClass}`}
+                    >
+                      {g === 'M' ? 'Male' : g === 'F' ? 'Female' : 'Unknown'}
+                    </span>
+                  </td>
+                  <td
+                    className={`py-2 pr-3 font-semibold tabular-nums ${
+                      lowConfidence ? 'text-amber-700' : 'text-navy'
+                    }`}
+                    title={
+                      lowConfidence
+                        ? 'Below 85% — app uses neutral defaults'
+                        : 'Confident enough to use honorific + binary pronouns'
+                    }
+                  >
+                    {confPct}
+                  </td>
+                  <td className="py-2 pr-3">
+                    {r.honorificName ? (
+                      <span className="font-semibold text-navy">
+                        {r.honorificName}
+                      </span>
+                    ) : (
+                      <span className="text-navy-400">
+                        Mx. (neutral fallback)
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2 pr-3 text-navy-500">{pronouns}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }
