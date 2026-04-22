@@ -288,16 +288,36 @@ function MessageBubble({ message }) {
 }
 
 function ThinkingBubble() {
+  // Three-dot bouncing indicator. Inline animationDelay because Tailwind's
+  // arbitrary-value class can get stripped from the final CSS bundle —
+  // plain style props always land in the DOM.
   return (
     <div className="flex gap-3">
       <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gold-100 text-navy">
         <Bot className="h-4 w-4" />
       </div>
-      <div className="inline-flex items-center gap-1 rounded-2xl bg-navy-50 px-4 py-3">
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-navy-300 [animation-delay:-0.3s]" />
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-navy-300 [animation-delay:-0.15s]" />
-        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-navy-300" />
+      <div className="inline-flex items-center gap-2 rounded-2xl bg-navy-50 px-5 py-4">
+        <span
+          className="h-2.5 w-2.5 rounded-full bg-navy"
+          style={{ animation: 'aiBounce 1s infinite ease-in-out', animationDelay: '0s' }}
+        />
+        <span
+          className="h-2.5 w-2.5 rounded-full bg-navy"
+          style={{ animation: 'aiBounce 1s infinite ease-in-out', animationDelay: '0.15s' }}
+        />
+        <span
+          className="h-2.5 w-2.5 rounded-full bg-navy"
+          style={{ animation: 'aiBounce 1s infinite ease-in-out', animationDelay: '0.3s' }}
+        />
       </div>
+      {/* Keyframes live inline so this component is fully self-contained —
+          no Tailwind plugin / global CSS dependency required. */}
+      <style>{`
+        @keyframes aiBounce {
+          0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+          40% { transform: translateY(-8px); opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }

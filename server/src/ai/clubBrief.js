@@ -383,11 +383,27 @@ async function buildBrief() {
   ].join('\n');
 }
 
-export async function getClubSystemPrompt({ forceFresh = false } = {}) {
+function buildUserContext(user) {
+  if (!user) return '';
+  const firstName = String(user.name || '').trim().split(/\s+/)[0] || user.name;
+  return [
+    '',
+    '---',
+    '',
+    '## Current User',
+    `You are chatting with **${user.name}** (role: ${user.role}).`,
+    `When drafting a message, email, or note on their behalf (e.g. "write a message to X"), sign it with "${firstName}" — never leave a placeholder like [Your Name] or [Name]. Address them as ${firstName} if a greeting is natural.`,
+    'Use this to personalize responses where appropriate, but do not reveal the user\'s full account details unless asked.',
+  ].join('\n');
+}
+
+export async function getClubSystemPrompt({ forceFresh = false, user = null } = {}) {
+  let base;
   if (!forceFresh && cache.text && Date.now() - cache.at < CACHE_TTL_MS) {
-    return cache.text;
+    base = cache.text;
+  } else {
+    base = await buildBrief();
+    cache = { at: Date.now(), text: base };
   }
-  const text = await buildBrief();
-  cache = { at: Date.now(), text };
-  return text;
+  return base + buildUserContext(user);
 }

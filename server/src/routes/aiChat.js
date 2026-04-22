@@ -80,8 +80,10 @@ router.post('/', chatLimiter, async (req, res) => {
       : 0.7;
 
   // Prepend the club's authoritative system prompt (IPS + internal policies
-  // + live portfolio/votes/pitches data). Cached 60s inside the service.
-  const systemPrompt = await getClubSystemPrompt();
+  // + live portfolio/votes/pitches data). The club brief is cached 60s; the
+  // per-user addendum (name + role) is appended fresh each call so drafted
+  // messages sign with the right name.
+  const systemPrompt = await getClubSystemPrompt({ user: req.user });
   const fullMessages = [{ role: 'system', content: systemPrompt }, ...messages];
 
   const reply = await llmChat({ messages: fullMessages, temperature: temp });
