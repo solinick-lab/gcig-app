@@ -26,7 +26,7 @@ import RoleBadge from '../components/RoleBadge.jsx';
 
 // ---------------------------------------------------------------------------
 // Editorial-style Dashboard. Pulls from three existing endpoints:
-//   /dashboard         next pitch, upcoming events (+ pitches), activity, WIR
+//   /dashboard         next pitch, upcoming events (+ pitches), activity, DIR
 //   /holdings/quotes   live AUM, cash, holdings list → used for movers
 //   /holdings/history  sparkline + WoW / MoM / YTD deltas
 // All requests are cheap (server-cached). If any one fails the rest still
@@ -97,8 +97,11 @@ export default function Dashboard() {
         history={normalizedHistory}
       />
 
-      {dashboard?.weekInReview && (
-        <WeekInReview text={dashboard.weekInReview} />
+      {dashboard?.dayInReview && (
+        <DayInReview
+          text={dashboard.dayInReview}
+          generatedAt={dashboard.dayInReviewAt}
+        />
       )}
 
       <SpotlightRow
@@ -369,18 +372,44 @@ function Mover({ holding }) {
   );
 }
 
-// ─── Week in Review ─────────────────────────────────────────────────────
+// ─── Day in Review ──────────────────────────────────────────────────────
 
-function WeekInReview({ text }) {
+function DayInReview({ text, generatedAt }) {
+  // Stamp the card with an ET-formatted "as of" line so the user can see
+  // exactly which market close the paragraph reflects.
+  let stamp = null;
+  if (generatedAt) {
+    try {
+      const d = new Date(generatedAt);
+      const dateStr = d.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        timeZone: 'America/New_York',
+      });
+      const timeStr = d.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZone: 'America/New_York',
+      });
+      stamp = `As of ${timeStr} ET · ${dateStr}`;
+    } catch {
+      /* ignore */
+    }
+  }
   return (
     <div className="rounded-2xl border border-gold-200 bg-[#FFFDF5] p-5 shadow-card md:p-7">
       <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-gold-700">
         <span className="h-px w-6 bg-gold" />
-        The Week in Review
+        The Day in Review
       </div>
       <p className="mt-4 font-serif text-lg leading-relaxed text-navy md:text-xl">
         {text}
       </p>
+      {stamp && (
+        <div className="mt-4 border-t border-gold-200/60 pt-3 text-[11px] uppercase tracking-[0.18em] text-navy-400">
+          {stamp}
+        </div>
+      )}
     </div>
   );
 }

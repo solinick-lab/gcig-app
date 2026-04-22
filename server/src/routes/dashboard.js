@@ -2,33 +2,69 @@ import { Router } from 'express';
 import prisma from '../db.js';
 import { verifyJwt } from '../middleware/auth.js';
 import { getSheetPortfolio } from '../services/sheetPortfolio.js';
-import { generateWeekInReview } from '../services/articleSummarizer.js';
+import { generateDayInReview } from '../services/articleSummarizer.js';
 import { getNewsForTicker } from '../services/news.js';
 import { eventAudienceWhere } from './events.js';
 
 const router = Router();
 router.use(verifyJwt);
 
-// Week-in-Review cache. The paragraph covers a rolling 7-day window and the
-// club's actual cadence is weekly meetings, so regenerating a couple of
-// times per week is plenty. 3.5 days = refresh roughly mid-week and again
-// right before the next meeting.
-const WIR_TTL_MS = 3.5 * 24 * 60 * 60 * 1000;
-const wirCache = { at: 0, text: null };
+// Day-in-Review cache. The paragraph represents "as of 4:00 PM ET market
+// close", so it's keyed by the ET review-day. We regenerate at most once
+// per ET trading day — the first dashboard load after 4pm ET triggers a
+// fresh paragraph; everyone else serves the cached one until the next
+// 4pm crossover. First deploy with an empty cache generates immediately
+// so the card lights up on day one.
+const dirCache = { reviewDay: null, generatedAt: null, text: null };
+
+// The YYYY-MM-DD key the DIR is stamped against, based on ET 4pm cutoff.
+//   - Before 4pm ET: return yesterday's date (today's close hasn't happened)
+//   - At/after 4pm ET: return today's date
+// So the key only flips once per day, at 4pm ET.
+function currentReviewDayET() {
+  const now = new Date();
+  // Pull the hour + date components in America/New_York. Intl gives us
+  // parts that respect DST automatically — simpler than subtracting a
+  // fixed 4 or 5 hours.
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hour12: false,
+  }).formatToParts(now);
+  const get = (t) => parts.find((p) => p.type === t)?.value;
+  const y = Number(get('year'));
+  const m = Number(get('month'));
+  const d = Number(get('day'));
+  const hour = Number(get('hour'));
+  // ET date as UTC midnight for easy arithmetic.
+  const etDate = new Date(Date.UTC(y, m - 1, d));
+  if (hour < 16) {
+    etDate.setUTCDate(etDate.getUTCDate() - 1);
+  }
+  return etDate.toISOString().slice(0, 10);
+}
 
 // Broad-market / sector ETFs whose "news" is category headlines rather than
-// company-specific reporting. Excluded from Week in Review — they'd otherwise
-// fill it with Samsung/iPhone/Bayonetta-style noise via QQQ's tech-category
-// feed or random Fed blurbs via VOO's business-category feed. Keep in sync
-// with TICKER_TOPIC_OVERRIDES in services/news.js.
+// company-specific reporting. Excluded from Day in Review — they'd otherwise
+// fill it with Samsung/iPhone-style noise via QQQ's tech-category feed or
+// random Fed blurbs via VOO's business-category feed. Keep in sync with
+// TICKER_TOPIC_OVERRIDES in services/news.js.
 const BROAD_MARKET_TICKERS = ['VOO', 'VGT', 'QQQ', 'SPY', 'XLK', 'XLV'];
 
 // Build the structured payload the LLM summarizes. Kept small and factual;
-// the prose is the model's job.
-async function buildWeekInReviewPayload() {
+// the prose is the model's job. Window is roughly 24 hours back — today's
+// trading session — so the paragraph reads as a daily close recap.
+async function buildDayInReviewPayload() {
   const now = new Date();
-  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  // Look 14 days ahead for "upcoming" pitches so the WIR surfaces items
+  const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  // Portfolio comparison needs a bit more history (last ~3 days of
+  // snapshots) so we can find the most recent prior-session snapshot
+  // even after a weekend.
+  const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+  // Look 14 days ahead for "upcoming" pitches so the DIR surfaces items
   // scheduled for the next club meeting even if it's ~10 days out.
   const lookahead = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
 
@@ -92,7 +128,7 @@ async function buildWeekInReviewPayload() {
   const [newPitches, upcomingPitches, openVotes, closedVotes, snapshots, topNews] =
     await Promise.all([
       prisma.pitch.findMany({
-        where: { date: { gte: weekAgo, lte: now } },
+        where: { date: { gte: dayAgo, lte: now } },
         orderBy: { date: 'desc' },
         select: { ticker: true, pitcherName: true, date: true, votedOutcome: true },
       }),
@@ -107,12 +143,12 @@ async function buildWeekInReviewPayload() {
         select: { ticker: true, title: true, deadline: true },
       }),
       prisma.votingSession.findMany({
-        where: { status: 'closed', closedAt: { gte: weekAgo } },
+        where: { status: 'closed', closedAt: { gte: dayAgo } },
         orderBy: { closedAt: 'desc' },
         select: { ticker: true, title: true, closedAt: true, synthesis: true },
       }),
       prisma.portfolioSnapshot.findMany({
-        where: { date: { gte: weekAgo } },
+        where: { date: { gte: threeDaysAgo } },
         orderBy: { date: 'asc' },
         select: { date: true, totalValue: true },
       }),
@@ -124,11 +160,13 @@ async function buildWeekInReviewPayload() {
       }),
     ]);
 
-  // Portfolio delta over the week (best effort from snapshots).
+  // Day-over-day portfolio delta: latest snapshot vs the most recent prior
+  // snapshot. If we only have one snapshot (or none), return null — the
+  // prompt will omit portfolio commentary.
   let portfolio = null;
   if (snapshots.length >= 2) {
-    const start = snapshots[0];
     const end = snapshots[snapshots.length - 1];
+    const start = snapshots[snapshots.length - 2];
     const delta = end.totalValue - start.totalValue;
     const pct = start.totalValue > 0 ? (delta / start.totalValue) * 100 : 0;
     portfolio = {
@@ -248,23 +286,31 @@ router.get('/', async (req, res) => {
     .sort((a, b) => new Date(b.at) - new Date(a.at))
     .slice(0, 5);
 
-  // Week in Review: 3-hour cache, best-effort. Never blocks the dashboard
-  // response — if the LLM call errors or times out we just return null and
-  // the client hides the card.
-  let weekInReview = null;
-  if (wirCache.text && Date.now() - wirCache.at < WIR_TTL_MS) {
-    weekInReview = wirCache.text;
+  // Day in Review: keyed by ET review-day. Generate when the cache is
+  // empty or when a new review-day rolls in (4pm ET crossover). Never
+  // blocks the dashboard response — if the LLM errors we return null
+  // and the client hides the card.
+  let dayInReview = null;
+  let dayInReviewAt = null;
+  const reviewDay = currentReviewDayET();
+  const haveCached = dirCache.text && dirCache.reviewDay === reviewDay;
+  if (haveCached) {
+    dayInReview = dirCache.text;
+    dayInReviewAt = dirCache.generatedAt;
   } else if (process.env.LOCAL_LLM_URL) {
     try {
-      const payload = await buildWeekInReviewPayload();
-      const text = await generateWeekInReview(payload);
+      const payload = await buildDayInReviewPayload();
+      const text = await generateDayInReview(payload);
       if (text) {
-        wirCache.at = Date.now();
-        wirCache.text = text;
-        weekInReview = text;
+        const stampedAt = new Date().toISOString();
+        dirCache.reviewDay = reviewDay;
+        dirCache.generatedAt = stampedAt;
+        dirCache.text = text;
+        dayInReview = text;
+        dayInReviewAt = stampedAt;
       }
     } catch (err) {
-      console.warn('week-in-review generation failed:', err.message);
+      console.warn('day-in-review generation failed:', err.message);
     }
   }
 
@@ -273,7 +319,11 @@ router.get('/', async (req, res) => {
     upcomingEvents,
     holdingsCount,
     activity,
-    weekInReview,
+    dayInReview,
+    // ISO timestamp of when the paragraph was generated — the client uses
+    // this to stamp the card ("as of 4:00 PM ET · Apr 22"). null when the
+    // card is hidden.
+    dayInReviewAt,
   });
 });
 
