@@ -155,7 +155,7 @@ export default function AiChat() {
               <div>
                 Holdings, cash position, sector mix, and per-position
                 performance (total return, YTD, daily change) — pulled
-                from the Google Sheet and refreshed at most once per minute.
+                from the Google Sheet and refreshed every 20 minutes.
               </div>
             </div>
           </div>

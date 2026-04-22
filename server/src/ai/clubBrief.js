@@ -9,9 +9,11 @@ import { getSheetPortfolio } from '../services/sheetPortfolio.js';
 //   2. The club's IPS and Internal Policies docs (verbatim, as reference)
 //   3. Live club data (portfolio, votes, pitches, events) pulled on demand
 //
-// The assembled brief is cached for 60s so a burst of messages doesn't
-// hammer the Google Sheet / Prisma. Cache misses fall through gracefully —
-// if the sheet is unreachable we still return the doc-only brief.
+// The assembled brief is cached for 20 minutes to match sheetPortfolio's
+// own 20-minute sheet cache — pulling the brief more often wouldn't make
+// the portfolio data any fresher, and Prisma-sourced bits (votes, pitches,
+// events) don't change minute-to-minute in normal use. If the sheet is
+// unreachable the brief still renders with a "data unavailable" note.
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -23,7 +25,9 @@ const INTERNAL_POLICIES_TEXT = fs.readFileSync(
   'utf8'
 );
 
-const CACHE_TTL_MS = 60 * 1000;
+// 20 minutes — matches sheetPortfolio.js so the brief's refresh cadence
+// aligns with the underlying data's refresh cadence.
+const CACHE_TTL_MS = 20 * 60 * 1000;
 let cache = { at: 0, text: null };
 
 // Truncate a list to N items with a tail indicator.
