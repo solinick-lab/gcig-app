@@ -45,9 +45,9 @@ export async function computeParticipation(prisma) {
   });
 
   // Aggregate attendance rows per user. Only Present counts toward the
-  // score — Excused and Absent both count against the rate, so a member
-  // who skips half the meetings (even with a reason) still shows a lower
-  // participation number than someone who actually showed up.
+  // score and only Absent counts against it — Excused is neutral, removed
+  // from both sides of the ratio so a legitimate excuse doesn't penalize
+  // the member. Rate = Present / (Present + Absent).
   const attendanceRows = await prisma.attendance.groupBy({
     by: ['userId', 'status'],
     _count: { _all: true },
@@ -82,7 +82,8 @@ export async function computeParticipation(prisma) {
     if (rank <= EXCLUDE_RANK_AT_OR_BELOW) continue;
 
     const att = attByUser.get(u.id) || { present: 0, excused: 0, absent: 0, total: 0 };
-    const attendanceRate = att.total > 0 ? att.present / att.total : 0;
+    const counted = att.present + att.absent;
+    const attendanceRate = counted > 0 ? att.present / counted : 0;
 
     const pitchCount = pitchByUser.get(u.id) || 0;
     const pitchFraction = Math.min(pitchCount / PITCH_CAP, 1);
