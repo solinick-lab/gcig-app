@@ -991,10 +991,18 @@ function ThesisSection({
 // leaving for the publisher's site. The reader falls back to a clean link to
 // the original if extraction fails.
 function NewsSection({ loading, error, articles, topic, narrative, onOpen }) {
-  if (!loading && !error && (!articles || articles.length === 0)) return null;
+  // Individual story list is collapsed by default — the AI narrative
+  // above is usually enough. A toggle expands the full ranked feed
+  // when members want to dig in.
+  const [storiesOpen, setStoriesOpen] = useState(false);
+
+  if (!loading && !error && (!articles || articles.length === 0) && !narrative) {
+    return null;
+  }
   // For broad-market / sector ETFs the server swaps in curated category
   // headlines; `topic` tells the UI what to advertise instead of the default.
   const heading = topic || 'Recent News';
+  const storyCount = articles?.length || 0;
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
@@ -1002,15 +1010,16 @@ function NewsSection({ loading, error, articles, topic, narrative, onOpen }) {
           <Newspaper className="h-3.5 w-3.5" />
           {heading}
         </div>
-        {articles.length > 0 && (
+        {storyCount > 0 && (
           <span className="text-[10px] text-navy-400">
-            via newsapi.org · {articles.length} stories
+            {storyCount} stor{storyCount === 1 ? 'y' : 'ies'} indexed
           </span>
         )}
       </div>
 
-      {/* Ticker-level narrative synthesized from the headlines. Shown above
-          the article list so members see the overall vibe before diving in. */}
+      {/* Ticker-level narrative synthesized from the headlines. Shown
+          above the (collapsed) article list so members see the overall
+          vibe before deciding whether to drill in. */}
       {narrative && (
         <div className="mb-3 rounded-lg border border-gold-200 bg-gold-100/30 px-3 py-2">
           <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-gold-800">
@@ -1019,6 +1028,7 @@ function NewsSection({ loading, error, articles, topic, narrative, onOpen }) {
           <p className="text-sm leading-relaxed text-navy">{narrative}</p>
         </div>
       )}
+
       {loading ? (
         <div className="rounded-lg border border-navy-100 bg-white p-3 text-xs text-navy-400">
           Loading headlines…
@@ -1027,9 +1037,35 @@ function NewsSection({ loading, error, articles, topic, narrative, onOpen }) {
         <div className="rounded-lg border border-navy-100 bg-navy-50/40 p-3 text-xs text-navy-400">
           {error}
         </div>
-      ) : (
-        <ul className="space-y-2">
-          {articles.map((a, i) => (
+      ) : storyCount === 0 ? null : (
+        <>
+          {/* Expand / collapse the ranked story list. Keeps the modal
+              short on first open — the narrative is doing the heavy
+              lifting, stories are there for members who want to verify. */}
+          <button
+            type="button"
+            onClick={() => setStoriesOpen((v) => !v)}
+            aria-expanded={storiesOpen}
+            className="mb-2 inline-flex items-center gap-1.5 rounded-lg border border-navy-100 bg-white px-3 py-1.5 text-xs font-semibold text-navy transition hover:bg-navy-50"
+          >
+            <span>
+              {storiesOpen ? 'Hide' : 'Show'} {storyCount} individual{' '}
+              {storyCount === 1 ? 'story' : 'stories'}
+            </span>
+            <svg
+              className={`h-3 w-3 transition ${storiesOpen ? 'rotate-180' : ''}`}
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
+              <path d="M3 5l3 3 3-3" />
+            </svg>
+          </button>
+          {storiesOpen && (
+            <ul className="space-y-2">
+              {articles.map((a, i) => (
             <li key={i} className="rounded-lg border border-navy-100 bg-white">
               <button
                 type="button"
@@ -1087,8 +1123,10 @@ function NewsSection({ loading, error, articles, topic, narrative, onOpen }) {
                 </div>
               </button>
             </li>
-          ))}
-        </ul>
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </div>
   );
