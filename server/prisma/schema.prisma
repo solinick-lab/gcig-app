@@ -304,6 +304,22 @@ model PortfolioSnapshot {
   cashValue  Float?
 }
 
+// Daily closing series for a benchmark ticker (VOO by default), used
+// to overlay the club's performance chart. One row per ticker × date.
+// `source` is 'close' on trading days and 'carry-forward' on
+// weekends / market holidays so the series lines up with day-by-day
+// portfolio snapshots — including non-trading days.
+model BenchmarkSnapshot {
+  id     Int      @id @default(autoincrement())
+  ticker String
+  date   DateTime
+  close  Float
+  source String   @default("close")
+
+  @@unique([ticker, date])
+  @@index([ticker, date])
+}
+
 // A single purchase lot for a ticker. We may buy the same stock at different
 // times and prices; tracking each lot gives us an exact cost basis instead
 // of relying on the sheet's rounded avg cost column.

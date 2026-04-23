@@ -123,6 +123,13 @@ import {
   getUpcomingEarningsBatch,
   getAnalystConsensus,
 } from '../services/marketData.js';
+import {
+  backfillBenchmark,
+  updateBenchmarkToday,
+  getBenchmarkSeries,
+  DEFAULT_BENCHMARK,
+  DEFAULT_START_DATE,
+} from '../services/benchmark.js';
 
 const router = Router();
 
@@ -160,17 +167,41 @@ router.post('/snapshot/daily', async (req, res) => {
         cashValue: data.totals.cashValue,
       },
     });
+    // Refresh the benchmark (VOO by default) alongside the portfolio
+    // snapshot so the overlay on the Portfolio chart stays current.
+    // Failure here shouldn't fail the whole cron — worst case the
+    // benchmark line is a day stale.
+    let benchmarkResult = null;
+    try {
+      benchmarkResult = await updateBenchmarkToday();
+    } catch (err) {
+      console.warn('Benchmark update failed (snapshot still saved):', err.message);
+    }
     res.json({
       ok: true,
       date: snap.date,
       totalValue: snap.totalValue,
       cashValue: snap.cashValue,
+      benchmark: benchmarkResult,
     });
   } catch (err) {
     console.error('Daily snapshot cron failed:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+// Public (authed) read of the benchmark series for Portfolio chart
+// overlay. Returns [{ date, close, source }] ordered ascending.
+// ?ticker= overrides the default, but the only series we backfill
+// by default is VOO.
+// (Mounted under `router.use(verifyJwt)` below so the endpoint is
+// gated on login.)
+
+// Backfill endpoint — super-admin, idempotent. Pulls Yahoo and
+// upserts every calendar day between `start` (default Oct 17 2025)
+// and today. Safe to run any time; a follow-up run will simply
+// overwrite with the same values.
+// (Defined inside the authed section below.)
 
 router.use(verifyJwt);
 
@@ -594,6 +625,36 @@ router.get('/history', async (_req, res) => {
     take: 365,
   });
   res.json(snapshots);
+});
+
+// Benchmark time-series for the Portfolio chart overlay. Returns
+// [{ date, close, source }] ordered ascending. Default ticker VOO;
+// pass ?ticker=... to override (only tickers we've backfilled will
+// have rows — ask super-admin to run /benchmark/backfill for a new
+// one).
+router.get('/benchmark', async (req, res) => {
+  const ticker = String(req.query.ticker || DEFAULT_BENCHMARK).toUpperCase();
+  const series = await getBenchmarkSeries(ticker);
+  res.json({ ticker, series });
+});
+
+// Super-admin one-shot backfill. Pulls Yahoo and upserts every
+// calendar day from `start` (default 2025-10-17) to today. Idempotent
+// — repeat runs just overwrite with the same values.
+router.post('/benchmark/backfill', requireSuperAdmin, async (req, res) => {
+  const ticker = String(req.body?.ticker || DEFAULT_BENCHMARK).toUpperCase();
+  const startStr = req.body?.start;
+  const start = startStr ? new Date(`${startStr}T00:00:00Z`) : DEFAULT_START_DATE;
+  if (Number.isNaN(start.getTime())) {
+    return res.status(400).json({ error: 'Invalid start date; use YYYY-MM-DD' });
+  }
+  try {
+    const summary = await backfillBenchmark(ticker, start);
+    res.json(summary);
+  } catch (err) {
+    console.error(`benchmark backfill(${ticker}) failed:`, err.message);
+    res.status(502).json({ error: err.message || 'Backfill failed' });
+  }
 });
 
 // Upcoming earnings for every held equity ticker (next 60 days). Pulled
