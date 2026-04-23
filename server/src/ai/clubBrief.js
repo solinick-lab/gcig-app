@@ -167,6 +167,7 @@ async function buildLiveContext() {
     upcomingPitches,
     upcomingEvents,
     snapshotsRes,
+    membersRes,
   ] = await Promise.allSettled([
     getSheetPortfolio(),
     prisma.votingSession.findMany({
@@ -196,6 +197,20 @@ async function buildLiveContext() {
       where: { date: { gte: yearStart } },
       orderBy: { date: 'asc' },
       select: { date: true, totalValue: true, cashValue: true },
+    }),
+    // Full member roster. Used to ground "who is X?" questions and
+    // prevent the model from claiming it doesn't know a member just
+    // because that member hasn't pitched anything yet.
+    prisma.user.findMany({
+      select: {
+        name: true,
+        role: true,
+        extraRoles: true,
+        industries: {
+          select: { industry: { select: { name: true } } },
+        },
+      },
+      orderBy: { name: 'asc' },
     }),
   ]);
 
@@ -718,6 +733,81 @@ async function buildLiveContext() {
       .join('\n');
   }
 
+  // Club roster. Grouped by operational tier so the model can answer
+  // "who is on the advisory board?" or "who are the analysts?" without
+  // scanning. Ordered within each tier alphabetically for consistency.
+  // This is the AUTHORITATIVE list of names — if a member isn't here,
+  // they aren't in the app.
+  let rosterBlock =
+    '_No member roster available right now — fall back to the names mentioned in Holdings Intel._';
+  if (membersRes.status === 'fulfilled' && membersRes.value.length > 0) {
+    const ROLE_LABELS = {
+      President: 'President',
+      CIO: 'CIO',
+      ChiefOfCommunication: 'Chief of Communication',
+      SeniorPortfolioManager: 'Senior Portfolio Manager',
+      PortfolioManager: 'Portfolio Manager',
+      SeniorAnalyst: 'Senior Analyst',
+      Analyst: 'Analyst',
+      JuniorAnalyst: 'Junior Analyst',
+      AdvisoryBoardMember: 'Advisory Board Member',
+      FacultyAdvisory: 'Faculty Advisor',
+    };
+    const TIERS = [
+      {
+        heading: 'Executive',
+        roles: new Set(['President', 'CIO']),
+      },
+      {
+        heading: 'Chief of Communication',
+        roles: new Set(['ChiefOfCommunication']),
+      },
+      {
+        heading: 'Portfolio Managers',
+        roles: new Set(['SeniorPortfolioManager', 'PortfolioManager']),
+      },
+      {
+        heading: 'Analysts',
+        roles: new Set(['SeniorAnalyst', 'Analyst', 'JuniorAnalyst']),
+      },
+      {
+        heading: 'Advisory',
+        roles: new Set(['AdvisoryBoardMember', 'FacultyAdvisory']),
+      },
+    ];
+    const byTier = TIERS.map((t) => ({ ...t, members: [] }));
+    const other = [];
+    for (const u of membersRes.value) {
+      const tier = byTier.find((t) => t.roles.has(u.role));
+      if (tier) tier.members.push(u);
+      else other.push(u);
+    }
+    const tierLines = [];
+    for (const t of byTier) {
+      if (t.members.length === 0) continue;
+      tierLines.push(`**${t.heading}:**`);
+      for (const u of t.members) {
+        const role = ROLE_LABELS[u.role] || u.role;
+        const industries = (u.industries || [])
+          .map((ui) => ui.industry?.name)
+          .filter(Boolean);
+        const indBit = industries.length > 0 ? ` · ${industries.join(', ')}` : '';
+        const extraBits = (u.extraRoles || [])
+          .map((r) => ROLE_LABELS[r] || r)
+          .filter((label) => label !== role);
+        const extraSuffix =
+          extraBits.length > 0 ? ` (also: ${extraBits.join(', ')})` : '';
+        tierLines.push(`  - ${u.name} — ${role}${indBit}${extraSuffix}`);
+      }
+      tierLines.push('');
+    }
+    if (other.length > 0) {
+      tierLines.push('**Other:**');
+      for (const u of other) tierLines.push(`  - ${u.name} — ${u.role}`);
+    }
+    rosterBlock = tierLines.join('\n').trimEnd();
+  }
+
   // Upcoming events (non-advisory only; advisory events stay internal to the board).
   let eventsBlock = '_No events scheduled in the next 2 weeks._';
   if (upcomingEvents.status === 'fulfilled' && upcomingEvents.value.length > 0) {
@@ -768,6 +858,14 @@ async function buildLiveContext() {
     '',
     '### Upcoming Events (next 2 weeks)',
     eventsBlock,
+    '',
+    '### Club Members (authoritative roster)',
+    '_This is the full list of current members. Use this to answer_',
+    '_"who is X?" questions, to verify a name spelling, or to pick_',
+    '_the right person when a user mentions a first or last name alone._',
+    '_If a name isn\'t in this list, that person isn\'t in the club._',
+    '',
+    rosterBlock,
   ].join('\n');
 }
 
@@ -804,11 +902,11 @@ Questions like "any news on our portfolio?", "what's happening with X?", "anythi
 ## Writing about a member (references, evaluations, reports, "tell me about X")
 This is the single highest-risk request type. Follow this checklist EVERY time, no exceptions:
 
-1. Who is the member? Their name must be the Current User, OR explicitly mentioned in the user's message, OR appear in a Holdings Intel "Pitched by:" / "(by NAME)" line. If none of those, say you have no record of that person and stop.
+1. Who is the member? Resolve their name against the **Club Members** section. If no match there, they aren't in the app — say so and stop. If a partial name is ambiguous, ask which one the user means.
 
-2. Scan Holdings Intel for every line that names this member. These are the ONLY verified things they've done on record.
+2. Once you've confirmed the member exists, scan Holdings Intel for every line that names them. These are the ONLY verified pitches / theses / vote authorships they have on record.
 
-3. If step 2 produces zero hits, say explicitly: "I don't have any pitches, theses, or vote records on file for [name]." Offer to help once they have something to show. Do not proceed to write a glowing narrative based on nothing.
+3. If step 2 produces zero hits, say explicitly: "[Member name] is on the roster as a [role], but I don't have any pitches, theses, or vote records on file for them yet." Offer to help once they have something to show. Do NOT proceed to write a glowing narrative based on nothing — being on the roster is not the same as having contributions on record.
 
 4. If step 2 produces hits, restrict the reference to exactly those items — use the ticker, company name, and date as printed. Do not add invented colors like "thematic insights", "community engagement", or other generic filler.
 
@@ -832,12 +930,13 @@ You know ONLY what is in this system prompt. Nothing else about the Griffin Fund
 
 - **Who wrote what thesis**: Only the "(by NAME)" annotations in Holdings Intel are authoritative. No annotation → we don't know who wrote it.
 
-- **Member names**: Never invent a member name. The only names you know are:
-  - The Current User (see the "Current User" section at the bottom)
+- **Member names**: The ONLY valid sources of member names are:
+  - The **Club Members** section (the full roster — use this to answer "who is X?" and to match first-name-or-last-name-only references to a full name)
+  - The Current User section (the person you're chatting with)
   - Any name explicitly named by a "Pitched by:" line or a "Thesis (by NAME)" annotation in Holdings Intel
   - Any name in "pitcherName" entries in Upcoming Pitches
   - Names the USER explicitly types in their message
-  Any other name — Nolan, Alex, Jordan, Sarah, a teacher, a rival analyst — DOES NOT EXIST in this club unless the user just typed it. If you find yourself generating a name that isn't from one of those sources, STOP and use a placeholder like "[name]" or ask the user who they mean.
+  Any other name DOES NOT EXIST in this club. When the user refers to a member by a partial name (first or last only), resolve it against the Club Members list — don't guess. If ambiguous ("Thomas" when there are two Thomases), ask which one. If no match in Club Members, say the person isn't on file.
 
 - **Contributions / references / evaluations**: If asked to write a reference, evaluation, summary, or report about any member's work, base every single claim on something explicitly in this system prompt. Every pitch you mention must appear in a Holdings Intel "Pitched by:" line. Every thesis must be annotated to them. Every vote outcome must be in Recently Closed Votes. If you can't ground a claim, don't make it. A short honest paragraph ("Member has not pitched anything yet on record") is vastly better than a long fabricated one.
 
