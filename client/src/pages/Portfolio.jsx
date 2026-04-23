@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { format, subDays, subMonths, subYears, startOfYear } from 'date-fns';
 import {
-  ComposedChart,
+  AreaChart,
   Area,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -96,7 +95,6 @@ export default function Portfolio() {
   const canSeeRisk = (CLIENT_ROLE_RANK[user?.role] || 0) >= 7;
   const [data, setData] = useState(null);
   const [history, setHistory] = useState([]);
-  const [benchmark, setBenchmark] = useState({ ticker: 'VOO', series: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -104,14 +102,12 @@ export default function Portfolio() {
     setLoading(true);
     setError('');
     try {
-      const [quotes, hist, bench] = await Promise.all([
+      const [quotes, hist] = await Promise.all([
         api.get('/holdings/quotes'),
         api.get('/holdings/history'),
-        api.get('/holdings/benchmark'),
       ]);
       setData(quotes.data);
       setHistory(hist.data);
-      setBenchmark(bench.data || { ticker: 'VOO', series: [] });
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to load portfolio');
       setData({ holdings: [], totals: {} });
@@ -123,17 +119,6 @@ export default function Portfolio() {
   useEffect(() => {
     load();
   }, []);
-
-  // Date-keyed lookup for the benchmark series. Lets the percentSeries
-  // builder attach a matching benchmark close to every portfolio row
-  // without quadratic lookups.
-  const benchmarkByDate = useMemo(() => {
-    const m = new Map();
-    for (const b of benchmark?.series || []) {
-      m.set(new Date(b.date).toISOString().slice(0, 10), b.close);
-    }
-    return m;
-  }, [benchmark]);
 
   const totals = data?.totals || {};
   const holdings = data?.holdings || [];
@@ -228,38 +213,8 @@ export default function Portfolio() {
   // For every other range (1W, 1M, YTD, …) we keep the "change since start of
   // range" model, subtracting infusions that landed inside the range so they
   // don't fake-inflate the return.
-  // Benchmark key helper — both series use UTC YYYY-MM-DD keys, but
-  // portfolio snapshots are stored with hours=0 *local* time so the
-  // ISO date can drift by a day across DST boundaries. Using only the
-  // y-m-d portion avoids that.
-  const benchLookup = (date) =>
-    benchmarkByDate.get(date.toISOString().slice(0, 10));
-
   const percentSeries = useMemo(() => {
     if (chartData.length === 0) return [];
-
-    // Baseline VOO close — the first benchmark value at or after the
-    // chart's start date. All benchmark % values are relative to this
-    // so the line starts at 0% just like the club's line.
-    const firstPoint = chartData[0];
-    let benchBase = null;
-    // Walk forward through chartData until we find a day with a
-    // benchmark close. First-of-range might be a day before we have
-    // VOO data (e.g. pre-backfill), in which case benchBase stays null
-    // and we just don't render the benchmark line for that range.
-    for (const d of chartData) {
-      const c = benchLookup(d.date);
-      if (c != null) {
-        benchBase = c;
-        break;
-      }
-    }
-    const benchPct = (d) => {
-      if (benchBase == null || benchBase <= 0) return null;
-      const c = benchLookup(d.date);
-      if (c == null) return null;
-      return ((c - benchBase) / benchBase) * 100;
-    };
 
     if (range === 'ALL') {
       return chartData.map((d) => {
@@ -271,11 +226,11 @@ export default function Portfolio() {
           );
         const dollarDelta = d.value - runningInvested;
         const percent = runningInvested > 0 ? (dollarDelta / runningInvested) * 100 : 0;
-        return { ...d, dollarDelta, percent, benchmarkPercent: benchPct(d) };
+        return { ...d, dollarDelta, percent };
       });
     }
 
-    const start = firstPoint;
+    const start = chartData[0];
     const base = start.equity > 0 ? start.equity : start.value;
     if (base <= 0) return [];
     return chartData.map((d) => {
@@ -284,21 +239,15 @@ export default function Portfolio() {
       ).reduce((s, cf) => s + cf.amount, 0);
       const dollarDelta = d.value - cfSoFar - start.value;
       const percent = (dollarDelta / base) * 100;
-      return { ...d, dollarDelta, percent, benchmarkPercent: benchPct(d) };
+      return { ...d, dollarDelta, percent };
     });
-  }, [chartData, range, benchmarkByDate]);
+  }, [chartData, range]);
 
   // Tight y-axis domain in percent — pad slightly so the line doesn't kiss
-  // the top / bottom of the chart. Expanded to include the benchmark line
-  // too so the overlay never clips.
+  // the top / bottom of the chart.
   const yDomain = useMemo(() => {
     if (percentSeries.length === 0) return [0, 1];
-    const values = [];
-    for (const d of percentSeries) {
-      values.push(d.percent);
-      if (d.benchmarkPercent != null) values.push(d.benchmarkPercent);
-    }
-    if (values.length === 0) return [0, 1];
+    const values = percentSeries.map((d) => d.percent);
     const min = Math.min(...values);
     const max = Math.max(...values);
     const range = max - min;
@@ -385,22 +334,6 @@ export default function Portfolio() {
     const pct = base > 0 ? (diff / base) * 100 : 0;
     return { diff, pct, cashFlowInRange };
   }, [chartData, range]);
-
-  // Matching benchmark % change over the visible range. Uses the same
-  // start / end dates as the club's rangeChange so the two numbers are
-  // directly comparable. Null when we don't have benchmark data for
-  // the full window.
-  const benchmarkRangeChange = useMemo(() => {
-    if (percentSeries.length < 2) return null;
-    const first = percentSeries.find((d) => d.benchmarkPercent != null);
-    if (!first) return null;
-    // percentSeries already expresses each row as % from the anchor
-    // benchmark close, so the last non-null benchmarkPercent IS the
-    // range return.
-    const last = [...percentSeries].reverse().find((d) => d.benchmarkPercent != null);
-    if (!last) return null;
-    return { pct: last.benchmarkPercent };
-  }, [percentSeries]);
 
   // Build display data with a short date label. For long ranges we thin labels out.
   const displayData = percentSeries.map((d) => ({
@@ -512,72 +445,20 @@ export default function Portfolio() {
           {/* Header row: title + perf summary on left, range selector on right */}
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <div className="flex items-center gap-3">
-                <div className="text-sm font-semibold text-navy">Performance Over Time</div>
-                {/* Legend — tiny swatches so members can parse the two
-                    lines without hovering. Hidden when we have no
-                    benchmark data in the visible range. */}
-                {benchmarkRangeChange && (
-                  <div className="flex items-center gap-3 text-[11px] text-navy-400">
-                    <span className="flex items-center gap-1.5">
-                      <span
-                        className="inline-block h-2.5 w-3.5 rounded-sm"
-                        style={{ background: '#1B2A4A' }}
-                      />
-                      Griffin Fund
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span
-                        className="inline-block h-0.5 w-3.5"
-                        style={{
-                          background:
-                            'repeating-linear-gradient(90deg,#C9A84C 0 4px,transparent 4px 7px)',
-                        }}
-                      />
-                      {benchmark.ticker}
-                    </span>
-                  </div>
-                )}
-              </div>
+              <div className="text-sm font-semibold text-navy">Performance Over Time</div>
               {rangeChange && (
                 <>
-                  <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                    <span
-                      className={`text-sm font-semibold ${
-                        rangeChange.diff >= 0 ? 'text-emerald-600' : 'text-red-600'
-                      }`}
-                    >
-                      {rangeChange.diff >= 0 ? '+' : ''}
-                      {fmtMoney(rangeChange.diff)} ({rangeChange.diff >= 0 ? '+' : ''}
-                      {rangeChange.pct.toFixed(2)}%)
-                    </span>
-                    <span className="text-navy-400 text-xs font-normal">
+                  <div
+                    className={`mt-1 text-sm font-semibold ${
+                      rangeChange.diff >= 0 ? 'text-emerald-600' : 'text-red-600'
+                    }`}
+                  >
+                    {rangeChange.diff >= 0 ? '+' : ''}
+                    {fmtMoney(rangeChange.diff)} ({rangeChange.diff >= 0 ? '+' : ''}
+                    {rangeChange.pct.toFixed(2)}%){' '}
+                    <span className="text-navy-400 font-normal">
                       in {RANGES.find((r) => r.key === range)?.label}
                     </span>
-                    {/* Benchmark comparison — same window, VOO total
-                        return. Colored green when we're beating it,
-                        red when we're trailing, neutral when flat. */}
-                    {benchmarkRangeChange && (
-                      <span className="text-[11px] text-navy-400">
-                        ·{' '}
-                        <span
-                          className={`font-semibold ${
-                            rangeChange.pct >= benchmarkRangeChange.pct
-                              ? 'text-emerald-600'
-                              : 'text-red-600'
-                          }`}
-                        >
-                          {rangeChange.pct >= benchmarkRangeChange.pct ? '▲' : '▼'}{' '}
-                          {Math.abs(rangeChange.pct - benchmarkRangeChange.pct).toFixed(2)}pp
-                        </span>{' '}
-                        vs.{' '}
-                        <span className="font-semibold text-navy">
-                          {benchmark.ticker}
-                        </span>{' '}
-                        ({benchmarkRangeChange.pct >= 0 ? '+' : ''}
-                        {benchmarkRangeChange.pct.toFixed(2)}%)
-                      </span>
-                    )}
                   </div>
                   {range === 'ALL' ? (
                     <div className="mt-0.5 text-[11px] text-navy-400">
@@ -613,10 +494,7 @@ export default function Portfolio() {
           {displayData.length > 1 ? (
             <div style={{ width: '100%', height: 320 }}>
               <ResponsiveContainer>
-                <ComposedChart
-                  data={displayData}
-                  margin={{ top: 10, right: 10, bottom: 0, left: 0 }}
-                >
+                <AreaChart data={displayData} margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
                   <defs>
                     <linearGradient id="navyFill" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#1B2A4A" stopOpacity={0.25} />
@@ -644,19 +522,10 @@ export default function Portfolio() {
                     width={55}
                   />
                   <Tooltip
-                    formatter={(v, name, entry) => {
-                      if (v == null) return null;
-                      if (name === 'benchmarkPercent') {
-                        return [
-                          `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`,
-                          `${benchmark.ticker}`,
-                        ];
-                      }
-                      return [
-                        `${v >= 0 ? '+' : ''}${v.toFixed(2)}% (${fmtMoney(entry?.payload?.dollarDelta)})`,
-                        'Griffin Fund',
-                      ];
-                    }}
+                    formatter={(v, _name, entry) => [
+                      `${v >= 0 ? '+' : ''}${v.toFixed(2)}% (${fmtMoney(entry?.payload?.dollarDelta)})`,
+                      'Return',
+                    ]}
                     labelFormatter={(_, payload) => payload?.[0]?.payload?.tooltipLabel || ''}
                     contentStyle={{
                       borderRadius: 8,
@@ -664,8 +533,6 @@ export default function Portfolio() {
                       fontSize: 12,
                     }}
                   />
-                  {/* Club line: filled area in navy, matches the rest of
-                      the dashboard's palette. */}
                   <Area
                     type="monotone"
                     dataKey="percent"
@@ -674,25 +541,8 @@ export default function Portfolio() {
                     fill="url(#navyFill)"
                     dot={false}
                     activeDot={{ r: 5, fill: '#C9A84C', stroke: '#1B2A4A', strokeWidth: 2 }}
-                    name="Griffin Fund"
                   />
-                  {/* Benchmark (VOO): dashed gold stroke, no fill — sits
-                      alongside the club line so members can read relative
-                      performance at a glance. Hidden when no benchmark
-                      data overlaps the range. */}
-                  <Line
-                    type="monotone"
-                    dataKey="benchmarkPercent"
-                    stroke="#C9A84C"
-                    strokeWidth={2}
-                    strokeDasharray="5 4"
-                    dot={false}
-                    activeDot={{ r: 4, fill: '#1B2A4A', stroke: '#C9A84C', strokeWidth: 2 }}
-                    connectNulls
-                    name={benchmark.ticker}
-                    isAnimationActive={false}
-                  />
-                </ComposedChart>
+                </AreaChart>
               </ResponsiveContainer>
             </div>
           ) : (
