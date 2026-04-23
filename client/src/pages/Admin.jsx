@@ -6,6 +6,7 @@ import Card from '../components/Card.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import Members from './Members.jsx';
 import AuditLog from './AuditLog.jsx';
+import Participation from './Participation.jsx';
 
 function ProviderRow({ label, data }) {
   const dot = !data?.configured
@@ -108,12 +109,13 @@ function LlmStatusCard() {
 }
 
 export default function Admin() {
-  const { isSuperAdmin } = useAuth();
-  // Audit Log + Name Inference are only visible to the super admin (app
-  // owner). Other Presidents see only the Members tab — no tab strip
-  // rendered if there's nothing to switch to.
+  const { isAdmin, isSuperAdmin } = useAuth();
+  // Tab visibility: Members is universal; Participation is President-only
+  // (isAdmin); Audit Log and Name Inference are super-admin-only. Non-admin
+  // viewers just see the Members tab without a tab strip.
   const tabs = [
     { id: 'members', label: 'Members' },
+    ...(isAdmin ? [{ id: 'participation', label: 'Participation' }] : []),
     ...(isSuperAdmin
       ? [
           { id: 'audit', label: 'Audit Log' },
@@ -155,6 +157,8 @@ export default function Admin() {
         <AuditLog embedded />
       ) : tab === 'inference' && isSuperAdmin ? (
         <NameInferenceTable />
+      ) : tab === 'participation' && isAdmin ? (
+        <Participation embedded />
       ) : (
         <Members embedded />
       )}

@@ -12,6 +12,7 @@ import {
 import { sendInviteEmail, primaryClientOrigin } from '../services/email.js';
 import { auditReq } from '../services/audit.js';
 import { nameProfile } from '../services/nameGender.js';
+import { computeParticipation } from '../services/participation.js';
 
 const router = Router();
 
@@ -33,6 +34,19 @@ function generateTempPassword() {
 }
 
 router.use(verifyJwt);
+
+// President-only: participation ranking. Aggregates attendance, pitches,
+// and role rank into a single 0-100 score with per-component breakdown so
+// the President can see exactly why each member ranks where they do.
+router.get('/participation', requireAdmin, async (_req, res) => {
+  try {
+    const data = await computeParticipation(prisma);
+    res.json(data);
+  } catch (err) {
+    console.error('participation aggregation failed:', err.message);
+    res.status(500).json({ error: 'Failed to compute participation ranking' });
+  }
+});
 
 // All authed users can list members (shown on attendance sheet)
 router.get('/', async (_req, res) => {
