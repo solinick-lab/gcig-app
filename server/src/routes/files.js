@@ -186,6 +186,24 @@ router.post(
         filename: req.file.originalname,
         contentType: req.file.mimetype,
       });
+      // Fire-and-forget background summarization. The upload response
+      // shouldn't wait 20+ seconds for the LLM — instead we let the
+      // user finish filling the form while the summary gets ready.
+      // Failures (unsupported type, image-only deck, LLM down) are
+      // logged but never bubble up to the caller. Supported types
+      // are filtered here so non-summarizable uploads don't log
+      // noisy "unsupported" warnings.
+      const canSummarize = /\.(pdf|pptx|docx|txt|md)$/i.test(item.name || '');
+      if (canSummarize) {
+        setImmediate(() => {
+          summarizeFile(item.id).catch((err) => {
+            console.warn(
+              `auto-summarize(${item.id}) failed: ${err.message}`
+            );
+          });
+        });
+      }
+
       res.json({
         itemId: item.id,
         name: item.name,
@@ -200,6 +218,8 @@ router.post(
         // — which contain `!` and other chars — intact without
         // URL-encoding gymnastics.
         ref: `onedrive:${item.id}`,
+        // Tells the client whether to expect a summary soon.
+        summaryPending: canSummarize,
       });
     } catch (err) {
       if (err.code === 'NOT_AUTHORIZED') {
@@ -225,12 +245,14 @@ router.get('/:itemId/summary', verifyJwt, async (req, res) => {
   }
 });
 
-// Generate a summary. Defaults to cache-on-hit; pass ?force=1 to
-// regenerate even when a cached row exists.
+// Generate (or return cached) a summary. Summaries are one-shot —
+// once a row exists in FileSummary, this endpoint always returns
+// that cached row. Regeneration is intentionally not exposed: the
+// file is immutable once uploaded, so the summary should be too.
+// Upload another file if you need a different summary.
 router.post('/:itemId/summarize', verifyJwt, summarizeLimiter, async (req, res) => {
-  const force = req.query.force === '1' || req.body?.force === true;
   try {
-    const row = await summarizeFile(req.params.itemId, { force });
+    const row = await summarizeFile(req.params.itemId);
     res.json(row);
   } catch (err) {
     if (err.code === 'NOT_AUTHORIZED') {

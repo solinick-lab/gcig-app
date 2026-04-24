@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Sparkles, RefreshCw, Loader2 } from 'lucide-react';
+import { Sparkles, Loader2 } from 'lucide-react';
 import api from '../api/client.js';
 import { extractItemId, isManagedFile } from '../api/fileHelpers.js';
 
@@ -83,13 +83,17 @@ export default function FileSummary({ fileRef, filename, compact = false }) {
     };
   }, [itemId, supported]);
 
-  async function generate(force = false) {
+  async function generate() {
     if (!itemId) return;
     setGenerating(true);
     setError('');
     try {
-      const url = `/files/${encodeURIComponent(itemId)}/summarize${force ? '?force=1' : ''}`;
-      const { data } = await api.post(url);
+      // Server is cache-first, so calling this when the background
+      // auto-gen has already completed just returns the cached row
+      // instantly. No more force-regenerate option.
+      const { data } = await api.post(
+        `/files/${encodeURIComponent(itemId)}/summarize`
+      );
       setSummary(data);
     } catch (err) {
       setError(
@@ -127,20 +131,6 @@ export default function FileSummary({ fileRef, filename, compact = false }) {
               · based on first portion of doc
             </span>
           )}
-          <button
-            type="button"
-            onClick={() => generate(true)}
-            disabled={generating}
-            title="Regenerate from the current file"
-            className="ml-auto inline-flex items-center gap-1 text-navy-400 hover:text-navy disabled:opacity-50"
-          >
-            <RefreshCw
-              className={`h-3 w-3 ${generating ? 'animate-spin' : ''}`}
-            />
-            <span className="text-[10px] normal-case tracking-normal">
-              {generating ? 'Regenerating…' : 'Regenerate'}
-            </span>
-          </button>
         </div>
         <div className="text-sm leading-relaxed text-navy">
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD}>
@@ -151,28 +141,28 @@ export default function FileSummary({ fileRef, filename, compact = false }) {
           {summary.model === 'local' ? 'House model' : 'OpenAI fallback'} ·{' '}
           {updated}
         </div>
-        {error && (
-          <div className="mt-2 text-[11px] font-semibold text-red-700">
-            {error}
-          </div>
-        )}
       </div>
     );
   }
 
-  // No summary yet — offer generation.
+  // No summary yet. The server auto-kicks off a summarize job after
+  // every upload, so this state is usually just "still processing" —
+  // the manual button exists as a fallback in case the background
+  // job errored (cold LLM, text-extraction failure, etc.).
   return (
     <div className="rounded-xl border border-dashed border-navy-100 bg-navy-50/40 px-3 py-3 md:px-4 md:py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-xs text-navy-500">
           <Sparkles className="h-3.5 w-3.5 text-gold-700" />
           <span>
-            {filename ? `No AI summary for ${filename} yet.` : 'No AI summary yet.'}
+            {generating
+              ? 'Generating summary…'
+              : 'Summary is processing. Refresh in a minute, or click to kick it off manually.'}
           </span>
         </div>
         <button
           type="button"
-          onClick={() => generate(false)}
+          onClick={() => generate()}
           disabled={generating}
           className="inline-flex items-center gap-1.5 rounded-lg border border-navy-100 bg-white px-3 py-1.5 text-xs font-semibold text-navy transition hover:border-gold hover:bg-gold-100/40 disabled:opacity-60"
         >
@@ -184,7 +174,7 @@ export default function FileSummary({ fileRef, filename, compact = false }) {
           ) : (
             <>
               <Sparkles className="h-3.5 w-3.5" />
-              Generate summary
+              Check now
             </>
           )}
         </button>
