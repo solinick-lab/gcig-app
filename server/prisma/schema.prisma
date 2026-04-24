@@ -365,6 +365,23 @@ model AiChatMessage {
   @@index([sessionId, createdAt])
 }
 
+// AI-generated summary for an uploaded file, keyed by fileRef
+// (same scheme used in Report.fileUrl / Pitch.slideshowUrl, e.g.
+// "onedrive:ABC123"). One row per file — regenerations overwrite.
+// Summaries are slow to produce (10-30s on the local GPU) so we
+// persist them and let the UI fetch cached results.
+model FileSummary {
+  id         Int      @id @default(autoincrement())
+  fileRef    String   @unique
+  filename   String?  // Captured at generation time for display
+  summary    String
+  model      String?  // Which provider generated it (for future invalidation)
+  charCount  Int?     // Size of the extracted text fed into the model
+  truncated  Boolean  @default(false) // True when the source doc exceeded our char cap
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
 // OAuth tokens for file-storage providers (currently: OneDrive via
 // Microsoft Graph). One row per provider — we always rebind the same
 // account instead of multi-tenant. Stores the current access token +

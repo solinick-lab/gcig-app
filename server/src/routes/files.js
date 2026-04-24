@@ -13,6 +13,10 @@ import {
   disconnect,
   isConfigured,
 } from '../services/oneDriveStorage.js';
+import {
+  summarizeFile,
+  getCachedSummary,
+} from '../services/fileSummarizer.js';
 
 // File-storage endpoints. Backed by OneDrive via Microsoft Graph.
 // The OAuth callback (`/oauth/callback`) intentionally sits OUTSIDE
@@ -40,6 +44,18 @@ const uploadLimiter = rateLimit({
   max: 30,
   keyGenerator: (req) => `file-upload:${req.user?.id || req.ip}`,
   message: { error: 'Upload rate limit reached. Try again in a few minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// AI summary generation is expensive (10-30s of GPU time per request
+// on the local LLM). Cap each user at 10 generations per 10 min to
+// prevent loops. Reads from the cached summary aren't gated.
+const summarizeLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => `file-summarize:${req.user?.id || req.ip}`,
+  message: { error: 'Summarize rate limit reached. Try again in a few minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -196,6 +212,37 @@ router.post(
     }
   }
 );
+
+// Cached summary — cheap read, no LLM call. Returns 404 if none
+// exists yet so the UI can prompt a generation.
+router.get('/:itemId/summary', verifyJwt, async (req, res) => {
+  try {
+    const row = await getCachedSummary(req.params.itemId);
+    if (!row) return res.status(404).json({ error: 'No summary yet' });
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Generate a summary. Defaults to cache-on-hit; pass ?force=1 to
+// regenerate even when a cached row exists.
+router.post('/:itemId/summarize', verifyJwt, summarizeLimiter, async (req, res) => {
+  const force = req.query.force === '1' || req.body?.force === true;
+  try {
+    const row = await summarizeFile(req.params.itemId, { force });
+    res.json(row);
+  } catch (err) {
+    if (err.code === 'NOT_AUTHORIZED') {
+      return res.status(503).json({ error: 'OneDrive not connected' });
+    }
+    if (err.code === 'UNSUPPORTED_TYPE') {
+      return res.status(415).json({ error: err.message });
+    }
+    console.error('summarize failed:', err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
 
 // Metadata — filename + size, for rendering file chips in the UI.
 router.get('/:itemId/info', verifyJwt, async (req, res) => {

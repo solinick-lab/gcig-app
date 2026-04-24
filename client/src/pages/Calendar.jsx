@@ -14,6 +14,7 @@ import MemberPicker from '../components/MemberPicker.jsx';
 import EventAttendance from '../components/EventAttendance.jsx';
 import AdminOnly from '../components/AdminOnly.jsx';
 import FileUploader from '../components/FileUploader.jsx';
+import FileSummary from '../components/FileSummary.jsx';
 import { isManagedFile, downloadFile } from '../api/fileHelpers.js';
 
 const PITCH_ROLES = ['President', 'CIO', 'SeniorPortfolioManager', 'PortfolioManager'];
@@ -401,6 +402,14 @@ export default function Calendar() {
                   View slideshow →
                 </a>
               ))}
+            {isManagedFile(selected.slideshowUrl) && (
+              <div className="mt-2">
+                <FileSummary
+                  fileRef={selected.slideshowUrl}
+                  filename={`${selected.ticker} slideshow`}
+                />
+              </div>
+            )}
             {canEditPitches && (
               <div className="flex gap-2 pt-3 border-t border-navy-50">
                 <Button variant="outline" onClick={() => openPitchEdit(selected)}>

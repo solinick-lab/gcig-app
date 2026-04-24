@@ -9,6 +9,7 @@ import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
 import Modal from '../components/Modal.jsx';
 import FileUploader from '../components/FileUploader.jsx';
+import FileSummary from '../components/FileSummary.jsx';
 import { isManagedFile, downloadFile } from '../api/fileHelpers.js';
 
 const REPORT_ROLES = ['President', 'CIO', 'SeniorPortfolioManager', 'PortfolioManager'];
@@ -118,54 +119,63 @@ export default function Reports({ embedded = false } = {}) {
         ) : (
           <ul className="divide-y divide-navy-50">
             {filtered.map((r) => (
-              <li key={r.id} className="flex items-start justify-between gap-4 py-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-navy">{r.title}</h3>
-                    {r.ticker && (
-                      <span className="rounded-full bg-gold-100 px-2 py-0.5 text-xs font-bold text-gold-700">
-                        {r.ticker}
-                      </span>
+              <li key={r.id} className="py-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-bold text-navy">{r.title}</h3>
+                      {r.ticker && (
+                        <span className="rounded-full bg-gold-100 px-2 py-0.5 text-xs font-bold text-gold-700">
+                          {r.ticker}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-1 text-sm text-navy-400">
+                      By {r.author} • {format(new Date(r.date), 'MMM d, yyyy')}
+                    </div>
+                    {r.description && (
+                      <p className="mt-2 text-sm text-navy">{r.description}</p>
                     )}
                   </div>
-                  <div className="mt-1 text-sm text-navy-400">
-                    By {r.author} • {format(new Date(r.date), 'MMM d, yyyy')}
+                  <div className="flex items-center gap-2">
+                    {isManagedFile(r.fileUrl) ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          downloadFile(r.fileUrl, `${r.title}.pdf`).catch(() => {})
+                        }
+                        className="inline-flex items-center gap-1 rounded-lg border border-navy-100 px-3 py-2 text-xs font-semibold text-navy hover:bg-navy-50"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        Download
+                      </button>
+                    ) : (
+                      <a
+                        href={safeHref(r.fileUrl)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 rounded-lg border border-navy-100 px-3 py-2 text-xs font-semibold text-navy hover:bg-navy-50"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        Open
+                      </a>
+                    )}
+                    {canEdit && (
+                      <button
+                        onClick={() => handleDelete(r.id)}
+                        className="rounded-lg p-2 text-red-600 hover:bg-red-50"
+                        aria-label="Delete report"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
-                  {r.description && (
-                    <p className="mt-2 text-sm text-navy">{r.description}</p>
-                  )}
                 </div>
-                <div className="flex items-center gap-2">
-                  {isManagedFile(r.fileUrl) ? (
-                    <button
-                      type="button"
-                      onClick={() => downloadFile(r.fileUrl, `${r.title}.pdf`).catch(() => {})}
-                      className="inline-flex items-center gap-1 rounded-lg border border-navy-100 px-3 py-2 text-xs font-semibold text-navy hover:bg-navy-50"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                      Download
-                    </button>
-                  ) : (
-                    <a
-                      href={safeHref(r.fileUrl)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 rounded-lg border border-navy-100 px-3 py-2 text-xs font-semibold text-navy hover:bg-navy-50"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                      Open
-                    </a>
-                  )}
-                  {canEdit && (
-                    <button
-                      onClick={() => handleDelete(r.id)}
-                      className="rounded-lg p-2 text-red-600 hover:bg-red-50"
-                      aria-label="Delete report"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
+                {isManagedFile(r.fileUrl) && (
+                  <div className="mt-3">
+                    <FileSummary fileRef={r.fileUrl} filename={r.title} />
+                  </div>
+                )}
               </li>
             ))}
           </ul>
