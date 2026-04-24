@@ -102,6 +102,139 @@ router.get('/name-inference', requireSuperAdmin, async (_req, res) => {
   res.json(rows);
 });
 
+// Full per-member profile. Any authed user can view any profile —
+// this is the same tier of info already visible on the Members page,
+// just organized per-person. Returns the member's roster data plus
+// every pitch they've given, their attendance record, and a sample
+// of recent votes. Advisory-tier + Chief-of-Comms members are
+// flagged as attendance-exempt so the UI can hide the attendance tile.
+const ATTENDANCE_EXEMPT_ROLES = new Set([
+  'AdvisoryBoardMember',
+  'FacultyAdvisory',
+  'ChiefOfCommunication',
+]);
+
+router.get('/:id/profile', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Bad id' });
+  const user = await prisma.user.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      name: true,
+      role: true,
+      extraRoles: true,
+      createdAt: true,
+      industries: {
+        include: { industry: { select: { id: true, name: true } } },
+      },
+    },
+  });
+  if (!user) return res.status(404).json({ error: 'Member not found' });
+
+  // Pitches — union of structured PitchPresenter rows (new style) and
+  // legacy pitcherName matches, dedup by pitch id, ordered newest first.
+  const [presenterRows, nameRows] = await Promise.all([
+    prisma.pitchPresenter.findMany({
+      where: { userId: id },
+      include: {
+        pitch: {
+          select: {
+            id: true,
+            ticker: true,
+            date: true,
+            votedOutcome: true,
+            pitcherName: true,
+            industry: { select: { name: true } },
+          },
+        },
+      },
+    }),
+    prisma.pitch.findMany({
+      where: { pitcherName: user.name },
+      select: {
+        id: true,
+        ticker: true,
+        date: true,
+        votedOutcome: true,
+        pitcherName: true,
+        industry: { select: { name: true } },
+      },
+    }),
+  ]);
+  const pitchMap = new Map();
+  for (const p of nameRows) pitchMap.set(p.id, p);
+  for (const r of presenterRows) pitchMap.set(r.pitch.id, r.pitch);
+  const pitches = [...pitchMap.values()].sort(
+    (a, b) => new Date(b.date) - new Date(a.date)
+  );
+
+  // Attendance summary. Exempt roles skip the whole block.
+  const isExempt = ATTENDANCE_EXEMPT_ROLES.has(user.role);
+  let attendance = null;
+  if (!isExempt) {
+    const records = await prisma.attendance.findMany({
+      where: { userId: id },
+      select: { status: true },
+    });
+    const present = records.filter((r) => r.status === 'Present').length;
+    const absent = records.filter((r) => r.status === 'Absent').length;
+    const excused = records.filter((r) => r.status === 'Excused').length;
+    const total = records.length;
+    attendance = {
+      total,
+      present,
+      absent,
+      excused,
+      // "Rate" here matches /attendance/mine: present + excused counts
+      // as credit so a legit absence isn't held against a member.
+      rate:
+        total > 0 ? Math.round(((present + excused) / total) * 100) : null,
+    };
+  }
+
+  // Votes — latest 10 + total count. Gives the UI a feed for the
+  // profile without dumping every ballot the member has ever cast.
+  const [ballots, totalVotes] = await Promise.all([
+    prisma.ballot.findMany({
+      where: { userId: id },
+      orderBy: { castAt: 'desc' },
+      take: 10,
+      include: {
+        session: { select: { ticker: true, closedAt: true, status: true } },
+      },
+    }),
+    prisma.ballot.count({ where: { userId: id } }),
+  ]);
+
+  const profile = nameProfile(user.name || '');
+
+  res.json({
+    id: user.id,
+    name: user.name,
+    role: user.role,
+    extraRoles: user.extraRoles,
+    createdAt: user.createdAt,
+    firstName: profile.firstName,
+    honorificName: profile.honorificName,
+    industries: user.industries.map((ui) => ui.industry),
+    pitches,
+    attendance,
+    attendanceExempt: isExempt,
+    votes: {
+      total: totalVotes,
+      recent: ballots.map((b) => ({
+        sessionId: b.sessionId,
+        ticker: b.session?.ticker || null,
+        action: b.action,
+        investmentAmount: b.investmentAmount,
+        castAt: b.castAt,
+        status: b.session?.status || null,
+      })),
+    },
+  });
+});
+
 // Invite a new member. No account is created yet — just a PendingInvite record
 // and an email with a one-time link where they set their own password.
 router.post('/', requireExecutive, async (req, res) => {

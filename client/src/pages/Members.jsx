@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Plus, KeyRound, Trash2, ShieldCheck, ShieldOff } from 'lucide-react';
 import api from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -151,7 +152,12 @@ export default function Members({ embedded = false } = {}) {
             <li key={u.id} className="py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-semibold text-navy">{u.name}</div>
+                  <Link
+                    to={`/members/${u.id}`}
+                    className="block truncate font-semibold text-navy hover:text-gold-700"
+                  >
+                    {u.name}
+                  </Link>
                   <div className="truncate text-xs text-navy-400">{u.email}</div>
                   <div className="mt-1 flex flex-wrap items-center gap-1">
                     <RoleBadge role={u.role} />
@@ -235,7 +241,12 @@ export default function Members({ embedded = false } = {}) {
               {users.map((u) => (
                 <tr key={u.id}>
                   <td className="py-3 pr-4">
-                    <div className="font-semibold text-navy">{u.name}</div>
+                    <Link
+                      to={`/members/${u.id}`}
+                      className="font-semibold text-navy hover:text-gold-700"
+                    >
+                      {u.name}
+                    </Link>
                     <div className="text-xs text-navy-400">{u.email}</div>
                   </td>
                   <td className="py-3 pr-4">

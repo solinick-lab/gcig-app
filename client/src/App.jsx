@@ -24,6 +24,7 @@ import Admin from './pages/Admin.jsx';
 import PitchOutcomes from './pages/PitchOutcomes.jsx';
 import Broadcast from './pages/Broadcast.jsx';
 import AiChat from './pages/AiChat.jsx';
+import MemberProfile from './pages/MemberProfile.jsx';
 import Landing from './pages/Landing.jsx';
 
 export default function App() {
@@ -74,6 +75,7 @@ export default function App() {
         <Route path="/chat" element={<Chat />} />
         <Route path="/broadcast" element={<Broadcast />} />
         <Route path="/ai-chat" element={<AiChat />} />
+        <Route path="/members/:id" element={<MemberProfile />} />
         <Route path="/profile" element={<Profile />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
