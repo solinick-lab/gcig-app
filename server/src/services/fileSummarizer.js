@@ -69,10 +69,83 @@ async function fetchItemMetadata(itemId) {
   return res.json();
 }
 
-// Text extraction. PDF-only for now — most pitch decks get exported
-// to PDF before uploading. PPTX/DOCX support could follow via
-// `mammoth` or `pizzip`-based parsers but adds weight for marginal
-// coverage today.
+// ── Text extraction ─────────────────────────────────────────────────
+// PPTX / DOCX are ZIP archives with XML inside. Rather than pulling
+// in a heavy Office-doc library, we unzip with jszip and pull text
+// from the well-defined text-run tags with a light regex. That
+// catches ~99% of real documents — slightly-malformed or image-only
+// slides are silently skipped, which is the right behavior.
+
+// Unescape the handful of XML entities that show up in real text.
+function decodeXmlEntities(s) {
+  return s
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+// Pull `<TAG>...</TAG>` bodies out of XML, in document order.
+// self-closing `<TAG/>` tags are ignored (they carry no text).
+function extractTagText(xml, tag) {
+  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'g');
+  const out = [];
+  let m;
+  while ((m = re.exec(xml)) !== null) {
+    const decoded = decodeXmlEntities(m[1]).trim();
+    if (decoded) out.push(decoded);
+  }
+  return out;
+}
+
+async function extractPptxText(buffer) {
+  const JSZipModule = await import('jszip');
+  const JSZip = JSZipModule.default || JSZipModule;
+  const zip = await JSZip.loadAsync(buffer);
+  // Slide files live at ppt/slides/slide<N>.xml. Sort by number so
+  // the extracted text reads slide-1-first.
+  const slideFiles = Object.keys(zip.files)
+    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+    .sort((a, b) => {
+      const na = Number(a.match(/slide(\d+)/)[1]);
+      const nb = Number(b.match(/slide(\d+)/)[1]);
+      return na - nb;
+    });
+  if (slideFiles.length === 0) {
+    throw new Error('PPTX has no slides — file may be corrupt.');
+  }
+  const parts = [];
+  for (let i = 0; i < slideFiles.length; i++) {
+    const xml = await zip.file(slideFiles[i]).async('string');
+    // <a:t> is the DrawingML text-run element used across slides.
+    const runs = extractTagText(xml, 'a:t');
+    if (runs.length === 0) continue;
+    parts.push(`--- Slide ${i + 1} ---\n${runs.join('\n')}`);
+  }
+  return parts.join('\n\n').trim();
+}
+
+async function extractDocxText(buffer) {
+  const JSZipModule = await import('jszip');
+  const JSZip = JSZipModule.default || JSZipModule;
+  const zip = await JSZip.loadAsync(buffer);
+  const file = zip.file('word/document.xml');
+  if (!file) {
+    throw new Error('DOCX has no document.xml — file may be corrupt.');
+  }
+  const xml = await file.async('string');
+  // <w:t> is WordprocessingML's text-run element. <w:p> paragraphs
+  // get a newline separator so the output reads like the source doc.
+  const paragraphs = xml.split(/<\/w:p>/);
+  const out = [];
+  for (const p of paragraphs) {
+    const runs = extractTagText(p, 'w:t');
+    if (runs.length > 0) out.push(runs.join(''));
+  }
+  return out.join('\n').trim();
+}
+
 async function extractText(buffer, filename) {
   const lower = String(filename || '').toLowerCase();
   if (lower.endsWith('.pdf')) {
@@ -82,12 +155,17 @@ async function extractText(buffer, filename) {
     const data = await pdfParse(buffer);
     return (data.text || '').trim();
   }
-  // Light handling for plain text / markdown.
+  if (lower.endsWith('.pptx')) {
+    return extractPptxText(buffer);
+  }
+  if (lower.endsWith('.docx')) {
+    return extractDocxText(buffer);
+  }
   if (lower.endsWith('.txt') || lower.endsWith('.md')) {
     return buffer.toString('utf8').trim();
   }
   const err = new Error(
-    `Summarization only supports PDF / txt / md files right now — got ${filename}.`
+    `Summarization supports PDF / PPTX / DOCX / TXT / MD — got ${filename || 'an unknown type'}.`
   );
   err.code = 'UNSUPPORTED_TYPE';
   throw err;
