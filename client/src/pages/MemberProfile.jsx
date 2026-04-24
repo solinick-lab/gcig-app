@@ -238,12 +238,23 @@ function PitchesCard({ pitches }) {
       ) : (
         <ul className="divide-y divide-navy-50">
           {pitches.map((p) => {
+            // Prefer effectiveOutcome (server infers Buy when the ticker
+            // is currently held but votedOutcome was never set, and
+            // tags future-dated rows Scheduled).
+            const outcome = p.effectiveOutcome || p.votedOutcome || 'Pending';
             const tone =
-              p.votedOutcome === 'Buy'
+              outcome === 'Buy'
                 ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                : p.votedOutcome === 'NoBuy'
+                : outcome === 'NoBuy'
                   ? 'bg-red-50 text-red-800 border-red-200'
-                  : 'bg-navy-50 text-navy-500 border-navy-100';
+                  : outcome === 'Scheduled'
+                    ? 'bg-gold-100/40 text-navy border-gold-200'
+                    : 'bg-navy-50 text-navy-500 border-navy-100';
+            const tooltip = p.outcomeInferred
+              ? 'Inferred from current portfolio — ticker is held so the pitch clearly passed. Raw votedOutcome hasn\'t been set on this row.'
+              : outcome === 'Scheduled'
+                ? 'Pitch is on the calendar but hasn\'t happened yet.'
+                : undefined;
             return (
               <li key={p.id} className="flex items-start gap-3 py-2.5">
                 <div className="flex-shrink-0">
@@ -262,9 +273,18 @@ function PitchesCard({ pitches }) {
                   )}
                 </div>
                 <span
-                  className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${tone}`}
+                  title={tooltip}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${tone}`}
                 >
-                  {p.votedOutcome || 'Pending'}
+                  {outcome}
+                  {p.outcomeInferred && (
+                    <span
+                      className="text-[9px] opacity-70"
+                      aria-label="Inferred from current holdings"
+                    >
+                      ·
+                    </span>
+                  )}
                 </span>
               </li>
             );

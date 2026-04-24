@@ -13,6 +13,7 @@ import { sendInviteEmail, primaryClientOrigin } from '../services/email.js';
 import { auditReq } from '../services/audit.js';
 import { nameProfile } from '../services/nameGender.js';
 import { computeParticipation } from '../services/participation.js';
+import { getSheetPortfolio } from '../services/sheetPortfolio.js';
 
 const router = Router();
 
@@ -165,9 +166,42 @@ router.get('/:id/profile', async (req, res) => {
   const pitchMap = new Map();
   for (const p of nameRows) pitchMap.set(p.id, p);
   for (const r of presenterRows) pitchMap.set(r.pitch.id, r.pitch);
-  const pitches = [...pitchMap.values()].sort(
+  const rawPitches = [...pitchMap.values()].sort(
     (a, b) => new Date(b.date) - new Date(a.date)
   );
+
+  // Infer an effective outcome so the UI isn't misleading. The
+  // votedOutcome column is often left null even after a vote — if
+  // the ticker is in the current portfolio, the pitch clearly passed
+  // and was bought. If the pitch date is in the future, it's still
+  // scheduled. Leaves the raw votedOutcome available for audit.
+  let heldTickers = new Set();
+  try {
+    const sheet = await getSheetPortfolio();
+    heldTickers = new Set(
+      sheet.holdings
+        .filter((h) => !h.isCash && h.ticker)
+        .map((h) => h.ticker.toUpperCase())
+    );
+  } catch {
+    /* sheet unreachable — fall back to raw votedOutcome only. */
+  }
+  const now = new Date();
+  const pitches = rawPitches.map((p) => {
+    const ticker = String(p.ticker || '').toUpperCase();
+    const pitchDate = new Date(p.date);
+    let effectiveOutcome = p.votedOutcome || null;
+    let outcomeInferred = false;
+    if (!effectiveOutcome) {
+      if (pitchDate > now) {
+        effectiveOutcome = 'Scheduled';
+      } else if (heldTickers.has(ticker)) {
+        effectiveOutcome = 'Buy';
+        outcomeInferred = true;
+      }
+    }
+    return { ...p, effectiveOutcome, outcomeInferred };
+  });
 
   // Attendance summary. Exempt roles skip the whole block.
   const isExempt = ATTENDANCE_EXEMPT_ROLES.has(user.role);
