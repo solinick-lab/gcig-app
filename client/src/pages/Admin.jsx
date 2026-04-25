@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Navigate, useSearchParams } from 'react-router-dom';
 import { RefreshCw, Sparkles, Cloud, Upload, Unplug } from 'lucide-react';
 import api, { API_BASE } from '../api/client.js';
 import PageHeader from '../components/PageHeader.jsx';
@@ -110,10 +110,21 @@ function LlmStatusCard() {
 }
 
 export default function Admin() {
-  const { isAdmin, isSuperAdmin } = useAuth();
-  // Tab visibility: Members is universal; Participation is President-only
-  // (isAdmin); Audit Log and Name Inference are super-admin-only. Non-admin
-  // viewers just see the Members tab without a tab strip.
+  const { isAdmin, isExecutive, isSuperAdmin } = useAuth();
+
+  // Page-level gate. Everything under /admin is for the executive tier
+  // or above — if a non-executive user lands here via a direct URL,
+  // bounce them to the dashboard. Server-side routes are also gated,
+  // but this prevents them from seeing scaffolding (PageHeader, tab
+  // strip) that would suggest the page exists.
+  if (!isExecutive && !isSuperAdmin) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  // Tab visibility:
+  //   Members — always shown (every executive can see the roster).
+  //   Participation — President only (isAdmin).
+  //   Audit Log / Name Inference — super admin only.
   const tabs = [
     { id: 'members', label: 'Members' },
     ...(isAdmin ? [{ id: 'participation', label: 'Participation' }] : []),
@@ -126,6 +137,11 @@ export default function Admin() {
   ];
   const [tab, setTab] = useState('members');
 
+  // The status cards are sensitive (LLM provider config / OneDrive
+  // tokens) so they're gated tighter than the page itself. CIOs who
+  // visit /admin just see the Members tab — no infrastructure strip.
+  const showStatusStrip = isAdmin || isSuperAdmin;
+
   return (
     <>
       <PageHeader
@@ -133,10 +149,12 @@ export default function Admin() {
         title="Admin"
         subtitle="Manage members and review security events."
       />
-      <div className="mb-4 grid gap-4 md:grid-cols-2">
-        <LlmStatusCard />
-        {isSuperAdmin && <OneDriveCard />}
-      </div>
+      {showStatusStrip && (
+        <div className="mb-4 grid gap-4 md:grid-cols-2">
+          {isAdmin && <LlmStatusCard />}
+          {isSuperAdmin && <OneDriveCard />}
+        </div>
+      )}
       <div className="mb-6 flex gap-6 border-b border-navy-100">
         {tabs.map((t) => (
           <button
