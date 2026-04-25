@@ -25,6 +25,8 @@ import aiChatRoutes from './routes/aiChat.js';
 import publicRoutes from './routes/public.js';
 import filesRoutes from './routes/files.js';
 import { ensureRecurringMeetings } from './services/recurringMeetings.js';
+import cron from 'node-cron';
+import { regenerate as regenerateDayInReview } from './services/dayInReview.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -108,6 +110,37 @@ app.use((err, req, res, _next) => {
   // 4xx errors with explicit messages (e.g. validation) stay as-is.
   res.status(status).json({ error: err.message || 'Bad request' });
 });
+
+// ── Scheduled jobs ────────────────────────────────────────────────────
+// Daily 4:05 PM America/New_York — proactively warm the Day-in-Review
+// cache so the first dashboard load after market close is instant
+// instead of waiting 10-30s for the LLM. 5 minutes after the cache
+// key flips so we're safely in the new review-day window.
+//
+// Requires the API service to run continuously (Render Starter+ tier).
+// On the free spin-down tier this still works while the service is
+// awake, just doesn't fire if nobody's pinged the API for 15+ min.
+// The lazy /day-in-review endpoint is the safety net either way.
+cron.schedule(
+  '5 16 * * *',
+  () => {
+    console.log('[cron] day-in-review: regenerating after 4pm ET close');
+    regenerateDayInReview({ force: true })
+      .then((r) => {
+        if (r) {
+          console.log(
+            `[cron] day-in-review: generated for ${r.reviewDay} at ${r.dayInReviewAt}`
+          );
+        } else {
+          console.warn('[cron] day-in-review: generator returned null');
+        }
+      })
+      .catch((err) => {
+        console.error('[cron] day-in-review failed:', err.message);
+      });
+  },
+  { timezone: 'America/New_York' }
+);
 
 const port = process.env.PORT || 4000;
 app.listen(port, async () => {
