@@ -66,14 +66,27 @@ export default function Dashboard() {
   const [dashboard, setDashboard] = useState(null);
   const [quotes, setQuotes] = useState(null);
   const [history, setHistory] = useState([]);
-
   const [earnings, setEarnings] = useState(null); // { upcoming: [...] }
+  // Day in Review fetched separately so the slow LLM call doesn't
+  // block the rest of the dashboard. Loading state lets the card
+  // render a placeholder instead of disappearing entirely.
+  const [dirData, setDirData] = useState(null);
+  const [dirLoading, setDirLoading] = useState(true);
 
   useEffect(() => {
     api.get('/dashboard').then((r) => setDashboard(r.data)).catch(() => setDashboard({}));
     api.get('/holdings/quotes').then((r) => setQuotes(r.data)).catch(() => setQuotes(null));
     api.get('/holdings/history').then((r) => setHistory(r.data || [])).catch(() => setHistory([]));
     api.get('/holdings/earnings').then((r) => setEarnings(r.data)).catch(() => setEarnings(null));
+    // DIR runs in parallel with the dashboard request. On cache miss
+    // it can take 10-30s; on cache hit it's instant. The page
+    // renders without waiting either way.
+    setDirLoading(true);
+    api
+      .get('/dashboard/day-in-review')
+      .then((r) => setDirData(r.data))
+      .catch(() => setDirData(null))
+      .finally(() => setDirLoading(false));
   }, []);
 
   // Soonest upcoming earnings within the next 30 days — surfaces as a
@@ -115,12 +128,19 @@ export default function Dashboard() {
         history={normalizedHistory}
       />
 
-      {dashboard?.dayInReview && (
+      {/* DIR text comes from its own endpoint; on the very first load
+          of a new ET review-day it can take 10-30s for the LLM to
+          finish. The placeholder keeps the slot reserved so the page
+          doesn't visibly reshuffle when it lands. Hidden entirely if
+          the LLM produced nothing AND we're not still loading. */}
+      {dirLoading ? (
+        <DayInReviewPlaceholder />
+      ) : dirData?.dayInReview ? (
         <DayInReview
-          text={dashboard.dayInReview}
-          generatedAt={dashboard.dayInReviewAt}
+          text={dirData.dayInReview}
+          generatedAt={dirData.dayInReviewAt}
         />
-      )}
+      ) : null}
 
       <SpotlightRow
         nextPitch={dashboard?.nextPitch}
@@ -398,6 +418,28 @@ function Mover({ holding }) {
 }
 
 // ─── Day in Review ──────────────────────────────────────────────────────
+
+// Slot-reserving placeholder that renders while the DIR endpoint is
+// still working. Three pulsing skeleton lines mimic the actual
+// paragraph height so the page doesn't jump when the real card lands.
+function DayInReviewPlaceholder() {
+  return (
+    <div className="rounded-2xl border border-gold-200 bg-[#FFFDF5] p-5 shadow-card md:p-7">
+      <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-gold-700">
+        <span className="h-px w-6 bg-gold" />
+        The Day in Review
+        <span className="ml-2 text-[9px] normal-case tracking-normal text-navy-400">
+          generating…
+        </span>
+      </div>
+      <div className="mt-4 space-y-2">
+        <div className="h-4 w-11/12 animate-pulse rounded bg-navy-50" />
+        <div className="h-4 w-10/12 animate-pulse rounded bg-navy-50" />
+        <div className="h-4 w-7/12 animate-pulse rounded bg-navy-50" />
+      </div>
+    </div>
+  );
+}
 
 function DayInReview({ text, generatedAt }) {
   // Stamp the card with an ET-formatted "as of" line so the user can see

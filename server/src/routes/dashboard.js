@@ -286,33 +286,17 @@ router.get('/', async (req, res) => {
     .sort((a, b) => new Date(b.at) - new Date(a.at))
     .slice(0, 5);
 
-  // Day in Review: keyed by ET review-day. Generate when the cache is
-  // empty or when a new review-day rolls in (4pm ET crossover). Never
-  // blocks the dashboard response — if the LLM errors we return null
-  // and the client hides the card.
-  let dayInReview = null;
-  let dayInReviewAt = null;
+  // Day in Review used to be inlined here, awaiting the LLM call —
+  // which made every cache miss block the whole dashboard for 10-30s.
+  // It now has its own endpoint (GET /day-in-review) that the client
+  // fires in parallel; this handler returns instantly with whatever
+  // is already cached. If the cached DIR is for the current review-day
+  // we return it; otherwise the client gets null and its own request
+  // triggers the generation.
   const reviewDay = currentReviewDayET();
   const haveCached = dirCache.text && dirCache.reviewDay === reviewDay;
-  if (haveCached) {
-    dayInReview = dirCache.text;
-    dayInReviewAt = dirCache.generatedAt;
-  } else if (process.env.LOCAL_LLM_URL) {
-    try {
-      const payload = await buildDayInReviewPayload();
-      const text = await generateDayInReview(payload);
-      if (text) {
-        const stampedAt = new Date().toISOString();
-        dirCache.reviewDay = reviewDay;
-        dirCache.generatedAt = stampedAt;
-        dirCache.text = text;
-        dayInReview = text;
-        dayInReviewAt = stampedAt;
-      }
-    } catch (err) {
-      console.warn('day-in-review generation failed:', err.message);
-    }
-  }
+  const dayInReview = haveCached ? dirCache.text : null;
+  const dayInReviewAt = haveCached ? dirCache.generatedAt : null;
 
   res.json({
     nextPitch,
@@ -320,11 +304,45 @@ router.get('/', async (req, res) => {
     holdingsCount,
     activity,
     dayInReview,
-    // ISO timestamp of when the paragraph was generated — the client uses
-    // this to stamp the card ("as of 4:00 PM ET · Apr 22"). null when the
-    // card is hidden.
     dayInReviewAt,
   });
+});
+
+// Day in Review on a separate endpoint so its slow LLM call never
+// blocks the rest of the dashboard. The client fetches both in
+// parallel and lets the DIR card render whenever it's ready.
+//
+// On cache miss this DOES wait for the LLM (10-30s), but only this
+// one card is suspended in the UI — everything else has already
+// rendered.
+router.get('/day-in-review', async (_req, res) => {
+  const reviewDay = currentReviewDayET();
+  const haveCached = dirCache.text && dirCache.reviewDay === reviewDay;
+  if (haveCached) {
+    return res.json({
+      dayInReview: dirCache.text,
+      dayInReviewAt: dirCache.generatedAt,
+      cached: true,
+    });
+  }
+  if (!process.env.LOCAL_LLM_URL) {
+    return res.json({ dayInReview: null, dayInReviewAt: null, cached: false });
+  }
+  try {
+    const payload = await buildDayInReviewPayload();
+    const text = await generateDayInReview(payload);
+    if (!text) {
+      return res.json({ dayInReview: null, dayInReviewAt: null, cached: false });
+    }
+    const stampedAt = new Date().toISOString();
+    dirCache.reviewDay = reviewDay;
+    dirCache.generatedAt = stampedAt;
+    dirCache.text = text;
+    res.json({ dayInReview: text, dayInReviewAt: stampedAt, cached: false });
+  } catch (err) {
+    console.warn('day-in-review generation failed:', err.message);
+    res.json({ dayInReview: null, dayInReviewAt: null, cached: false });
+  }
 });
 
 export default router;
