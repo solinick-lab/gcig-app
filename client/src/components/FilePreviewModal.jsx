@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react';
 import { X, ExternalLink, Download, Loader2 } from 'lucide-react';
-import { API_BASE } from '../api/client.js';
+import api from '../api/client.js';
 import {
   isManagedFile,
   extractItemId,
   downloadFile,
 } from '../api/fileHelpers.js';
 
-// In-app PDF / file preview. Two paths:
+// In-app file preview. Two paths:
 //
-//   onedrive:ITEM_ID — fetched from /api/files/:id with the user's JWT,
-//                      turned into a blob URL, embedded so it never
-//                      leaves the page. Always works for PDFs.
+//   onedrive:ITEM_ID — asks the server for a short-lived OneDrive embed
+//                      URL (POST /me/drive/items/:id/preview) and loads
+//                      it in an iframe. Microsoft's Office Online viewer
+//                      handles PDF, PPTX, DOCX, XLSX uniformly.
 //
 //   http(s)://...    — embedded directly via <iframe>. Works for sites
 //                      that don't set X-Frame-Options: DENY (Google
@@ -21,57 +22,49 @@ import {
 // `filename` is used for the download fallback so the saved file has a
 // sensible name. `title` is the modal header. Both optional.
 export default function FilePreviewModal({ url, title, filename, onClose }) {
-  const [blobUrl, setBlobUrl] = useState(null);
+  const [embedUrl, setEmbedUrl] = useState(null);
   const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const managed = isManagedFile(url);
 
   useEffect(() => {
-    if (!url || !managed) return;
+    if (!url) return;
+    if (!managed) {
+      setEmbedUrl(toEmbedUrl(url));
+      return;
+    }
     let cancelled = false;
-    let revoke = null;
     setLoading(true);
     setLoadError('');
+    setEmbedUrl(null);
     (async () => {
       try {
         const id = extractItemId(url);
-        const token = localStorage.getItem('gcig_token');
-        const res = await fetch(`${API_BASE}/files/${encodeURIComponent(id)}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) {
-          let msg = `Preview failed (${res.status})`;
-          try {
-            const body = await res.json();
-            if (body?.error) msg = body.error;
-          } catch {
-            /* not JSON */
-          }
-          throw new Error(msg);
-        }
-        const blob = await res.blob();
+        const { data } = await api.get(
+          `/files/${encodeURIComponent(id)}/preview`
+        );
         if (cancelled) return;
-        const obj = URL.createObjectURL(blob);
-        revoke = obj;
-        setBlobUrl(obj);
+        if (!data?.url) throw new Error('Preview URL missing from response');
+        setEmbedUrl(data.url);
       } catch (err) {
-        if (!cancelled) setLoadError(err.message || 'Preview failed');
+        if (!cancelled) {
+          setLoadError(
+            err.response?.data?.error ||
+              err.message ||
+              'Preview failed'
+          );
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => {
       cancelled = true;
-      if (revoke) URL.revokeObjectURL(revoke);
     };
   }, [url, managed]);
 
   if (!url) return null;
-
-  // External URL we'll iframe directly. Google Drive `/preview` URLs work;
-  // raw `/view` URLs sometimes block; we leave it to the user's fallback.
-  const externalEmbedUrl = !managed ? toEmbedUrl(url) : null;
 
   async function handleDownload() {
     try {
@@ -83,9 +76,13 @@ export default function FilePreviewModal({ url, title, filename, onClose }) {
 
   function handleOpenExternal() {
     if (managed) {
-      // For managed files there's no "external" page — fall back to
-      // downloading.
-      handleDownload();
+      // Open the embed URL in a new tab if we have one — otherwise fall
+      // back to triggering a download.
+      if (embedUrl) {
+        window.open(embedUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        handleDownload();
+      }
       return;
     }
     window.open(url, '_blank', 'noopener,noreferrer');
@@ -108,7 +105,7 @@ export default function FilePreviewModal({ url, title, filename, onClose }) {
             <button
               onClick={handleDownload}
               className="hidden items-center gap-1 rounded-lg border border-navy-100 px-2.5 py-1 text-xs font-semibold text-navy hover:bg-navy-50 sm:inline-flex"
-              title="Download"
+              title="Download a copy"
             >
               <Download className="h-3.5 w-3.5" />
               Download
@@ -116,10 +113,10 @@ export default function FilePreviewModal({ url, title, filename, onClose }) {
             <button
               onClick={handleOpenExternal}
               className="hidden items-center gap-1 rounded-lg border border-navy-100 px-2.5 py-1 text-xs font-semibold text-navy hover:bg-navy-50 sm:inline-flex"
-              title="Open in new tab"
+              title="Open in a new tab"
             >
               <ExternalLink className="h-3.5 w-3.5" />
-              {managed ? 'Download' : 'Open'}
+              New tab
             </button>
             <button
               onClick={onClose}
@@ -132,40 +129,27 @@ export default function FilePreviewModal({ url, title, filename, onClose }) {
         </div>
 
         <div className="flex-1 bg-navy-50">
-          {managed ? (
-            loading ? (
-              <div className="flex h-full items-center justify-center text-sm text-navy-400">
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Loading preview…
-              </div>
-            ) : loadError ? (
-              <PreviewError
-                message={loadError}
-                onDownload={handleDownload}
-              />
-            ) : blobUrl ? (
-              // <embed> uses the browser's built-in PDF viewer — works
-              // everywhere desktop Chrome/Safari/Firefox + iOS/Android.
-              <embed
-                src={blobUrl}
-                type="application/pdf"
-                className="h-full w-full"
-              />
-            ) : null
-          ) : (
+          {loading ? (
+            <div className="flex h-full items-center justify-center text-sm text-navy-400">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Loading preview…
+            </div>
+          ) : loadError ? (
+            <PreviewError message={loadError} onDownload={handleDownload} />
+          ) : embedUrl ? (
             <iframe
-              src={externalEmbedUrl}
+              src={embedUrl}
               title={title || 'Document preview'}
               className="h-full w-full"
-              // We can't reliably detect X-Frame-Options block from JS,
-              // so the bottom strip below offers the new-tab fallback.
+              // OneDrive's embed URL serves the Office Online viewer in
+              // its own sandbox — no extra restrictions needed here.
+              allow="fullscreen"
             />
-          )}
+          ) : null}
         </div>
 
         {/* Mobile / fallback action strip. Always visible on small screens
-            (where the header buttons are hidden) and on external embeds
-            in case the iframe got blocked. */}
+            (where the header buttons are hidden). */}
         <div className="flex flex-wrap gap-2 border-t border-navy-50 px-4 py-2 sm:hidden">
           <button
             onClick={handleDownload}
@@ -179,7 +163,7 @@ export default function FilePreviewModal({ url, title, filename, onClose }) {
             className="inline-flex items-center gap-1 rounded-lg border border-navy-100 px-3 py-1.5 text-xs font-semibold text-navy"
           >
             <ExternalLink className="h-3.5 w-3.5" />
-            {managed ? 'Save copy' : 'Open in new tab'}
+            New tab
           </button>
         </div>
       </div>

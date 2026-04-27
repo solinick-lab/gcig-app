@@ -343,6 +343,36 @@ export async function getMetadata(itemId) {
   return r.json();
 }
 
+// Ask Microsoft Graph for a short-lived embed URL that renders the file
+// in the Office Online viewer. Works for PDF, PPTX, DOCX, XLSX — anything
+// Office can render. Returns { url, postParameters? } where url is meant
+// to be loaded in an <iframe> and postParameters (if present) describes a
+// form post that produces the same render. We only need `url`.
+export async function getPreviewUrl(itemId) {
+  const token = await getAccessToken();
+  const url = `${GRAPH}/me/drive/items/${encodeURIComponent(itemId)}/preview`;
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    // Empty body — defaults are fine. zoom=1, allowEdit=false implied.
+    body: '{}',
+  });
+  if (!r.ok) {
+    const text = await r.text().catch(() => '');
+    throw new Error(`Preview URL fetch failed (${r.status}): ${text.slice(0, 300)}`);
+  }
+  const json = await r.json();
+  // Graph returns { getUrl, postUrl, postParameters }. getUrl is suitable
+  // for direct iframe src.
+  if (!json?.getUrl) {
+    throw new Error('Preview URL missing from Graph response');
+  }
+  return { url: json.getUrl };
+}
+
 export async function deleteFile(itemId) {
   const token = await getAccessToken();
   const url = `${GRAPH}/me/drive/items/${encodeURIComponent(itemId)}`;
