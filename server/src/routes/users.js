@@ -49,6 +49,90 @@ router.get('/participation', requireAdmin, async (_req, res) => {
   }
 });
 
+// ── Lunch schedule ────────────────────────────────────────────────────
+// Stored on User.lunchSchedule as JSON: { mon, tue, wed, thu, fri } where
+// each value is 'First' | 'Second' | 'Both' | null. Used by the
+// Request-a-Pitch flow so requesters can pick a lunch period the
+// President / their PM is actually free.
+const LUNCH_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri'];
+const LUNCH_VALUES = new Set(['First', 'Second', 'Both', null]);
+
+function sanitizeLunchSchedule(input) {
+  if (input == null) return null;
+  if (typeof input !== 'object') {
+    const err = new Error('lunchSchedule must be an object');
+    err.status = 400;
+    throw err;
+  }
+  const out = {};
+  for (const day of LUNCH_DAYS) {
+    const v = input[day] ?? null;
+    if (!LUNCH_VALUES.has(v)) {
+      const err = new Error(`Invalid lunch value for ${day}`);
+      err.status = 400;
+      throw err;
+    }
+    out[day] = v;
+  }
+  return out;
+}
+
+router.get('/me/lunch', async (req, res) => {
+  const u = await prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: { lunchSchedule: true },
+  });
+  res.json({ lunchSchedule: u?.lunchSchedule || null });
+});
+
+router.put('/me/lunch', async (req, res) => {
+  let lunchSchedule;
+  try {
+    lunchSchedule = sanitizeLunchSchedule(req.body?.lunchSchedule);
+  } catch (err) {
+    return res.status(err.status || 400).json({ error: err.message });
+  }
+  await prisma.user.update({
+    where: { id: req.user.id },
+    data: { lunchSchedule },
+  });
+  res.json({ lunchSchedule });
+});
+
+// Public lunch availability for the President + every PM. Used by the
+// Request-a-Pitch UI so requesters know which period each leader has free
+// before submitting a meeting time. Doesn't expose anyone outside
+// leadership — non-leaders' schedules stay private.
+router.get('/lunch/leaders', async (_req, res) => {
+  const leaders = await prisma.user.findMany({
+    where: {
+      OR: [
+        { role: 'President' },
+        { role: 'PortfolioManager' },
+        { role: 'SeniorPortfolioManager' },
+        { ledIndustries: { some: {} } },
+      ],
+    },
+    select: {
+      id: true,
+      name: true,
+      role: true,
+      lunchSchedule: true,
+      ledIndustries: { select: { id: true, name: true } },
+    },
+    orderBy: { name: 'asc' },
+  });
+  res.json(
+    leaders.map((u) => ({
+      id: u.id,
+      name: u.name,
+      role: u.role,
+      lunchSchedule: u.lunchSchedule || null,
+      industries: u.ledIndustries,
+    }))
+  );
+});
+
 // All authed users can list members (shown on attendance sheet)
 router.get('/', async (_req, res) => {
   const users = await prisma.user.findMany({

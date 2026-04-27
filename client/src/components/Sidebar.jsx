@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -14,9 +15,11 @@ import {
   Trophy,
   Megaphone,
   Bot,
+  Send,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import RoleBadge from './RoleBadge.jsx';
+import api from '../api/client.js';
 
 // Grouped sidebar nav. Sections with a header collapse the crowd of items
 // into 4 scannable clusters instead of a flat list of 12.
@@ -28,6 +31,7 @@ const NAV_SECTIONS = [
     header: 'Day to day',
     items: [
       { to: '/calendar', label: 'Calendar', icon: CalendarDays },
+      { to: '/pitch-requests', label: 'Pitch Requests', icon: Send, badgeKey: 'pitchRequests' },
       { to: '/chat', label: 'Chat', icon: MessageSquare },
       { to: '/broadcast', label: 'Broadcast', icon: Megaphone, executiveOnly: true },
       { to: '/attendance', label: 'Attendance', icon: ClipboardCheck, hideForAdvisory: true },
@@ -58,6 +62,29 @@ const NAV_SECTIONS = [
 
 export default function Sidebar({ onNavigate }) {
   const { user, logout, isAdmin, isExecutive, isAdvisory, isSuperAdmin } = useAuth();
+  const [badges, setBadges] = useState({ pitchRequests: 0 });
+
+  // Poll the pending-pitch-requests count so the sidebar chip stays fresh.
+  // 60s cadence is plenty for an inbox-style notification — anything more
+  // aggressive just spams the API for nothing.
+  useEffect(() => {
+    let cancelled = false;
+    async function pull() {
+      try {
+        const { data } = await api.get('/pitch-requests/pending-count');
+        if (cancelled) return;
+        setBadges({ pitchRequests: (data.count || 0) + (data.mineUnseen || 0) });
+      } catch {
+        /* ignore — badge defaults to 0 */
+      }
+    }
+    pull();
+    const t = setInterval(pull, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, []);
 
   return (
     <aside className="flex h-full w-64 flex-col bg-navy text-white">
@@ -103,6 +130,7 @@ export default function Sidebar({ onNavigate }) {
               <div className="space-y-0.5">
                 {visible.map((item) => {
                   const Icon = item.icon;
+                  const badge = item.badgeKey ? badges[item.badgeKey] : 0;
                   return (
                     <NavLink
                       key={item.to}
@@ -118,7 +146,12 @@ export default function Sidebar({ onNavigate }) {
                       }
                     >
                       <Icon className="h-4 w-4" />
-                      {item.label}
+                      <span className="flex-1">{item.label}</span>
+                      {badge > 0 && (
+                        <span className="ml-2 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-gold px-1.5 text-[10px] font-bold text-navy">
+                          {badge}
+                        </span>
+                      )}
                     </NavLink>
                   );
                 })}

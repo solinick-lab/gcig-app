@@ -277,6 +277,192 @@ export async function sendBroadcastEmail(
   });
 }
 
+// Pitch-request notification sent to the President + the relevant
+// industry PM at submission time. `attachment` is optional — when the
+// requester uploaded a deck via OneDrive we attach the bytes; when they
+// pasted a Google Drive / Slides URL we just embed the link.
+export async function sendPitchRequestEmail(
+  toEmail,
+  {
+    recipientName,
+    recipientRole, // 'President' | 'PM'
+    requesterName,
+    requesterRole,
+    ticker,
+    companyName,
+    industryName,
+    proposedDate,
+    proposedLunch,
+    notes,
+    deckUrl, // External URL when deck wasn't uploaded
+    deckFileName, // For the body when we have an attachment
+    inboxUrl,
+    attachment, // { filename, content (Buffer), contentType }
+  }
+) {
+  const dateStr = proposedDate
+    ? new Date(proposedDate).toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+      })
+    : 'No date proposed';
+  const lunchLabel = proposedLunch
+    ? proposedLunch === 'Both'
+      ? 'either lunch'
+      : `${proposedLunch.toLowerCase()} lunch`
+    : null;
+  const audienceCopy =
+    recipientRole === 'President'
+      ? `<strong>${requesterName}</strong> has requested a pitch meeting with you.`
+      : `<strong>${requesterName}</strong> (one of your pod members) has requested a pitch meeting with the President. You're cc'd as the responsible portfolio manager.`;
+  const deckBlock = attachment
+    ? `<p style="color: #1B2A4A; font-size: 13px; margin: 0 0 4px;">
+         <strong>Slide deck:</strong> attached (${attachment.filename})
+       </p>`
+    : deckUrl
+    ? `<p style="color: #1B2A4A; font-size: 13px; margin: 0 0 4px;">
+         <strong>Slide deck:</strong>
+         <a href="${deckUrl}" style="color: #1B2A4A;">${deckFileName || deckUrl}</a>
+       </p>`
+    : '';
+
+  const mail = {
+    from: from(),
+    to: toEmail,
+    subject: `Pitch request: ${ticker}${companyName ? ` (${companyName})` : ''} from ${requesterName}`,
+    html: `
+      <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h1 style="color: #1B2A4A; font-size: 20px; margin: 0; font-family: Georgia, serif; letter-spacing: -0.01em;">The Griffin Fund</h1>
+          <p style="color: #C9A84C; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; margin: 4px 0 0;">
+            Grace Church School Investment Group
+          </p>
+        </div>
+        <div style="background: #F7F8FB; border-radius: 12px; padding: 24px;">
+          <p style="color: #1B2A4A; font-size: 14px; margin: 0 0 8px;">Hi ${recipientName},</p>
+          <p style="color: #1B2A4A; font-size: 14px; margin: 0 0 16px;">
+            ${audienceCopy}
+          </p>
+          <div style="background: #1B2A4A; border-radius: 8px; padding: 16px; margin: 0 0 16px;">
+            <p style="color: #8C99BB; font-size: 12px; margin: 0 0 4px;">Ticker</p>
+            <p style="color: #C9A84C; font-size: 22px; font-weight: 700; margin: 0 0 12px;">${ticker}${companyName ? ` <span style="color: white; font-size: 14px; font-weight: 400;">— ${companyName}</span>` : ''}</p>
+            <p style="color: #8C99BB; font-size: 12px; margin: 0 0 4px;">Requested by</p>
+            <p style="color: white; font-size: 13px; margin: 0 0 12px;">${requesterName}${requesterRole ? ` <span style="color: #8C99BB;">(${requesterRole})</span>` : ''}</p>
+            ${
+              industryName
+                ? `<p style="color: #8C99BB; font-size: 12px; margin: 0 0 4px;">Sector</p>
+                   <p style="color: white; font-size: 13px; margin: 0 0 12px;">${industryName}</p>`
+                : ''
+            }
+            <p style="color: #8C99BB; font-size: 12px; margin: 0 0 4px;">Proposed meeting</p>
+            <p style="color: white; font-size: 13px; margin: 0 0 ${notes ? '12px' : '0'};">${dateStr}${lunchLabel ? ` &middot; ${lunchLabel}` : ''}</p>
+            ${
+              notes
+                ? `<p style="color: #8C99BB; font-size: 12px; margin: 0 0 4px;">Notes</p>
+                   <p style="color: white; font-size: 13px; margin: 0; white-space: pre-wrap;">${escapeHtml(notes)}</p>`
+                : ''
+            }
+          </div>
+          ${deckBlock}
+          ${
+            recipientRole === 'President'
+              ? `<p style="color: #1B2A4A; font-size: 14px; margin: 16px 0 8px;">
+                   The PM has been cc'd. The request is pending your approval —
+                   only your decision blocks the meeting.
+                 </p>`
+              : `<p style="color: #1B2A4A; font-size: 14px; margin: 16px 0 8px;">
+                   Heads up — your approval is informational. The President's
+                   decision is what locks in the meeting.
+                 </p>`
+          }
+          <div style="text-align: center; margin: 20px 0 0;">
+            <a href="${inboxUrl}" style="display: inline-block; background: #C9A84C; color: #1B2A4A; font-size: 14px; font-weight: 600; text-decoration: none; padding: 10px 24px; border-radius: 8px;">
+              Review on the Griffin Fund
+            </a>
+          </div>
+        </div>
+      </div>
+    `,
+  };
+  if (attachment) {
+    mail.attachments = [
+      {
+        filename: attachment.filename,
+        content: attachment.content,
+        contentType: attachment.contentType,
+      },
+    ];
+  }
+  await getTransporter().sendMail(mail);
+}
+
+// Sent to the requester when the President OR a PM acts on their
+// request. `actor` is 'President' or 'PM' so the body can read right.
+export async function sendPitchRequestDecisionEmail(
+  toEmail,
+  {
+    requesterName,
+    actor,
+    actorName,
+    decision, // 'approved' | 'declined'
+    ticker,
+    reason,
+    dashboardUrl,
+  }
+) {
+  const headline =
+    actor === 'President'
+      ? decision === 'approved'
+        ? `Approved: your ${ticker} pitch request`
+        : `Declined: your ${ticker} pitch request`
+      : decision === 'approved'
+      ? `Your PM has approved your ${ticker} pitch request`
+      : `Your PM can't make your ${ticker} pitch meeting`;
+  const body =
+    actor === 'President'
+      ? decision === 'approved'
+        ? `<strong>${actorName}</strong> approved your pitch request. The meeting is on — they'll follow up with the final time and location.`
+        : `<strong>${actorName}</strong> declined your pitch request.${reason ? ` Reason: <em>${escapeHtml(reason)}</em>` : ''} You can submit a new request with a different time or refined thesis.`
+      : decision === 'approved'
+      ? `<strong>${actorName}</strong> (your PM) approved the request. The President's decision is still pending.`
+      : `<strong>${actorName}</strong> (your PM) can't make this meeting${reason ? ` — <em>${escapeHtml(reason)}</em>` : ''}. The President can still approve, so the meeting may go ahead without your PM.`;
+  await getTransporter().sendMail({
+    from: from(),
+    to: toEmail,
+    subject: headline,
+    html: `
+      <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h1 style="color: #1B2A4A; font-size: 20px; margin: 0; font-family: Georgia, serif; letter-spacing: -0.01em;">The Griffin Fund</h1>
+          <p style="color: #C9A84C; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; margin: 4px 0 0;">
+            Grace Church School Investment Group
+          </p>
+        </div>
+        <div style="background: #F7F8FB; border-radius: 12px; padding: 24px;">
+          <p style="color: #1B2A4A; font-size: 14px; margin: 0 0 8px;">Hi ${requesterName},</p>
+          <p style="color: #1B2A4A; font-size: 14px; margin: 0 0 16px;">${body}</p>
+          <div style="text-align: center; margin: 20px 0 0;">
+            <a href="${dashboardUrl}" style="display: inline-block; background: #C9A84C; color: #1B2A4A; font-size: 14px; font-weight: 600; text-decoration: none; padding: 10px 24px; border-radius: 8px;">
+              Open the Griffin Fund
+            </a>
+          </div>
+        </div>
+      </div>
+    `,
+  });
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export async function sendInviteEmail(toEmail, { name, role, inviteUrl }) {
   await getTransporter().sendMail({
     from: from(),

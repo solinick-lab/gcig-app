@@ -307,6 +307,31 @@ export async function streamDownload(itemId, res) {
   }
 }
 
+// Fetch the file's bytes into memory. Used for email attachments where
+// we need the buffer + filename in one shot. Don't use this for large
+// downloads to a client — use streamDownload instead so we don't buffer
+// 25 MB in Node memory just to forward it.
+export async function downloadBuffer(itemId) {
+  const token = await getAccessToken();
+  const [contentRes, meta] = await Promise.all([
+    fetch(`${GRAPH}/me/drive/items/${encodeURIComponent(itemId)}/content`, {
+      headers: { Authorization: `Bearer ${token}` },
+      redirect: 'follow',
+    }),
+    getMetadata(itemId),
+  ]);
+  if (!contentRes.ok) {
+    const text = await contentRes.text().catch(() => '');
+    throw new Error(`Download failed (${contentRes.status}): ${text.slice(0, 300)}`);
+  }
+  const arrayBuf = await contentRes.arrayBuffer();
+  return {
+    buffer: Buffer.from(arrayBuf),
+    filename: meta.name,
+    contentType: contentRes.headers.get('content-type') || 'application/octet-stream',
+  };
+}
+
 export async function getMetadata(itemId) {
   const token = await getAccessToken();
   const url = `${GRAPH}/me/drive/items/${encodeURIComponent(itemId)}`;

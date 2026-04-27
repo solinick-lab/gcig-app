@@ -24,6 +24,7 @@ import systemRoutes from './routes/system.js';
 import aiChatRoutes from './routes/aiChat.js';
 import publicRoutes from './routes/public.js';
 import filesRoutes from './routes/files.js';
+import pitchRequestRoutes from './routes/pitchRequests.js';
 import { ensureRecurringMeetings } from './services/recurringMeetings.js';
 import cron from 'node-cron';
 import { regenerate as regenerateDayInReview } from './services/dayInReview.js';
@@ -95,6 +96,7 @@ app.use('/api/system', systemRoutes);
 app.use('/api/ai-chat', aiChatRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/files', filesRoutes);
+app.use('/api/pitch-requests', pitchRequestRoutes);
 
 // Generic error handler. Logs the full error server-side for debugging but
 // never leaks internal details (stack traces, Prisma error bodies, etc.) to

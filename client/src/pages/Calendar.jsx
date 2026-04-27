@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Calendar as BigCalendar, dateFnsLocalizer } from 'react-big-calendar';
 import { format, parse, startOfWeek, getDay } from 'date-fns';
 import enUS from 'date-fns/locale/en-US';
-import { Plus, Presentation, CalendarDays } from 'lucide-react';
+import { Plus, Presentation, CalendarDays, Send, Utensils } from 'lucide-react';
 import api from '../api/client.js';
 import { safeHref } from '../api/safeUrl.js';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -15,6 +15,7 @@ import EventAttendance from '../components/EventAttendance.jsx';
 import AdminOnly from '../components/AdminOnly.jsx';
 import FileUploader from '../components/FileUploader.jsx';
 import FileSummary from '../components/FileSummary.jsx';
+import RequestPitchModal from '../components/RequestPitchModal.jsx';
 import { isManagedFile, downloadFile } from '../api/fileHelpers.js';
 
 const PITCH_ROLES = ['President', 'CIO', 'SeniorPortfolioManager', 'PortfolioManager'];
@@ -70,6 +71,18 @@ export default function Calendar() {
   const [eventModalOpen, setEventModalOpen] = useState(false);
   const [eventForm, setEventForm] = useState(emptyEventForm());
 
+  const [requestPitchOpen, setRequestPitchOpen] = useState(false);
+  const [leaderLunch, setLeaderLunch] = useState([]);
+
+  async function loadLeaderLunch() {
+    try {
+      const { data } = await api.get('/users/lunch/leaders');
+      setLeaderLunch(data);
+    } catch {
+      setLeaderLunch([]);
+    }
+  }
+
   async function loadPitches() {
     const { data } = await api.get('/pitches');
     setPitches(data);
@@ -91,6 +104,7 @@ export default function Calendar() {
     loadPitches();
     loadEvents();
     loadIndustries();
+    loadLeaderLunch();
     if (canEditPitches) loadUsers();
   }, [canEditPitches]);
 
@@ -270,6 +284,13 @@ export default function Calendar() {
         subtitle="Pitches and club events on one view."
         actions={
           <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={() => setRequestPitchOpen(true)}
+              variant="outline"
+            >
+              <Send className="h-4 w-4" />
+              Request a Pitch
+            </Button>
             {canEditPitches && (
               <Button onClick={openPitchCreate} variant="gold">
                 <Plus className="h-4 w-4" />
@@ -315,6 +336,19 @@ export default function Calendar() {
           />
         </div>
       </Card>
+
+      <div className="mt-4">
+        <PitchRequestCard
+          leaders={leaderLunch}
+          onRequestClick={() => setRequestPitchOpen(true)}
+        />
+      </div>
+
+      <RequestPitchModal
+        open={requestPitchOpen}
+        onClose={() => setRequestPitchOpen(false)}
+        onSubmitted={loadLeaderLunch}
+      />
 
       {/* ── Pitch detail modal ── */}
       <Modal
@@ -732,6 +766,106 @@ function MobileAgenda({ events, onSelect }) {
         );
       })}
     </div>
+  );
+}
+
+// Editorial card for the "Request a Pitch with the President" feature.
+// Renders directly under the calendar so members can see lunch availability
+// across the President + every PM at a glance before opening the modal.
+const LUNCH_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri'];
+const LUNCH_DAY_LABELS = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri' };
+function lunchCellLabel(v) {
+  if (v === 'Both') return 'Either';
+  if (v === 'First') return '1st';
+  if (v === 'Second') return '2nd';
+  return '—';
+}
+function lunchCellClass(v) {
+  if (v === 'Both') return 'bg-gold-100 text-gold-800';
+  if (v === 'First' || v === 'Second') return 'bg-navy-50 text-navy';
+  return 'bg-white text-navy-300';
+}
+
+function PitchRequestCard({ leaders, onRequestClick }) {
+  const president = leaders.find((l) => l.role === 'President');
+  const pms = leaders.filter((l) => l.role !== 'President');
+  const hasAnySchedule = leaders.some(
+    (l) => l.lunchSchedule && Object.values(l.lunchSchedule).some(Boolean)
+  );
+  return (
+    <Card
+      kicker="Members"
+      title="Request a Pitch with the President"
+      action={
+        <Button onClick={onRequestClick} variant="gold">
+          <Send className="h-4 w-4" />
+          New request
+        </Button>
+      }
+    >
+      <p className="mb-4 text-sm text-navy-600">
+        Any member can request a pitch meeting with the President. Pick a sector
+        below — the PM responsible for that sector will be cc'd. Your request
+        won't be submitted until you attach a slide deck.
+      </p>
+      <div className="rounded-lg border border-navy-100 bg-navy-50/40 p-4">
+        <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gold-700">
+          <Utensils className="h-3.5 w-3.5" />
+          Lunch availability
+        </div>
+        {!hasAnySchedule ? (
+          <p className="text-xs text-navy-400">
+            Lunch availability hasn't been entered yet. Members can set theirs
+            from the Profile page.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[420px] text-left text-xs">
+              <thead>
+                <tr className="text-navy-400">
+                  <th className="py-1 pr-2 font-medium">Member</th>
+                  {LUNCH_DAYS.map((d) => (
+                    <th key={d} className="px-2 py-1 text-center font-medium">
+                      {LUNCH_DAY_LABELS[d]}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {[president, ...pms].filter(Boolean).map((l) => (
+                  <tr key={l.id} className="border-t border-navy-50">
+                    <td className="py-1.5 pr-2">
+                      <div className="font-semibold text-navy">{l.name}</div>
+                      <div className="text-[10px] uppercase tracking-wider text-navy-400">
+                        {l.role === 'President'
+                          ? 'President'
+                          : l.industries?.length
+                          ? `PM · ${l.industries.map((i) => i.name).join(', ')}`
+                          : 'PM'}
+                      </div>
+                    </td>
+                    {LUNCH_DAYS.map((d) => {
+                      const v = l.lunchSchedule?.[d] || null;
+                      return (
+                        <td key={d} className="px-1 py-1.5 text-center">
+                          <span
+                            className={`inline-block rounded-md px-2 py-0.5 text-[10px] font-semibold ${lunchCellClass(
+                              v
+                            )}`}
+                          >
+                            {lunchCellLabel(v)}
+                          </span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 

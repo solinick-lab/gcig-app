@@ -26,6 +26,7 @@ import Broadcast from './pages/Broadcast.jsx';
 import AiChat from './pages/AiChat.jsx';
 import MemberProfile from './pages/MemberProfile.jsx';
 import Landing from './pages/Landing.jsx';
+import PitchRequests from './pages/PitchRequests.jsx';
 
 export default function App() {
   const { loading } = useAuth();
@@ -57,6 +58,7 @@ export default function App() {
       >
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/calendar" element={<Calendar />} />
+        <Route path="/pitch-requests" element={<PitchRequests />} />
         {/* Legacy routes — keep so old bookmarks/links still work */}
         <Route path="/pitches" element={<Calendar />} />
         <Route path="/events" element={<Calendar />} />

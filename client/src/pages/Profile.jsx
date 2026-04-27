@@ -8,6 +8,7 @@ import {
   FileText,
   BookOpen,
   ShieldCheck,
+  Utensils,
 } from 'lucide-react';
 import { GoogleLogin } from '@react-oauth/google';
 import api from '../api/client.js';
@@ -293,6 +294,10 @@ export default function Profile() {
         </div>
       )}
 
+      <div className="mt-6">
+        <LunchScheduleCard />
+      </div>
+
       {/* One consolidated Security section — Google link, password,
           2FA, and active sessions all under a single editorial card
           with small-caps sub-section kickers. */}
@@ -447,6 +452,139 @@ export default function Profile() {
         </Card>
       </div>
     </>
+  );
+}
+
+// Lunch availability editor. Stored as JSON on the user — only the
+// President + PMs are surfaced via /users/lunch/leaders, but every member
+// can fill theirs in (cheap, and useful if leadership rotates mid-year).
+const LUNCH_DAYS = [
+  { key: 'mon', label: 'Monday' },
+  { key: 'tue', label: 'Tuesday' },
+  { key: 'wed', label: 'Wednesday' },
+  { key: 'thu', label: 'Thursday' },
+  { key: 'fri', label: 'Friday' },
+];
+const LUNCH_OPTIONS = [
+  { value: '', label: 'Not in school' },
+  { value: 'First', label: 'First lunch' },
+  { value: 'Second', label: 'Second lunch' },
+  { value: 'Both', label: 'Both / either' },
+];
+
+function LunchScheduleCard() {
+  const emptySchedule = {
+    mon: null,
+    tue: null,
+    wed: null,
+    thu: null,
+    fri: null,
+  };
+  const [schedule, setSchedule] = useState(emptySchedule);
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api
+      .get('/users/me/lunch')
+      .then((r) => {
+        const s = r.data?.lunchSchedule || {};
+        setSchedule({
+          mon: s.mon ?? null,
+          tue: s.tue ?? null,
+          wed: s.wed ?? null,
+          thu: s.thu ?? null,
+          fri: s.fri ?? null,
+        });
+      })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, []);
+
+  async function handleSave() {
+    setSaving(true);
+    setError('');
+    try {
+      await api.put('/users/me/lunch', { lunchSchedule: schedule });
+      setSavedAt(Date.now());
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to save lunch schedule.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card
+      kicker="Availability"
+      title={
+        <span className="flex items-center gap-2">
+          <Utensils className="h-5 w-5 text-gold" />
+          Lunch schedule
+        </span>
+      }
+    >
+      <p className="mb-4 max-w-2xl text-sm text-navy-600">
+        Set which lunch period you have each weekday. Members requesting a
+        pitch meeting with the President see this so they can pick a time
+        when leadership is actually free.
+      </p>
+      {!loaded ? (
+        <div className="text-sm text-navy-400">Loading…</div>
+      ) : (
+        <div className="space-y-3">
+          {LUNCH_DAYS.map((d) => (
+            <div
+              key={d.key}
+              className="flex flex-wrap items-center gap-3 border-b border-navy-50 pb-3 last:border-b-0 last:pb-0"
+            >
+              <div className="w-28 text-sm font-semibold text-navy">
+                {d.label}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {LUNCH_OPTIONS.map((o) => {
+                  const selected = (schedule[d.key] || '') === o.value;
+                  return (
+                    <button
+                      key={o.value || 'none'}
+                      type="button"
+                      onClick={() =>
+                        setSchedule({
+                          ...schedule,
+                          [d.key]: o.value || null,
+                        })
+                      }
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        selected
+                          ? 'border-gold bg-gold text-navy'
+                          : 'border-navy-100 bg-white text-navy hover:border-gold'
+                      }`}
+                    >
+                      {o.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          {error && (
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+          <div className="flex items-center gap-3 pt-1">
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : 'Save schedule'}
+            </Button>
+            {savedAt && !saving && (
+              <span className="text-xs text-emerald-700">Saved.</span>
+            )}
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 
