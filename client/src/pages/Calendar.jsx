@@ -790,9 +790,11 @@ function lunchCellClass(v) {
 }
 
 function PitchRequestCard({ leaders, onRequestClick }) {
-  const president = leaders.find((l) => l.role === 'President');
-  const pms = leaders.filter((l) => l.role !== 'President');
-  const hasAnySchedule = leaders.some(
+  // Pitch meetings happen with the President(s), so this card only lists
+  // them — PMs aren't part of the meeting cadence shown here. They're
+  // still cc'd downstream via the request form's industry picker.
+  const presidents = leaders.filter((l) => l.role === 'President');
+  const hasAnySchedule = presidents.some(
     (l) => l.lunchSchedule && Object.values(l.lunchSchedule).some(Boolean)
   );
   return (
@@ -835,16 +837,12 @@ function PitchRequestCard({ leaders, onRequestClick }) {
                 </tr>
               </thead>
               <tbody>
-                {[president, ...pms].filter(Boolean).map((l) => (
+                {presidents.map((l) => (
                   <tr key={l.id} className="border-t border-navy-50">
                     <td className="py-1.5 pr-2">
                       <div className="font-semibold text-navy">{l.name}</div>
                       <div className="text-[10px] uppercase tracking-wider text-navy-400">
-                        {l.role === 'President'
-                          ? 'President'
-                          : l.industries?.length
-                          ? `PM · ${l.industries.map((i) => i.name).join(', ')}`
-                          : 'PM'}
+                        President
                       </div>
                     </td>
                     {LUNCH_DAYS.map((d) => {
