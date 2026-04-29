@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
-import { CheckCircle2, XCircle, Clock, FileDown, Send } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, Eye, Send } from 'lucide-react';
 import api from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
 import RequestPitchModal from '../components/RequestPitchModal.jsx';
-import { isManagedFile, downloadFile } from '../api/fileHelpers.js';
-import { safeHref } from '../api/safeUrl.js';
+import FilePreviewModal from '../components/FilePreviewModal.jsx';
+import { openOrPreview } from '../api/fileHelpers.js';
 import { formatStartTime, ROOM_LABELS } from '../lib/lunchSlots.js';
 
 const PM_RANKED = [
@@ -234,7 +234,7 @@ function RequestRow({
   const proposed = row.proposedDate
     ? format(new Date(row.proposedDate), 'EEE, MMM d, yyyy')
     : 'No date proposed';
-  const managed = isManagedFile(row.deckRef);
+  const [preview, setPreview] = useState(null);
 
   return (
     <div className="rounded-lg border border-navy-100 bg-white p-4">
@@ -283,27 +283,23 @@ function RequestRow({
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
         {row.deckRef ? (
-          managed ? (
-            <button
-              type="button"
-              onClick={() =>
-                downloadFile(row.deckRef, `${row.ticker}-deck`).catch(() => {})
-              }
-              className="inline-flex items-center gap-1 text-xs font-semibold text-gold-700 underline"
-            >
-              <FileDown className="h-3.5 w-3.5" />
-              Download deck
-            </button>
-          ) : (
-            <a
-              href={safeHref(row.deckRef)}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 text-xs font-semibold text-gold-700 underline"
-            >
-              View deck →
-            </a>
-          )
+          <button
+            type="button"
+            onClick={() =>
+              openOrPreview(
+                {
+                  url: row.deckRef,
+                  title: `${row.ticker} pitch deck`,
+                  filename: `${row.ticker}-deck.pdf`,
+                },
+                setPreview
+              )
+            }
+            className="inline-flex items-center gap-1 text-xs font-semibold text-gold-700 underline"
+          >
+            <Eye className="h-3.5 w-3.5" />
+            View deck
+          </button>
         ) : null}
         {row.pm?.name && (
           <span className="text-[11px] text-navy-400">
@@ -346,6 +342,14 @@ function RequestRow({
             {showPresidentActions ? 'Decline' : "Can't make it"}
           </Button>
         </div>
+      )}
+      {preview && (
+        <FilePreviewModal
+          url={preview.url}
+          title={preview.title}
+          filename={preview.filename}
+          onClose={() => setPreview(null)}
+        />
       )}
     </div>
   );

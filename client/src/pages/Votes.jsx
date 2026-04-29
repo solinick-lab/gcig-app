@@ -12,7 +12,8 @@ import {
   Trash2,
 } from 'lucide-react';
 import api from '../api/client.js';
-import { safeHref } from '../api/safeUrl.js';
+import { openOrPreview } from '../api/fileHelpers.js';
+import FilePreviewModal from '../components/FilePreviewModal.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
@@ -302,6 +303,7 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
   const [ballotAmount, setBallotAmount] = useState('');
   const [ballotError, setBallotError] = useState('');
   const [casting, setCasting] = useState(false);
+  const [preview, setPreview] = useState(null);
   const isOpen = session.status === 'open' && !isPast(new Date(session.deadline));
   const tally = session.tally;
 
@@ -395,14 +397,22 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
               </div>
             </div>
             {session.pitch.slideshowUrl && (
-              <a
-                href={safeHref(session.pitch.slideshowUrl)}
-                target="_blank"
-                rel="noreferrer"
+              <button
+                type="button"
+                onClick={() =>
+                  openOrPreview(
+                    {
+                      url: session.pitch.slideshowUrl,
+                      title: `${session.pitch.ticker} slideshow`,
+                      filename: `${session.pitch.ticker}-pitch.pdf`,
+                    },
+                    setPreview
+                  )
+                }
                 className="text-sm font-semibold text-gold-700 underline"
               >
                 View Slideshow →
-              </a>
+              </button>
             )}
           </div>
         </Card>
@@ -563,6 +573,14 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
           )}
         </Card>
       </div>
+      {preview && (
+        <FilePreviewModal
+          url={preview.url}
+          title={preview.title}
+          filename={preview.filename}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </>
   );
 }

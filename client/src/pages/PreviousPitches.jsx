@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
-import { Search, FileText, ExternalLink } from 'lucide-react';
+import { Search, FileText, Eye } from 'lucide-react';
 import api from '../api/client.js';
-import { safeHref } from '../api/safeUrl.js';
+import { openOrPreview } from '../api/fileHelpers.js';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
+import FilePreviewModal from '../components/FilePreviewModal.jsx';
 
 export default function PreviousPitches({ embedded = false } = {}) {
   const [pitches, setPitches] = useState([]);
   const [query, setQuery] = useState('');
+  const [preview, setPreview] = useState(null);
 
   useEffect(() => {
     api.get('/pitches').then((r) => setPitches(r.data));
@@ -54,43 +56,61 @@ export default function PreviousPitches({ embedded = false } = {}) {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map((p) => (
-              <a
-                key={p.id}
-                href={safeHref(p.slideshowUrl)}
-                target="_blank"
-                rel="noreferrer"
-                className="group flex flex-col overflow-hidden rounded-lg border border-navy-100 bg-white text-left transition hover:border-gold hover:shadow-card"
-              >
-                <div className="flex h-36 items-center justify-center bg-navy">
-                  <FileText className="h-12 w-12 text-gold" />
-                </div>
-                <div className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-bold text-navy">{p.ticker}</div>
-                    <ExternalLink className="h-4 w-4 text-navy-400 group-hover:text-gold" />
+            {filtered.map((p) => {
+              const presenterNames =
+                p.presenters && p.presenters.length > 0
+                  ? p.presenters.map((pp) => pp.name).join(', ')
+                  : p.industry
+                  ? `${p.industry.name} pod`
+                  : p.pitcherName;
+              return (
+                <button
+                  type="button"
+                  key={p.id}
+                  onClick={() =>
+                    openOrPreview(
+                      {
+                        url: p.slideshowUrl,
+                        title: `${p.ticker} · ${presenterNames}`,
+                        filename: `${p.ticker}-pitch-${format(new Date(p.date), 'yyyy-MM-dd')}.pdf`,
+                      },
+                      setPreview
+                    )
+                  }
+                  className="group flex flex-col overflow-hidden rounded-lg border border-navy-100 bg-white text-left transition hover:border-gold hover:shadow-card"
+                >
+                  <div className="flex h-36 items-center justify-center bg-navy">
+                    <FileText className="h-12 w-12 text-gold" />
                   </div>
-                  {p.industry && (
-                    <div className="mt-1 inline-block rounded-full bg-gold-100 px-2 py-0.5 text-[10px] font-bold text-gold-800">
-                      {p.industry.name}
+                  <div className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-bold text-navy">{p.ticker}</div>
+                      <Eye className="h-4 w-4 text-navy-400 group-hover:text-gold" />
                     </div>
-                  )}
-                  <div className="mt-1 text-sm text-navy-400">
-                    {p.presenters && p.presenters.length > 0
-                      ? p.presenters.map((pp) => pp.name).join(', ')
-                      : p.industry
-                      ? `${p.industry.name} pod`
-                      : p.pitcherName}
+                    {p.industry && (
+                      <div className="mt-1 inline-block rounded-full bg-gold-100 px-2 py-0.5 text-[10px] font-bold text-gold-800">
+                        {p.industry.name}
+                      </div>
+                    )}
+                    <div className="mt-1 text-sm text-navy-400">{presenterNames}</div>
+                    <div className="mt-2 text-xs text-navy-400">
+                      {format(new Date(p.date), 'MMM d, yyyy')}
+                    </div>
                   </div>
-                  <div className="mt-2 text-xs text-navy-400">
-                    {format(new Date(p.date), 'MMM d, yyyy')}
-                  </div>
-                </div>
-              </a>
-            ))}
+                </button>
+              );
+            })}
           </div>
         )}
       </Card>
+      {preview && (
+        <FilePreviewModal
+          url={preview.url}
+          title={preview.title}
+          filename={preview.filename}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </>
   );
 }

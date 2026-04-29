@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { format, formatDistanceToNow } from 'date-fns';
 import {
   ExternalLink,
+  Eye,
   TrendingUp,
   TrendingDown,
   FileText,
@@ -12,8 +13,10 @@ import {
 } from 'lucide-react';
 import api from '../api/client.js';
 import { safeHref } from '../api/safeUrl.js';
+import { openOrPreview } from '../api/fileHelpers.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import Modal from './Modal.jsx';
+import FilePreviewModal from './FilePreviewModal.jsx';
 
 function fmtMoney(n, currency = 'USD') {
   if (n == null || Number.isNaN(n)) return '—';
@@ -67,6 +70,9 @@ export default function HoldingDetailModal({ holding, onClose }) {
   const [thesisError, setThesisError] = useState('');
   const [thesisCheck, setThesisCheck] = useState(null);
   const [thesisCheckLoading, setThesisCheckLoading] = useState(false);
+  // {url, title, filename} when the user clicks a Slides / Open button.
+  // null when the previewer is closed.
+  const [filePreview, setFilePreview] = useState(null);
   const [newsLoading, setNewsLoading] = useState(false);
   const [readerArticle, setReaderArticle] = useState(null); // article passed to ArticleReaderModal
   const [loading, setLoading] = useState(true);
@@ -402,15 +408,23 @@ export default function HoldingDetailModal({ holding, onClose }) {
                         </div>
                       </div>
                       {p.slideshowUrl && (
-                        <a
-                          href={safeHref(p.slideshowUrl)}
-                          target="_blank"
-                          rel="noreferrer"
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openOrPreview(
+                              {
+                                url: p.slideshowUrl,
+                                title: `${p.industry?.name || 'Pitch'} · ${p.presenters.join(', ')}`,
+                                filename: `${ticker}-pitch-${format(new Date(p.date), 'yyyy-MM-dd')}.pdf`,
+                              },
+                              setFilePreview
+                            )
+                          }
                           className="inline-flex items-center gap-1 rounded-lg border border-navy-100 px-2 py-1 text-[11px] font-semibold text-navy hover:bg-navy-50"
                         >
-                          <ExternalLink className="h-3 w-3" />
+                          <Eye className="h-3 w-3" />
                           Slides
-                        </a>
+                        </button>
                       )}
                     </div>
                   ))}
@@ -441,15 +455,23 @@ export default function HoldingDetailModal({ holding, onClose }) {
                           </p>
                         )}
                       </div>
-                      <a
-                        href={safeHref(r.fileUrl)}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
+                        onClick={() =>
+                          openOrPreview(
+                            {
+                              url: r.fileUrl,
+                              title: r.title,
+                              filename: `${r.title}.pdf`,
+                            },
+                            setFilePreview
+                          )
+                        }
                         className="inline-flex items-center gap-1 rounded-lg border border-navy-100 px-2 py-1 text-[11px] font-semibold text-navy hover:bg-navy-50"
                       >
-                        <ExternalLink className="h-3 w-3" />
+                        <Eye className="h-3 w-3" />
                         Open
-                      </a>
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -490,6 +512,14 @@ export default function HoldingDetailModal({ holding, onClose }) {
             article={readerArticle}
             onClose={() => setReaderArticle(null)}
           />
+          {filePreview && (
+            <FilePreviewModal
+              url={filePreview.url}
+              title={filePreview.title}
+              filename={filePreview.filename}
+              onClose={() => setFilePreview(null)}
+            />
+          )}
 
           {/* Next earnings — compact inline banner above the stats grid so
               it's the first thing a user sees when opening a holding. */}

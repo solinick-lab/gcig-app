@@ -13,6 +13,10 @@ api.interceptors.request.use((config) => {
   const token = localStorage.getItem('gcig_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+    // Stash the exact token we sent so the response interceptor can
+    // tell "token genuinely expired" (sent === current) from "token
+    // got rotated while this request was in flight" (sent !== current).
+    config._tokenAtSend = token;
   }
   return config;
 });
@@ -39,37 +43,40 @@ function maybeRotateToken(res) {
   }
 }
 
-// Wall-clock of the most recent successful response. Used to ignore
-// "stale 401" races: when we just toggle 2FA / change password / log
-// out everywhere, the SERVER bumps tokenVersion mid-flight. Any
-// concurrent in-flight request carrying the OLD token then 401s. If
-// we treated those 401s as "session ended" we'd wipe localStorage
-// even though the user just got a fresh token from the same flow.
+// Stale-401 detection. When something rotates the user's token mid-
+// flight (server-side tokenVersion bump from /2fa/disable, password
+// change, etc.), already-in-flight requests carrying the OLD token
+// will 401 even though the SESSION is fine — localStorage already
+// holds the new token from the same response.
 //
-// The grace window means: if anything succeeded in the last 8s, we
-// trust the session and ignore the lone 401.
-let lastSuccessAt = 0;
-const STALE_401_WINDOW_MS = 8_000;
+// The precise check: did the token in localStorage change between
+// when this request was sent and when its 401 came back? If yes,
+// it's a stale 401 — ignore it. If no, the session is genuinely
+// expired and we wipe + redirect.
+//
+// Unlike a time-window grace period, this can't be falsely warmed
+// by public/unauthed responses (they don't change the token), and
+// it can't accidentally suppress a real expired-session 401 (it
+// only fires when localStorage was actively updated mid-flight).
 
 api.interceptors.response.use(
   (res) => {
-    lastSuccessAt = Date.now();
     maybeRotateToken(res);
     return res;
   },
   (err) => {
     if (err.response?.status === 401) {
-      const recentlyValid =
-        lastSuccessAt > 0 && Date.now() - lastSuccessAt < STALE_401_WINDOW_MS;
-      if (recentlyValid) {
-        // Stale-request race — concurrent in-flight request hit a
-        // tokenVersion bump it didn't know about. The token in
-        // localStorage is fresh from the same flow. Reject the
-        // promise so the caller sees the failure but DON'T nuke the
-        // session — that would kick the user out of an otherwise
-        // healthy login.
+      const sent = err.config?._tokenAtSend;
+      const now = localStorage.getItem('gcig_token');
+      if (sent && now && sent !== now) {
+        // Token rotated since this request was sent. The 401 is from
+        // the old version — ignore and let the caller see a regular
+        // promise rejection.
         return Promise.reject(err);
       }
+      // Either there was no token in the first place, or the token
+      // we sent is still the one in storage and it's been rejected.
+      // Either way the session is over.
       localStorage.removeItem('gcig_token');
       localStorage.removeItem('gcig_user');
       const path = window.location.pathname;

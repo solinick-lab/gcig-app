@@ -9,6 +9,7 @@ import {
   uploadFile,
   streamDownload,
   getMetadata,
+  getPreviewUrl,
   getStatus,
   disconnect,
   isConfigured,
@@ -267,6 +268,24 @@ router.post('/:itemId/summarize', verifyJwt, summarizeLimiter, async (req, res) 
 });
 
 // Metadata — filename + size, for rendering file chips in the UI.
+// Short-lived embed URL from Microsoft Graph. The frontend iframe-loads
+// this in the FilePreviewModal, which lets us preview PDF + Office files
+// (PPTX, DOCX, XLSX) without ever serving the bytes ourselves.
+router.get('/:itemId/preview', verifyJwt, async (req, res) => {
+  const { itemId } = req.params;
+  if (!itemId) return res.status(400).json({ error: 'Bad item id' });
+  try {
+    const { url } = await getPreviewUrl(itemId);
+    res.json({ url });
+  } catch (err) {
+    if (err.code === 'NOT_AUTHORIZED') {
+      return res.status(503).json({ error: 'OneDrive not connected' });
+    }
+    console.error('OneDrive preview failed:', err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
 router.get('/:itemId/info', verifyJwt, async (req, res) => {
   try {
     const m = await getMetadata(req.params.itemId);

@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
-import { Plus, Search, ExternalLink, Trash2 } from 'lucide-react';
+import { Plus, Search, Eye, Trash2 } from 'lucide-react';
 import api from '../api/client.js';
-import { safeHref } from '../api/safeUrl.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
@@ -10,7 +9,8 @@ import Button from '../components/Button.jsx';
 import Modal from '../components/Modal.jsx';
 import FileUploader from '../components/FileUploader.jsx';
 import FileSummary from '../components/FileSummary.jsx';
-import { isManagedFile, downloadFile } from '../api/fileHelpers.js';
+import FilePreviewModal from '../components/FilePreviewModal.jsx';
+import { isManagedFile, openOrPreview } from '../api/fileHelpers.js';
 
 const REPORT_ROLES = ['President', 'CIO', 'SeniorPortfolioManager', 'PortfolioManager'];
 
@@ -28,6 +28,7 @@ export default function Reports({ embedded = false } = {}) {
   const [form, setForm] = useState(emptyForm());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [preview, setPreview] = useState(null);
 
   async function load() {
     const { data } = await api.get('/reports');
@@ -138,28 +139,23 @@ export default function Reports({ embedded = false } = {}) {
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    {isManagedFile(r.fileUrl) ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          downloadFile(r.fileUrl, `${r.title}.pdf`).catch(() => {})
-                        }
-                        className="inline-flex items-center gap-1 rounded-lg border border-navy-100 px-3 py-2 text-xs font-semibold text-navy hover:bg-navy-50"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        Download
-                      </button>
-                    ) : (
-                      <a
-                        href={safeHref(r.fileUrl)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 rounded-lg border border-navy-100 px-3 py-2 text-xs font-semibold text-navy hover:bg-navy-50"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        Open
-                      </a>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openOrPreview(
+                          {
+                            url: r.fileUrl,
+                            title: r.title,
+                            filename: `${r.title}.pdf`,
+                          },
+                          setPreview
+                        )
+                      }
+                      className="inline-flex items-center gap-1 rounded-lg border border-navy-100 px-3 py-2 text-xs font-semibold text-navy hover:bg-navy-50"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      Open
+                    </button>
                     {canEdit && (
                       <button
                         onClick={() => handleDelete(r.id)}
@@ -219,6 +215,14 @@ export default function Reports({ embedded = false } = {}) {
           </div>
         </form>
       </Modal>
+      {preview && (
+        <FilePreviewModal
+          url={preview.url}
+          title={preview.title}
+          filename={preview.filename}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </>
   );
 }

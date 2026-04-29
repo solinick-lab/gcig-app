@@ -37,6 +37,24 @@ export async function fetchFileMetadata(url) {
   }
 }
 
+// Click-handler helper for any "open this file" affordance. Routing:
+//   managed (onedrive:ITEM_ID) → set preview state so the in-app
+//                                FilePreviewModal opens with the
+//                                Office Online viewer.
+//   external (http(s)://...)   → window.open in a new tab. We don't
+//                                try to iframe arbitrary domains —
+//                                Google Drive / Dropbox / Slides etc.
+//                                handle their own auth UX better in a
+//                                full tab than embedded.
+export function openOrPreview({ url, title, filename }, setPreview) {
+  if (!url) return;
+  if (!isManagedFile(url)) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  setPreview({ url, title, filename });
+}
+
 // Trigger a download. Handles both managed (onedrive:) and plain URL
 // values. Managed files can't just be `<a href>`-linked because the
 // download endpoint needs an Authorization header — so we fetch with

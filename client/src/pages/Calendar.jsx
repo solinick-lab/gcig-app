@@ -4,7 +4,6 @@ import { format, parse, startOfWeek, getDay } from 'date-fns';
 import enUS from 'date-fns/locale/en-US';
 import { Plus, Presentation, CalendarDays, Send, Utensils, Handshake } from 'lucide-react';
 import api from '../api/client.js';
-import { safeHref } from '../api/safeUrl.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
@@ -15,9 +14,10 @@ import EventAttendance from '../components/EventAttendance.jsx';
 import AdminOnly from '../components/AdminOnly.jsx';
 import FileUploader from '../components/FileUploader.jsx';
 import FileSummary from '../components/FileSummary.jsx';
+import FilePreviewModal from '../components/FilePreviewModal.jsx';
 import RequestPitchModal from '../components/RequestPitchModal.jsx';
 import { formatStartTime, ROOM_LABELS } from '../lib/lunchSlots.js';
-import { isManagedFile, downloadFile } from '../api/fileHelpers.js';
+import { isManagedFile, openOrPreview } from '../api/fileHelpers.js';
 
 const PITCH_ROLES = ['President', 'CIO', 'SeniorPortfolioManager', 'PortfolioManager'];
 const CROSS_POD_ROLES = new Set(['President', 'CIO', 'SeniorPortfolioManager']);
@@ -73,6 +73,7 @@ export default function Calendar() {
   const [eventForm, setEventForm] = useState(emptyEventForm());
 
   const [requestPitchOpen, setRequestPitchOpen] = useState(false);
+  const [preview, setPreview] = useState(null);
   const [leaderLunch, setLeaderLunch] = useState([]);
   // Approved pitch meetings the current user is a party to. Fetched
   // separately from /pitches because they live in PitchRequest, not
@@ -491,29 +492,22 @@ export default function Calendar() {
             )}
             {selected.deckRef && (
               <div className="pt-1">
-                {isManagedFile(selected.deckRef) ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      downloadFile(
-                        selected.deckRef,
-                        `${selected.ticker}-deck`
-                      ).catch(() => {})
-                    }
-                    className="text-sm font-semibold text-gold-700 underline"
-                  >
-                    Download deck →
-                  </button>
-                ) : (
-                  <a
-                    href={safeHref(selected.deckRef)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-sm font-semibold text-gold-700 underline"
-                  >
-                    View deck →
-                  </a>
-                )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    openOrPreview(
+                      {
+                        url: selected.deckRef,
+                        title: `${selected.ticker} pitch deck`,
+                        filename: `${selected.ticker}-deck.pdf`,
+                      },
+                      setPreview
+                    )
+                  }
+                  className="text-sm font-semibold text-gold-700 underline"
+                >
+                  View deck →
+                </button>
               </div>
             )}
           </div>
@@ -582,30 +576,24 @@ export default function Calendar() {
                 <div className="text-navy">{selected.location}</div>
               </div>
             )}
-            {selected.slideshowUrl &&
-              (isManagedFile(selected.slideshowUrl) ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    downloadFile(
-                      selected.slideshowUrl,
-                      `${selected.ticker || 'pitch'}-slides`
-                    ).catch(() => {})
-                  }
-                  className="inline-block text-sm font-semibold text-gold-700 underline"
-                >
-                  Download slideshow →
-                </button>
-              ) : (
-                <a
-                  href={safeHref(selected.slideshowUrl)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-block text-sm font-semibold text-gold-700 underline"
-                >
-                  View slideshow →
-                </a>
-              ))}
+            {selected.slideshowUrl && (
+              <button
+                type="button"
+                onClick={() =>
+                  openOrPreview(
+                    {
+                      url: selected.slideshowUrl,
+                      title: `${selected.ticker || 'Pitch'} slideshow`,
+                      filename: `${selected.ticker || 'pitch'}-slides.pdf`,
+                    },
+                    setPreview
+                  )
+                }
+                className="inline-block text-sm font-semibold text-gold-700 underline"
+              >
+                View slideshow →
+              </button>
+            )}
             {isManagedFile(selected.slideshowUrl) && (
               <div className="mt-2">
                 <FileSummary
@@ -853,6 +841,14 @@ export default function Calendar() {
           </div>
         </form>
       </Modal>
+      {preview && (
+        <FilePreviewModal
+          url={preview.url}
+          title={preview.title}
+          filename={preview.filename}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </>
   );
 }
@@ -967,9 +963,11 @@ function lunchCellClass(v) {
 }
 
 function PitchRequestCard({ leaders, onRequestClick }) {
-  const president = leaders.find((l) => l.role === 'President');
-  const pms = leaders.filter((l) => l.role !== 'President');
-  const hasAnySchedule = leaders.some(
+  // Pitch meetings happen with the President(s), so this card only lists
+  // them — PMs aren't part of the meeting cadence shown here. They're
+  // still cc'd downstream via the request form's industry picker.
+  const presidents = leaders.filter((l) => l.role === 'President');
+  const hasAnySchedule = presidents.some(
     (l) => l.lunchSchedule && Object.values(l.lunchSchedule).some(Boolean)
   );
   return (
@@ -1012,16 +1010,12 @@ function PitchRequestCard({ leaders, onRequestClick }) {
                 </tr>
               </thead>
               <tbody>
-                {[president, ...pms].filter(Boolean).map((l) => (
+                {presidents.map((l) => (
                   <tr key={l.id} className="border-t border-navy-50">
                     <td className="py-1.5 pr-2">
                       <div className="font-semibold text-navy">{l.name}</div>
                       <div className="text-[10px] uppercase tracking-wider text-navy-400">
-                        {l.role === 'President'
-                          ? 'President'
-                          : l.industries?.length
-                          ? `PM · ${l.industries.map((i) => i.name).join(', ')}`
-                          : 'PM'}
+                        President
                       </div>
                     </td>
                     {LUNCH_DAYS.map((d) => {

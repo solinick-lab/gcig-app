@@ -16,7 +16,8 @@ import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
 import RoleBadge from '../components/RoleBadge.jsx';
 import EditorialMasthead from '../components/EditorialMasthead.jsx';
-import { isManagedFile, downloadFile } from '../api/fileHelpers.js';
+import FilePreviewModal from '../components/FilePreviewModal.jsx';
+import { openOrPreview } from '../api/fileHelpers.js';
 
 // Per-member profile. Any authed user can view any member's record —
 // the data exposed here is the same tier already on the Members page,
@@ -320,6 +321,7 @@ function PitchRow({ item: p }) {
 }
 
 function ReportRow({ item: r }) {
+  const [preview, setPreview] = useState(null);
   // Reports aren't voted on, so the right-side pill is just the kind
   // tag + optional external link to the file. Title is the main
   // identifier — a report can be macro / thematic even without a ticker.
@@ -344,30 +346,34 @@ function ReportRow({ item: r }) {
         </div>
       </div>
       {r.fileUrl ? (
-        isManagedFile(r.fileUrl) ? (
+        <>
           <button
             type="button"
             onClick={() =>
-              downloadFile(r.fileUrl, `${r.title || 'report'}.pdf`).catch(() => {})
+              openOrPreview(
+                {
+                  url: r.fileUrl,
+                  title: r.title || 'Report',
+                  filename: `${r.title || 'report'}.pdf`,
+                },
+                setPreview
+              )
             }
-            className="inline-flex items-center gap-1 rounded-full border border-navy-100 bg-white px-2 py-0.5 text-[10px] font-semibold text-navy-500 hover:border-gold hover:text-navy"
-            title="Download the report file"
-          >
-            Open
-            <ExternalLink className="h-3 w-3" />
-          </button>
-        ) : (
-          <a
-            href={r.fileUrl}
-            target="_blank"
-            rel="noreferrer"
             className="inline-flex items-center gap-1 rounded-full border border-navy-100 bg-white px-2 py-0.5 text-[10px] font-semibold text-navy-500 hover:border-gold hover:text-navy"
             title="Open the report file"
           >
             Open
             <ExternalLink className="h-3 w-3" />
-          </a>
-        )
+          </button>
+          {preview && (
+            <FilePreviewModal
+              url={preview.url}
+              title={preview.title}
+              filename={preview.filename}
+              onClose={() => setPreview(null)}
+            />
+          )}
+        </>
       ) : (
         <span className="inline-flex rounded-full border border-navy-100 bg-navy-50/40 px-2 py-0.5 text-[10px] font-semibold text-navy-400">
           Report

@@ -4,13 +4,14 @@ import { format, parse, startOfWeek, getDay } from 'date-fns';
 import enUS from 'date-fns/locale/en-US';
 import { Plus } from 'lucide-react';
 import api from '../api/client.js';
-import { safeHref } from '../api/safeUrl.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
 import Modal from '../components/Modal.jsx';
 import MemberPicker from '../components/MemberPicker.jsx';
+import FilePreviewModal from '../components/FilePreviewModal.jsx';
+import { openOrPreview } from '../api/fileHelpers.js';
 
 const PITCH_ROLES = ['President', 'CIO', 'SeniorPortfolioManager', 'PortfolioManager'];
 const CROSS_POD_ROLES = new Set(['President', 'CIO', 'SeniorPortfolioManager']);
@@ -42,6 +43,7 @@ export default function Pitches() {
   const [users, setUsers] = useState([]);
   const [industries, setIndustries] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [preview, setPreview] = useState(null);
 
   async function load() {
     const { data } = await api.get('/pitches');
@@ -235,14 +237,22 @@ export default function Pitches() {
               </div>
             )}
             {selected.slideshowUrl && (
-              <a
-                href={safeHref(selected.slideshowUrl)}
-                target="_blank"
-                rel="noreferrer"
+              <button
+                type="button"
+                onClick={() =>
+                  openOrPreview(
+                    {
+                      url: selected.slideshowUrl,
+                      title: `${selected.ticker || 'Pitch'} slideshow`,
+                      filename: `${selected.ticker || 'pitch'}-slides.pdf`,
+                    },
+                    setPreview
+                  )
+                }
                 className="inline-block text-sm font-semibold text-gold-700 underline"
               >
                 View slideshow →
-              </a>
+              </button>
             )}
             {canEdit && (
               <div className="flex gap-2 pt-3 border-t border-navy-50">
@@ -359,6 +369,14 @@ export default function Pitches() {
           </div>
         </form>
       </Modal>
+      {preview && (
+        <FilePreviewModal
+          url={preview.url}
+          title={preview.title}
+          filename={preview.filename}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </>
   );
 }
