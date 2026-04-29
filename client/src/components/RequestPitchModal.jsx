@@ -77,8 +77,11 @@ export default function RequestPitchModal({ open, onClose, onSubmitted }) {
     }
   }, [open]);
 
-  const president = useMemo(
-    () => leaders.find((l) => l.role === 'President') || null,
+  // The club can have multiple co-Presidents — list every one so the
+  // requester can see who's actually free, not just the first one
+  // alphabetically.
+  const presidents = useMemo(
+    () => leaders.filter((l) => l.role === 'President'),
     [leaders]
   );
   const pmForIndustry = useMemo(() => {
@@ -91,8 +94,17 @@ export default function RequestPitchModal({ open, onClose, onSubmitted }) {
   }, [form.industryId, industries, leaders]);
 
   const dayKey = weekdayKeyFor(form.proposedDate);
-  const presidentDayLunch =
-    dayKey && president?.lunchSchedule ? president.lunchSchedule[dayKey] : null;
+  // Per-President lunch on the chosen day. Used both for the "Who's free"
+  // list and the mismatch heads-up below.
+  const presidentDayLunches = useMemo(
+    () =>
+      presidents.map((p) => ({
+        id: p.id,
+        name: p.name,
+        lunch: dayKey && p.lunchSchedule ? p.lunchSchedule[dayKey] : null,
+      })),
+    [presidents, dayKey]
+  );
   const pmDayLunch =
     dayKey && pmForIndustry?.lunchSchedule
       ? pmForIndustry.lunchSchedule[dayKey]
@@ -130,15 +142,25 @@ export default function RequestPitchModal({ open, onClose, onSubmitted }) {
       if (form.proposedLunch === 'Both') return false;
       return scheduleVal !== form.proposedLunch;
     }
-    const presClash = clashes(presidentDayLunch);
+    // Multiple co-Presidents: only flag when every President with a
+    // known schedule clashes. If at least one is free (or hasn't entered
+    // their schedule yet) we stay silent — the meeting can still happen.
+    const knownPresClashes = presidentDayLunches
+      .map((p) => clashes(p.lunch))
+      .filter((v) => v !== null);
+    const allPresClash =
+      knownPresClashes.length > 0 && knownPresClashes.every((v) => v === true);
     const pmClash = clashes(pmDayLunch);
     const warnings = [];
-    if (presClash)
-      warnings.push(`President has ${lunchLabel(presidentDayLunch)} lunch that day`);
+    if (allPresClash) {
+      warnings.push(
+        `No President has ${lunchLabel(form.proposedLunch)} lunch free that day`
+      );
+    }
     if (pmClash && pmForIndustry)
       warnings.push(`${pmForIndustry.name} has ${lunchLabel(pmDayLunch)} lunch that day`);
     return warnings.length ? warnings.join('. ') + '.' : null;
-  }, [form.proposedLunch, dayKey, presidentDayLunch, pmDayLunch, pmForIndustry]);
+  }, [form.proposedLunch, dayKey, presidentDayLunches, pmDayLunch, pmForIndustry]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -317,22 +339,22 @@ export default function RequestPitchModal({ open, onClose, onSubmitted }) {
           </div>
         </div>
 
-        {(president || pmForIndustry) && dayKey && (
+        {(presidents.length > 0 || pmForIndustry) && dayKey && (
           <div className="rounded-lg border border-navy-100 bg-navy-50/50 px-3 py-2 text-xs text-navy">
             <div className="font-semibold text-navy">
               Who's free that day:
             </div>
             <ul className="mt-1 space-y-0.5">
-              {president && (
-                <li>
-                  <span className="font-medium">{president.name}</span> (President)
-                  : {lunchLabel(presidentDayLunch)} lunch
+              {presidentDayLunches.map((p) => (
+                <li key={p.id}>
+                  <span className="font-medium">{p.name}</span> (President)
+                  : {p.lunch ? `${lunchLabel(p.lunch)} lunch` : 'no schedule entered'}
                 </li>
-              )}
+              ))}
               {pmForIndustry && (
                 <li>
                   <span className="font-medium">{pmForIndustry.name}</span> (PM)
-                  : {lunchLabel(pmDayLunch)} lunch
+                  : {pmDayLunch ? `${lunchLabel(pmDayLunch)} lunch` : 'no schedule entered'}
                 </li>
               )}
             </ul>
