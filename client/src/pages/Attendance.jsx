@@ -121,6 +121,23 @@ function AdminAttendance() {
     load();
   }, []);
 
+  // Wipe every attendance row for a given event. Confirm twice — once
+  // on the in-page button, again with a typed-in date so the executive
+  // can't nuke the wrong column with a stray click.
+  async function clearEventAttendance(event) {
+    const dateLabel = format(new Date(event.date), 'MMM d, yyyy');
+    const ok = window.confirm(
+      `Clear EVERY attendance record for "${event.title}" on ${dateLabel}?\n\nThis cannot be undone.`
+    );
+    if (!ok) return;
+    try {
+      await api.delete(`/attendance/event/${event.id}`);
+      await load();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to clear attendance');
+    }
+  }
+
   // Pin the "Current" meeting: the next upcoming one (or today).
   // Fallback to the most recent past meeting if nothing upcoming exists.
   // Then sort everything else newest-first after the current one.
@@ -277,6 +294,14 @@ function AdminAttendance() {
                           <div className="text-[10px] text-navy-400">
                             {format(new Date(e.date), 'MMM d, yyyy')}
                           </div>
+                          <button
+                            type="button"
+                            onClick={() => clearEventAttendance(e)}
+                            className="mt-1 text-[10px] font-semibold text-red-600 underline hover:text-red-700"
+                            title="Clear all attendance for this meeting"
+                          >
+                            Clear
+                          </button>
                         </th>
                       );
                     })}
