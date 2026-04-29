@@ -9,6 +9,7 @@ import Button from '../components/Button.jsx';
 import RequestPitchModal from '../components/RequestPitchModal.jsx';
 import FilePreviewModal from '../components/FilePreviewModal.jsx';
 import { openOrPreview } from '../api/fileHelpers.js';
+import { formatStartTime, ROOM_LABELS } from '../lib/lunchSlots.js';
 
 const PM_RANKED = [
   'PortfolioManager',
@@ -259,6 +260,13 @@ function RequestRow({
         <div className="text-right text-xs text-navy-400">
           <div>{proposed}</div>
           {lunch && <div>{lunch}</div>}
+          {(row.proposedStartTime || row.room) && (
+            <div className="font-semibold text-navy">
+              {row.proposedStartTime ? formatStartTime(row.proposedStartTime) : ''}
+              {row.proposedStartTime && row.room ? ' · ' : ''}
+              {row.room ? ROOM_LABELS[row.room] || row.room : ''}
+            </div>
+          )}
         </div>
       </div>
 

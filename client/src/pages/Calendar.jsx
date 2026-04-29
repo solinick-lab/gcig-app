@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Calendar as BigCalendar, dateFnsLocalizer } from 'react-big-calendar';
 import { format, parse, startOfWeek, getDay } from 'date-fns';
 import enUS from 'date-fns/locale/en-US';
-import { Plus, Presentation, CalendarDays, Send, Utensils } from 'lucide-react';
+import { Plus, Presentation, CalendarDays, Send, Utensils, Handshake } from 'lucide-react';
 import api from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
@@ -16,6 +16,7 @@ import FileUploader from '../components/FileUploader.jsx';
 import FileSummary from '../components/FileSummary.jsx';
 import FilePreviewModal from '../components/FilePreviewModal.jsx';
 import RequestPitchModal from '../components/RequestPitchModal.jsx';
+import { formatStartTime, ROOM_LABELS } from '../lib/lunchSlots.js';
 import { isManagedFile, openOrPreview } from '../api/fileHelpers.js';
 
 const PITCH_ROLES = ['President', 'CIO', 'SeniorPortfolioManager', 'PortfolioManager'];
@@ -74,6 +75,11 @@ export default function Calendar() {
   const [requestPitchOpen, setRequestPitchOpen] = useState(false);
   const [preview, setPreview] = useState(null);
   const [leaderLunch, setLeaderLunch] = useState([]);
+  // Approved pitch meetings the current user is a party to. Fetched
+  // separately from /pitches because they live in PitchRequest, not
+  // Pitch — and they're scoped server-side so unrelated members
+  // can't see meetings they aren't in.
+  const [pitchMeetings, setPitchMeetings] = useState([]);
 
   async function loadLeaderLunch() {
     try {
@@ -81,6 +87,14 @@ export default function Calendar() {
       setLeaderLunch(data);
     } catch {
       setLeaderLunch([]);
+    }
+  }
+  async function loadPitchMeetings() {
+    try {
+      const { data } = await api.get('/pitch-requests/calendar');
+      setPitchMeetings(data);
+    } catch {
+      setPitchMeetings([]);
     }
   }
 
@@ -106,6 +120,7 @@ export default function Calendar() {
     loadEvents();
     loadIndustries();
     loadLeaderLunch();
+    loadPitchMeetings();
     if (canEditPitches) loadUsers();
   }, [canEditPitches]);
 
@@ -137,27 +152,72 @@ export default function Calendar() {
         resource: { type: 'event', data: e, audience: e.audience || 'all' },
       };
     });
-    return [...pitchEvents, ...evtEvents];
-  }, [pitches, events]);
+    // Approved pitch meetings — anchor each event at the proposed
+    // start time within the proposed date and give it a 30 min slot.
+    const meetingEvents = pitchMeetings
+      .filter((m) => m.proposedDate && m.proposedStartTime)
+      .map((m) => {
+        const day = new Date(m.proposedDate);
+        const [hh, mm] = m.proposedStartTime.split(':').map(Number);
+        // UTC accessors keep "the day the user picked" stable — the
+        // proposedDate is stored as UTC midnight, so reading via local
+        // accessors flips to the previous day in ET. Combine the
+        // calendar day with the school-local lunch hour for display.
+        const start = new Date(
+          day.getUTCFullYear(),
+          day.getUTCMonth(),
+          day.getUTCDate(),
+          hh,
+          mm,
+          0,
+          0
+        );
+        const end = new Date(start.getTime() + 30 * 60 * 1000);
+        const requesterFirst =
+          (m.requester?.name || '').split(' ')[0] || 'Member';
+        return {
+          id: `pitch-meeting-${m.id}`,
+          title: `🤝 ${m.ticker} — ${requesterFirst} w/ President`,
+          start,
+          end,
+          resource: { type: 'pitchRequest', data: m },
+        };
+      });
+    return [...pitchEvents, ...evtEvents, ...meetingEvents];
+  }, [pitches, events, pitchMeetings]);
 
-  // ── Styling: pitches = gold, events = navy ──
+  // ── Styling: pitches = gold, events = navy, pitch-meetings = emerald ──
   function eventPropGetter(calEvent) {
-    const isPitch = calEvent.resource?.type === 'pitch';
+    const t = calEvent.resource?.type;
+    if (t === 'pitch') {
+      return {
+        style: {
+          backgroundColor: '#C9A84C',
+          color: '#1B2A4A',
+          borderRadius: 4,
+          border: 'none',
+          fontWeight: 600,
+        },
+      };
+    }
+    if (t === 'pitchRequest') {
+      return {
+        style: {
+          backgroundColor: '#059669', // emerald-600
+          color: 'white',
+          borderRadius: 4,
+          border: 'none',
+          fontWeight: 600,
+        },
+      };
+    }
     return {
-      style: isPitch
-        ? {
-            backgroundColor: '#C9A84C',
-            color: '#1B2A4A',
-            borderRadius: 4,
-            border: 'none',
-            fontWeight: 600,
-          }
-        : {
-            backgroundColor: '#1B2A4A',
-            color: 'white',
-            borderRadius: 4,
-            border: 'none',
-          },
+      style: {
+        backgroundColor: '#1B2A4A',
+        color: 'white',
+        borderRadius: 4,
+        border: 'none',
+      },
     };
   }
 
@@ -320,6 +380,11 @@ export default function Calendar() {
             <CalendarDays className="h-3 w-3" />
             Event
           </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-3 w-3 rounded bg-emerald-600" />
+            <Handshake className="h-3 w-3" />
+            Pitch meeting
+          </span>
         </div>
         {/* Mobile: agenda list. Desktop: full BigCalendar grid. */}
         <div className="md:hidden">
@@ -348,8 +413,106 @@ export default function Calendar() {
       <RequestPitchModal
         open={requestPitchOpen}
         onClose={() => setRequestPitchOpen(false)}
-        onSubmitted={loadLeaderLunch}
+        onSubmitted={() => {
+          loadLeaderLunch();
+          loadPitchMeetings();
+        }}
       />
+
+      {/* ── Pitch meeting detail modal ── */}
+      <Modal
+        open={selectedType === 'pitchRequest' && !!selected}
+        onClose={() => {
+          setSelected(null);
+          setSelectedType(null);
+        }}
+        title="Pitch Meeting"
+        size="md"
+      >
+        {selectedType === 'pitchRequest' && selected && (
+          <div className="space-y-4">
+            <div>
+              <div className="text-xs uppercase text-navy-400">Ticker</div>
+              <div className="text-xl font-bold text-navy">
+                {selected.ticker}
+                {selected.companyName && (
+                  <span className="ml-2 text-sm font-normal text-navy-400">
+                    {selected.companyName}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <div className="text-xs uppercase text-navy-400">When</div>
+                <div className="text-navy">
+                  {format(new Date(selected.proposedDate), 'EEE, MMM d')}
+                </div>
+                <div className="text-sm text-navy">
+                  {formatStartTime(selected.proposedStartTime)}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs uppercase text-navy-400">Where</div>
+                <div className="text-navy">
+                  {ROOM_LABELS[selected.room] || selected.room || '—'}
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 border-t border-navy-50 pt-3">
+              <div>
+                <div className="text-xs uppercase text-navy-400">Requester</div>
+                <div className="text-sm text-navy">
+                  {selected.requester?.name || '—'}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs uppercase text-navy-400">President</div>
+                <div className="text-sm text-navy">
+                  {selected.president?.name || '—'}
+                </div>
+              </div>
+              {selected.pm && (
+                <div className="col-span-2">
+                  <div className="text-xs uppercase text-navy-400">Sector PM</div>
+                  <div className="text-sm text-navy">
+                    {selected.pm.name}
+                    {selected.industry?.name ? ` · ${selected.industry.name}` : ''}
+                  </div>
+                </div>
+              )}
+            </div>
+            {selected.thesis && (
+              <div className="border-t border-navy-50 pt-3">
+                <div className="text-xs uppercase text-navy-400">Thesis</div>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-navy">
+                  {selected.thesis}
+                </p>
+              </div>
+            )}
+            {selected.deckRef && (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    openOrPreview(
+                      {
+                        url: selected.deckRef,
+                        title: `${selected.ticker} pitch deck`,
+                        filename: `${selected.ticker}-deck.pdf`,
+                      },
+                      setPreview
+                    )
+                  }
+                  className="text-sm font-semibold text-gold-700 underline"
+                >
+                  View deck →
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
 
       {/* ── Pitch detail modal ── */}
       <Modal
@@ -737,16 +900,26 @@ function MobileAgenda({ events, onSelect }) {
             </div>
             <div className="space-y-2">
               {dayEvents.map((e) => {
-                const isPitch = e.resource?.type === 'pitch';
+                const t = e.resource?.type;
+                const tone =
+                  t === 'pitch'
+                    ? 'border-gold-300 bg-gold-100/40 hover:bg-gold-100/70'
+                    : t === 'pitchRequest'
+                    ? 'border-emerald-300 bg-emerald-50 hover:bg-emerald-100'
+                    : 'border-navy-100 bg-white hover:bg-navy-50';
+                const subline =
+                  t === 'pitchRequest'
+                    ? e.resource.data.room
+                      ? // Use the imported helper at module top via closure
+                        // — small enough that we don't import again here.
+                        e.resource.data.room.replace(/_/g, ' ')
+                      : null
+                    : e.resource?.data?.location;
                 return (
                   <button
                     key={e.id}
                     onClick={() => onSelect(e)}
-                    className={`flex w-full items-start gap-3 rounded-lg border px-3 py-2 text-left transition ${
-                      isPitch
-                        ? 'border-gold-300 bg-gold-100/40 hover:bg-gold-100/70'
-                        : 'border-navy-100 bg-white hover:bg-navy-50'
-                    }`}
+                    className={`flex w-full items-start gap-3 rounded-lg border px-3 py-2 text-left transition ${tone}`}
                   >
                     <div className="w-14 shrink-0 text-xs text-navy-400 tabular-nums">
                       {format(e.start, 'h:mm a')}
@@ -755,9 +928,9 @@ function MobileAgenda({ events, onSelect }) {
                       <div className="truncate text-sm font-semibold text-navy">
                         {e.title}
                       </div>
-                      {e.resource?.data?.location && (
+                      {subline && (
                         <div className="truncate text-[11px] text-navy-400">
-                          {e.resource.data.location}
+                          {subline}
                         </div>
                       )}
                     </div>

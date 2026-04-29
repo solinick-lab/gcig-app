@@ -178,6 +178,13 @@ model PitchRequest {
   // exactly when the requester wants to meet.
   proposedDate          DateTime?
   proposedLunch         LunchPeriod?
+  // "HH:MM" 24h string. Validated server-side against the lunch-block
+  // schedule so we never persist an out-of-range time.
+  proposedStartTime     String?
+  // LIBRARY / LOWER_COMMONS / ATHLETIC_COMMONS — validated server-side
+  // against an allowlist (kept as a string so adding rooms is a code
+  // change, not a migration).
+  room                  String?
   notes                 String?
   deckRef               String             // "onedrive:..." or http(s) URL
   status                PitchRequestStatus @default(Pending)

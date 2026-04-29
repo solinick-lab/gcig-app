@@ -5,10 +5,17 @@ import { auditReq } from '../services/audit.js';
 import {
   sendPitchRequestEmail,
   sendPitchRequestDecisionEmail,
+  buildPitchMeetingIcs,
   primaryClientOrigin,
 } from '../services/email.js';
 import { downloadBuffer } from '../services/oneDriveStorage.js';
 import { assertSafeHttpUrl } from '../services/validateUrl.js';
+import {
+  weekdayKeyFor,
+  isValidSlot,
+  isValidRoom,
+  ROOM_LABELS,
+} from '../lib/lunchSlots.js';
 
 const router = Router();
 router.use(verifyJwt);
@@ -88,6 +95,8 @@ router.post('/', canRequest, async (req, res) => {
     industryId,
     proposedDate,
     proposedLunch,
+    proposedStartTime,
+    room,
     notes,
     deckRef,
   } = req.body || {};
@@ -97,6 +106,36 @@ router.post('/', canRequest, async (req, res) => {
   }
   if (proposedLunch && !['First', 'Second', 'Both'].includes(proposedLunch)) {
     return res.status(400).json({ error: 'Invalid lunch period' });
+  }
+  // Start time + room are now required. Both gate the submit button on the
+  // client; we re-check server-side so a manual API caller can't bypass.
+  if (!proposedStartTime) {
+    return res.status(400).json({ error: 'Start time is required' });
+  }
+  if (!room) {
+    return res.status(400).json({ error: 'Room is required' });
+  }
+  if (!isValidRoom(room)) {
+    return res.status(400).json({ error: 'Invalid room' });
+  }
+  // The slot must (a) match HH:MM and (b) belong to the selected lunch
+  // block on the chosen weekday — anything else is rejected. We need a
+  // date for that check; without one we can't validate the slot.
+  if (!proposedDate) {
+    return res
+      .status(400)
+      .json({ error: 'Proposed date is required when picking a start time' });
+  }
+  const weekday = weekdayKeyFor(proposedDate);
+  if (!weekday) {
+    return res
+      .status(400)
+      .json({ error: 'Pick a weekday — lunch periods only run Mon–Fri' });
+  }
+  if (!isValidSlot(weekday, proposedLunch || 'Both', proposedStartTime)) {
+    return res
+      .status(400)
+      .json({ error: 'Start time is outside the chosen lunch block' });
   }
   // External URLs (Google Drive paste-link path) must pass the same SSRF
   // guard we use for pitch slideshow URLs. OneDrive refs bypass the check
@@ -138,6 +177,8 @@ router.post('/', canRequest, async (req, res) => {
       pmId,
       proposedDate: proposedDate ? new Date(proposedDate) : null,
       proposedLunch: proposedLunch || null,
+      proposedStartTime,
+      room,
       notes: notes || null,
       deckRef,
       presidentId: president?.id || null,
@@ -167,6 +208,8 @@ router.post('/', canRequest, async (req, res) => {
       industryName: industry?.name || null,
       proposedDate: created.proposedDate,
       proposedLunch: created.proposedLunch,
+      proposedStartTime: created.proposedStartTime,
+      room: created.room,
       notes: created.notes,
       deckUrl: externalDeckUrl,
       deckFileName: attachment?.filename || null,
@@ -199,6 +242,24 @@ router.post('/', canRequest, async (req, res) => {
         } catch (err) {
           console.error(`pitch-request ${created.id} PM email failed: ${err.message}`);
         }
+      }
+    }
+    // Confirmation copy to the submitter — closes the loop on "did my
+    // request go through?" without forcing them to refresh the inbox.
+    // Skipped only if the submitter is also the President (they already
+    // got a copy as recipientRole='President').
+    if (req.user?.email && req.user.id !== president?.id) {
+      try {
+        await sendPitchRequestEmail(req.user.email, {
+          ...emailParams,
+          recipientName: req.user.name,
+          recipientRole: 'Requester',
+          // Don't double-attach the deck on the requester's own email
+          // — they uploaded it, they don't need it back.
+          attachment: null,
+        });
+      } catch (err) {
+        console.error(`pitch-request ${created.id} requester email failed: ${err.message}`);
       }
     }
   })().catch((err) => console.error('pitch-request fan-out failed:', err));
@@ -278,18 +339,58 @@ router.get('/pending-for-pm', async (req, res) => {
 async function emailRequesterDecision(row, { actor, actorName, decision, reason }) {
   if (!row.requester?.email) return;
   const origin = primaryClientOrigin();
+  // On approval, attach an .ics so the requester's mail client offers
+  // an "Add to calendar" button — meeting goes straight onto their
+  // Gmail / Apple / Outlook calendar.
+  let icsAttachment = null;
+  if (decision === 'Approved' && row.proposedDate && row.proposedStartTime) {
+    try {
+      icsAttachment = buildPitchMeetingIcs({
+        uid: `pitch-request-${row.id}@griffinfund`,
+        proposedDate: row.proposedDate,
+        proposedStartTime: row.proposedStartTime,
+        ticker: row.ticker,
+        companyName: row.companyName,
+        roomLabel: row.room ? ROOM_LABELS[row.room] || row.room : null,
+        organizerEmail: row.president?.email || null,
+        organizerName: row.president?.name || 'President',
+        attendeeEmails: [row.requester?.email, row.pm?.email].filter(Boolean),
+      });
+    } catch (err) {
+      console.warn(`pitch-request ${row.id} ics build failed: ${err.message}`);
+    }
+  }
+  const params = {
+    requesterName: row.requester.name,
+    actor, // 'President' | 'PM'
+    actorName,
+    decision, // 'Approved' | 'Declined'
+    ticker: row.ticker,
+    reason: reason || null,
+    dashboardUrl: `${origin}/pitch-requests`,
+    proposedDate: row.proposedDate,
+    proposedStartTime: row.proposedStartTime,
+    roomLabel: row.room ? ROOM_LABELS[row.room] || row.room : null,
+    icsAttachment,
+  };
   try {
-    await sendPitchRequestDecisionEmail(row.requester.email, {
-      requesterName: row.requester.name,
-      actor, // 'President' | 'PM'
-      actorName,
-      decision, // 'Approved' | 'Declined'
-      ticker: row.ticker,
-      reason: reason || null,
-      dashboardUrl: `${origin}/pitch-requests`,
-    });
+    await sendPitchRequestDecisionEmail(row.requester.email, params);
   } catch (err) {
     console.error(`pitch-request ${row.id} decision email failed: ${err.message}`);
+  }
+  // On approval, also re-notify the PM so they can lock the meeting
+  // in their own calendar — they were cc'd on the original request
+  // but didn't see the time/room get confirmed until now.
+  if (decision === 'Approved' && row.pm?.email && row.pm.id !== row.requester?.id) {
+    try {
+      await sendPitchRequestDecisionEmail(row.pm.email, {
+        ...params,
+        requesterName: row.pm.name, // greet the PM, not the requester
+        ccCopy: true, // template tweaks copy: "for your awareness"
+      });
+    } catch (err) {
+      console.error(`pitch-request ${row.id} PM approval email failed: ${err.message}`);
+    }
   }
 }
 
@@ -425,6 +526,29 @@ router.get('/pending-count', async (req, res) => {
     },
   });
   res.json({ count, mineUnseen });
+});
+
+// Approved pitch-meetings the current user is part of — used by the
+// Calendar page so each meeting lands on the involved parties' (and
+// only their) calendars. Scoped server-side so unrelated members
+// can't see meetings they aren't in.
+router.get('/calendar', async (req, res) => {
+  const userId = req.user.id;
+  const rows = await prisma.pitchRequest.findMany({
+    where: {
+      status: 'Approved',
+      proposedDate: { not: null },
+      proposedStartTime: { not: null },
+      OR: [
+        { requesterId: userId },
+        { pmId: userId },
+        { presidentId: userId },
+      ],
+    },
+    orderBy: { proposedDate: 'asc' },
+    include: pitchRequestInclude(),
+  });
+  res.json(rows);
 });
 
 export default router;

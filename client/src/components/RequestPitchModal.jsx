@@ -4,6 +4,13 @@ import Modal from './Modal.jsx';
 import Button from './Button.jsx';
 import FileUploader from './FileUploader.jsx';
 import { Send } from 'lucide-react';
+import {
+  weekdayKeyFor,
+  generateLunchSlots,
+  formatStartTime,
+  ROOM_VALUES,
+  ROOM_LABELS,
+} from '../lib/lunchSlots.js';
 
 const LUNCH_OPTIONS = [
   { value: '', label: 'No preference' },
@@ -19,16 +26,6 @@ function lunchLabel(v) {
   return '—';
 }
 
-// Pulls the weekday key (mon..fri) for a date. Returns null for weekends so
-// the UI doesn't suggest a lunch period that doesn't exist.
-function weekdayKeyFor(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return null;
-  const day = d.getDay(); // 0 = Sun
-  return ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][day];
-}
-
 export default function RequestPitchModal({ open, onClose, onSubmitted }) {
   const [industries, setIndustries] = useState([]);
   const [leaders, setLeaders] = useState([]);
@@ -38,6 +35,8 @@ export default function RequestPitchModal({ open, onClose, onSubmitted }) {
     industryId: '',
     proposedDate: '',
     proposedLunch: '',
+    proposedStartTime: '',
+    room: '',
     thesis: '',
     notes: '',
     deckRef: '',
@@ -99,6 +98,27 @@ export default function RequestPitchModal({ open, onClose, onSubmitted }) {
       ? pmForIndustry.lunchSchedule[dayKey]
       : null;
 
+  // Available start-time slots for the chosen (weekday, lunch period).
+  // When the user picks "Both" / no preference, the helper returns the
+  // union of First + Second slots so they can still commit to a
+  // concrete time. Empty array when no date is set yet.
+  const availableSlots = useMemo(
+    () => generateLunchSlots(dayKey, form.proposedLunch),
+    [dayKey, form.proposedLunch]
+  );
+
+  // If the user re-pickes the date or lunch period in a way that
+  // invalidates their previously-chosen start time, clear it so they
+  // can't accidentally submit a stale time.
+  useEffect(() => {
+    if (
+      form.proposedStartTime &&
+      !availableSlots.includes(form.proposedStartTime)
+    ) {
+      setForm((prev) => ({ ...prev, proposedStartTime: '' }));
+    }
+  }, [availableSlots, form.proposedStartTime]);
+
   // Highlight a lunch mismatch — when the requester picked First but the
   // President only has Second free, etc. Surfaces the conflict before
   // submission rather than after the email has gone out.
@@ -131,6 +151,18 @@ export default function RequestPitchModal({ open, onClose, onSubmitted }) {
       setError('Ticker is required.');
       return;
     }
+    if (!form.proposedDate) {
+      setError('Pick a meeting date.');
+      return;
+    }
+    if (!form.proposedStartTime) {
+      setError('Pick a start time.');
+      return;
+    }
+    if (!form.room) {
+      setError('Pick a room.');
+      return;
+    }
     setSubmitting(true);
     try {
       await api.post('/pitch-requests', {
@@ -142,6 +174,8 @@ export default function RequestPitchModal({ open, onClose, onSubmitted }) {
           ? new Date(form.proposedDate).toISOString()
           : null,
         proposedLunch: form.proposedLunch || null,
+        proposedStartTime: form.proposedStartTime,
+        room: form.room,
         notes: form.notes.trim() || null,
         deckRef: form.deckRef,
       });
@@ -233,6 +267,56 @@ export default function RequestPitchModal({ open, onClose, onSubmitted }) {
           </div>
         </div>
 
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="block text-sm font-medium text-navy">
+              Start time
+              <span className="ml-0.5 text-red-600">*</span>
+            </label>
+            <select
+              value={form.proposedStartTime}
+              onChange={(e) =>
+                setForm({ ...form, proposedStartTime: e.target.value })
+              }
+              disabled={availableSlots.length === 0}
+              className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold disabled:bg-navy-50 disabled:text-navy-400"
+            >
+              <option value="">
+                {availableSlots.length === 0
+                  ? 'Pick a date first…'
+                  : 'Select a start time…'}
+              </option>
+              {availableSlots.map((s) => (
+                <option key={s} value={s}>
+                  {formatStartTime(s)}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-navy-400">
+              Slots end 45 min into the lunch block — anything later doesn't
+              leave room to actually meet.
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-navy">
+              Room
+              <span className="ml-0.5 text-red-600">*</span>
+            </label>
+            <select
+              value={form.room}
+              onChange={(e) => setForm({ ...form, room: e.target.value })}
+              className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
+            >
+              <option value="">Select a room…</option>
+              {ROOM_VALUES.map((r) => (
+                <option key={r} value={r}>
+                  {ROOM_LABELS[r]}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
         {(president || pmForIndustry) && dayKey && (
           <div className="rounded-lg border border-navy-100 bg-navy-50/50 px-3 py-2 text-xs text-navy">
             <div className="font-semibold text-navy">
@@ -306,7 +390,14 @@ export default function RequestPitchModal({ open, onClose, onSubmitted }) {
           <Button
             type="submit"
             variant="gold"
-            disabled={submitting || !form.deckRef || !form.ticker.trim()}
+            disabled={
+              submitting ||
+              !form.deckRef ||
+              !form.ticker.trim() ||
+              !form.proposedDate ||
+              !form.proposedStartTime ||
+              !form.room
+            }
           >
             <Send className="h-4 w-4" />
             {submitting ? 'Sending…' : 'Submit request'}

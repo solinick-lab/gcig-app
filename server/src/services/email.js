@@ -278,14 +278,15 @@ export async function sendBroadcastEmail(
 }
 
 // Pitch-request notification sent to the President + the relevant
-// industry PM at submission time. `attachment` is optional — when the
-// requester uploaded a deck via OneDrive we attach the bytes; when they
-// pasted a Google Drive / Slides URL we just embed the link.
+// industry PM at submission time, plus a confirmation copy back to the
+// requester so they know it went through. `attachment` is optional —
+// when the requester uploaded a deck via OneDrive we attach the bytes;
+// when they pasted a Google Drive / Slides URL we just embed the link.
 export async function sendPitchRequestEmail(
   toEmail,
   {
     recipientName,
-    recipientRole, // 'President' | 'PM'
+    recipientRole, // 'President' | 'PM' | 'Requester'
     requesterName,
     requesterRole,
     ticker,
@@ -293,6 +294,8 @@ export async function sendPitchRequestEmail(
     industryName,
     proposedDate,
     proposedLunch,
+    proposedStartTime, // "HH:MM" — pretty-printed in the body
+    room, // 'LIBRARY' | 'LOWER_COMMONS' | 'ATHLETIC_COMMONS'
     notes,
     deckUrl, // External URL when deck wasn't uploaded
     deckFileName, // For the body when we have an attachment
@@ -313,10 +316,17 @@ export async function sendPitchRequestEmail(
       ? 'either lunch'
       : `${proposedLunch.toLowerCase()} lunch`
     : null;
+  const timeLabel = formatHHMMto12h(proposedStartTime);
+  const roomLabel = roomLabelFor(room);
+  // Per-recipient greeting + framing copy. President / PM get the
+  // existing "this is for you to act on" framing; Requester gets a
+  // short confirmation that the request went through.
   const audienceCopy =
     recipientRole === 'President'
       ? `<strong>${requesterName}</strong> has requested a pitch meeting with you.`
-      : `<strong>${requesterName}</strong> (one of your pod members) has requested a pitch meeting with the President. You're cc'd as the responsible portfolio manager.`;
+      : recipientRole === 'PM'
+      ? `<strong>${requesterName}</strong> (one of your pod members) has requested a pitch meeting with the President. You're cc'd as the responsible portfolio manager.`
+      : `Your pitch request was submitted. The President will review it shortly — we've cc'd your sector PM for awareness.`;
   const deckBlock = attachment
     ? `<p style="color: #1B2A4A; font-size: 13px; margin: 0 0 4px;">
          <strong>Slide deck:</strong> attached (${attachment.filename})
@@ -331,7 +341,10 @@ export async function sendPitchRequestEmail(
   const mail = {
     from: from(),
     to: toEmail,
-    subject: `Pitch request: ${ticker}${companyName ? ` (${companyName})` : ''} from ${requesterName}`,
+    subject:
+      recipientRole === 'Requester'
+        ? `Submitted: your ${ticker}${companyName ? ` (${companyName})` : ''} pitch request`
+        : `Pitch request: ${ticker}${companyName ? ` (${companyName})` : ''} from ${requesterName}`,
     html: `
       <div style="font-family: 'Inter', system-ui, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px;">
         <div style="text-align: center; margin-bottom: 24px;">
@@ -357,7 +370,8 @@ export async function sendPitchRequestEmail(
                 : ''
             }
             <p style="color: #8C99BB; font-size: 12px; margin: 0 0 4px;">Proposed meeting</p>
-            <p style="color: white; font-size: 13px; margin: 0 0 ${notes ? '12px' : '0'};">${dateStr}${lunchLabel ? ` &middot; ${lunchLabel}` : ''}</p>
+            <p style="color: white; font-size: 13px; margin: 0 0 4px;">${dateStr}${lunchLabel ? ` &middot; ${lunchLabel}` : ''}</p>
+            <p style="color: white; font-size: 13px; margin: 0 0 ${notes ? '12px' : '0'};">${timeLabel ? `${timeLabel}` : ''}${timeLabel && roomLabel ? ' &middot; ' : ''}${roomLabel ? `${roomLabel}` : ''}</p>
             ${
               notes
                 ? `<p style="color: #8C99BB; font-size: 12px; margin: 0 0 4px;">Notes</p>
@@ -372,14 +386,19 @@ export async function sendPitchRequestEmail(
                    The PM has been cc'd. The request is pending your approval —
                    only your decision blocks the meeting.
                  </p>`
-              : `<p style="color: #1B2A4A; font-size: 14px; margin: 16px 0 8px;">
+              : recipientRole === 'PM'
+              ? `<p style="color: #1B2A4A; font-size: 14px; margin: 16px 0 8px;">
                    Heads up — your approval is informational. The President's
                    decision is what locks in the meeting.
+                 </p>`
+              : `<p style="color: #1B2A4A; font-size: 14px; margin: 16px 0 8px;">
+                   We'll email you again once the President responds. You can
+                   also track the status on your dashboard.
                  </p>`
           }
           <div style="text-align: center; margin: 20px 0 0;">
             <a href="${inboxUrl}" style="display: inline-block; background: #C9A84C; color: #1B2A4A; font-size: 14px; font-weight: 600; text-decoration: none; padding: 10px 24px; border-radius: 8px;">
-              Review on the Griffin Fund
+              ${recipientRole === 'Requester' ? 'View on the Griffin Fund' : 'Review on the Griffin Fund'}
             </a>
           </div>
         </div>
@@ -399,36 +418,73 @@ export async function sendPitchRequestEmail(
 }
 
 // Sent to the requester when the President OR a PM acts on their
-// request. `actor` is 'President' or 'PM' so the body can read right.
+// request, and (on approval) also sent to the PM as a "for your
+// awareness" cc. `decision` is normalized to lowercase before
+// comparing so callers passing 'Approved' / 'Declined' / 'approved'
+// all work — historically only the lowercase form matched.
 export async function sendPitchRequestDecisionEmail(
   toEmail,
   {
     requesterName,
     actor,
     actorName,
-    decision, // 'approved' | 'declined'
+    decision, // 'Approved' | 'Declined' (case-insensitive)
     ticker,
     reason,
     dashboardUrl,
+    proposedDate, // optional — when present, render the meeting block
+    proposedStartTime,
+    roomLabel,
+    icsAttachment, // optional { filename, content (Buffer or string), contentType }
+    ccCopy, // when true, this is the PM's cc copy of an approval
   }
 ) {
-  const headline =
-    actor === 'President'
-      ? decision === 'approved'
-        ? `Approved: your ${ticker} pitch request`
-        : `Declined: your ${ticker} pitch request`
-      : decision === 'approved'
-      ? `Your PM has approved your ${ticker} pitch request`
-      : `Your PM can't make your ${ticker} pitch meeting`;
-  const body =
-    actor === 'President'
-      ? decision === 'approved'
-        ? `<strong>${actorName}</strong> approved your pitch request. The meeting is on — they'll follow up with the final time and location.`
-        : `<strong>${actorName}</strong> declined your pitch request.${reason ? ` Reason: <em>${escapeHtml(reason)}</em>` : ''} You can submit a new request with a different time or refined thesis.`
-      : decision === 'approved'
-      ? `<strong>${actorName}</strong> (your PM) approved the request. The President's decision is still pending.`
-      : `<strong>${actorName}</strong> (your PM) can't make this meeting${reason ? ` — <em>${escapeHtml(reason)}</em>` : ''}. The President can still approve, so the meeting may go ahead without your PM.`;
-  await getTransporter().sendMail({
+  const isApproved = String(decision || '').toLowerCase() === 'approved';
+  const headline = ccCopy
+    ? `Confirmed: ${ticker} pitch meeting on the calendar`
+    : actor === 'President'
+    ? isApproved
+      ? `Approved: your ${ticker} pitch request`
+      : `Declined: your ${ticker} pitch request`
+    : isApproved
+    ? `Your PM has approved your ${ticker} pitch request`
+    : `Your PM can't make your ${ticker} pitch meeting`;
+  const body = ccCopy
+    ? `<strong>${actorName}</strong> approved the pitch meeting. You're cc'd as the responsible PM — see the time + room below and add it to your calendar.`
+    : actor === 'President'
+    ? isApproved
+      ? `<strong>${actorName}</strong> approved your pitch request. The meeting is on — see the details below, and the attached calendar invite will drop it onto your Gmail / Apple / Outlook calendar.`
+      : `<strong>${actorName}</strong> declined your pitch request.${reason ? ` Reason: <em>${escapeHtml(reason)}</em>` : ''} You can submit a new request with a different time or refined thesis.`
+    : isApproved
+    ? `<strong>${actorName}</strong> (your PM) approved the request. The President's decision is still pending.`
+    : `<strong>${actorName}</strong> (your PM) can't make this meeting${reason ? ` — <em>${escapeHtml(reason)}</em>` : ''}. The President can still approve, so the meeting may go ahead without your PM.`;
+
+  // Meeting details block — only rendered when we have a date AND a
+  // start time (i.e. on approve emails, where it matters most).
+  const dateStr = proposedDate
+    ? new Date(proposedDate).toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+      })
+    : null;
+  const timeLabel = formatHHMMto12h(proposedStartTime);
+  const showDetails = isApproved && dateStr && timeLabel;
+  const detailsBlock = showDetails
+    ? `<div style="background: #1B2A4A; border-radius: 8px; padding: 16px; margin: 0 0 16px;">
+         <p style="color: #8C99BB; font-size: 12px; margin: 0 0 4px;">When</p>
+         <p style="color: white; font-size: 13px; margin: 0 0 12px;">${dateStr} &middot; ${timeLabel}</p>
+         ${
+           roomLabel
+             ? `<p style="color: #8C99BB; font-size: 12px; margin: 0 0 4px;">Where</p>
+                <p style="color: white; font-size: 13px; margin: 0;">${escapeHtml(roomLabel)}</p>`
+             : ''
+         }
+       </div>`
+    : '';
+
+  const mail = {
     from: from(),
     to: toEmail,
     subject: headline,
@@ -443,6 +499,7 @@ export async function sendPitchRequestDecisionEmail(
         <div style="background: #F7F8FB; border-radius: 12px; padding: 24px;">
           <p style="color: #1B2A4A; font-size: 14px; margin: 0 0 8px;">Hi ${requesterName},</p>
           <p style="color: #1B2A4A; font-size: 14px; margin: 0 0 16px;">${body}</p>
+          ${detailsBlock}
           <div style="text-align: center; margin: 20px 0 0;">
             <a href="${dashboardUrl}" style="display: inline-block; background: #C9A84C; color: #1B2A4A; font-size: 14px; font-weight: 600; text-decoration: none; padding: 10px 24px; border-radius: 8px;">
               Open the Griffin Fund
@@ -451,7 +508,124 @@ export async function sendPitchRequestDecisionEmail(
         </div>
       </div>
     `,
-  });
+  };
+  if (icsAttachment) {
+    mail.attachments = [
+      {
+        filename: icsAttachment.filename || 'pitch-meeting.ics',
+        content: icsAttachment.content,
+        contentType: icsAttachment.contentType || 'text/calendar; charset=utf-8',
+      },
+    ];
+  }
+  await getTransporter().sendMail(mail);
+}
+
+// Tiny iCalendar (.ics) builder for approved pitch meetings. No
+// dependencies — RFC5545 is forgiving enough that we can hand-roll
+// this in 30 lines. Date/time are anchored to America/New_York since
+// every Grace Church School lunch period happens in ET regardless of
+// where the requester opens the email.
+export function buildPitchMeetingIcs({
+  uid,
+  proposedDate, // Date or ISO string
+  proposedStartTime, // "HH:MM"
+  durationMinutes = 30,
+  ticker,
+  companyName,
+  roomLabel,
+  organizerEmail,
+  organizerName,
+  attendeeEmails = [],
+}) {
+  if (!proposedDate || !proposedStartTime) {
+    throw new Error('proposedDate + proposedStartTime required');
+  }
+  const [hh, mm] = proposedStartTime.split(':').map(Number);
+  // `proposedDate` may have a time component baked in; we only want
+  // the calendar day, then attach the lunch start time.
+  const day = new Date(proposedDate);
+  if (Number.isNaN(day.getTime())) throw new Error('Invalid proposedDate');
+  // UTC accessors so "2026-04-29" stays April 29 regardless of the
+  // server's timezone — see lunchSlots.weekdayKeyFor for the same
+  // reasoning.
+  const y = day.getUTCFullYear();
+  const m = day.getUTCMonth() + 1;
+  const d = day.getUTCDate();
+  // Render as TZID=America/New_York wall-clock — most clients handle
+  // this without a VTIMEZONE block when the TZID is well-known.
+  const pad = (n) => String(n).padStart(2, '0');
+  const startWallclock = `${y}${pad(m)}${pad(d)}T${pad(hh)}${pad(mm)}00`;
+  const endMinutes = hh * 60 + mm + durationMinutes;
+  const endHh = Math.floor(endMinutes / 60);
+  const endMm = endMinutes % 60;
+  const endWallclock = `${y}${pad(m)}${pad(d)}T${pad(endHh)}${pad(endMm)}00`;
+  const dtstamp = new Date()
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}/, '');
+  const summary = `Pitch meeting · ${ticker}${companyName ? ` (${companyName})` : ''}`;
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Griffin Fund//Pitch Request//EN',
+    'METHOD:REQUEST',
+    'CALSCALE:GREGORIAN',
+    'BEGIN:VEVENT',
+    `UID:${uid}`,
+    `DTSTAMP:${dtstamp}`,
+    `DTSTART;TZID=America/New_York:${startWallclock}`,
+    `DTEND;TZID=America/New_York:${endWallclock}`,
+    `SUMMARY:${icsEscape(summary)}`,
+    roomLabel ? `LOCATION:${icsEscape(roomLabel)}` : null,
+    organizerEmail
+      ? `ORGANIZER;CN=${icsEscape(organizerName || 'President')}:mailto:${organizerEmail}`
+      : null,
+    ...attendeeEmails
+      .filter(Boolean)
+      .map(
+        (e) =>
+          `ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${e}`
+      ),
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].filter(Boolean);
+  return {
+    filename: 'pitch-meeting.ics',
+    content: lines.join('\r\n'),
+    contentType: 'text/calendar; charset=utf-8; method=REQUEST',
+  };
+}
+
+function icsEscape(s) {
+  return String(s)
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\n')
+    .replace(/,/g, '\\,')
+    .replace(/;/g, '\\;');
+}
+
+// Pretty-print "12:15" → "12:15 PM". Returns empty string for falsy
+// input so template `${...}` interpolation stays clean.
+function formatHHMMto12h(hhmm) {
+  if (!/^\d{2}:\d{2}$/.test(hhmm || '')) return '';
+  const [h, m] = hhmm.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+// Friendly room name for the request emails. Keep this aligned with
+// `ROOM_LABELS` in `src/lib/lunchSlots.js` — duplicating the small map
+// here avoids the email service depending on the lunchSlots module.
+function roomLabelFor(room) {
+  if (!room) return null;
+  const map = {
+    LIBRARY: 'Library (near smart board / printers)',
+    LOWER_COMMONS: 'Lower Commons',
+    ATHLETIC_COMMONS: 'Athletic Commons',
+  };
+  return map[room] || room;
 }
 
 function escapeHtml(s) {
