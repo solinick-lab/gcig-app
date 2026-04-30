@@ -474,6 +474,29 @@ model FileProviderToken {
   createdAt    DateTime @default(now())
 }
 
+// Monthly CPI forecast produced by the external Python forecaster running
+// on the club's local server. The forecaster POSTs to /api/cpi/ingest with
+// an HMAC signature; we upsert one row per `asOfMonth` (the latest CPI
+// month used as input). Old runs are kept for the historical "what we
+// predicted vs. what happened" backtest panel — never overwritten.
+//
+// `payload` stores the full JSON shape: forecasts[], backtest stats,
+// per-model contributions, ensemble weights. The client reads from this
+// JSON directly so the schema stays additive: the forecaster can grow
+// new fields without a Prisma migration.
+model CpiForecast {
+  id        Int      @id @default(autoincrement())
+  runAt     DateTime
+  // "YYYY-MM" of the most recently RELEASED CPI month used as input.
+  // Unique so the forecaster can re-POST a corrected run for the same
+  // input month and we'll upsert rather than duplicate.
+  asOfMonth String   @unique
+  payload   Json
+  createdAt DateTime @default(now())
+
+  @@index([runAt])
+}
+
 // LLM-generated priority tag for a news article, keyed by URL. Lets us skip
 // re-ranking articles we've already classified — articles don't change after
 // publish, so the classification is stable. One row per unique URL. `model`

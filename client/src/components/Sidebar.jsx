@@ -16,6 +16,7 @@ import {
   Megaphone,
   Bot,
   Send,
+  Activity,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import RoleBadge from './RoleBadge.jsx';
@@ -44,6 +45,7 @@ const NAV_SECTIONS = [
       { to: '/outcomes', label: 'Coverage Outcomes', icon: Trophy },
       { to: '/votes', label: 'Voting', icon: Vote },
       { to: '/industries', label: 'Industries', icon: Building2 },
+      { to: '/cpi', label: 'CPI Forecast', icon: Activity },
     ],
   },
   {

@@ -48,6 +48,12 @@ services:
         sync: false
       - key: R2_PUBLIC_URL
         sync: false
+      # Shared secret with the off-platform Python CPI forecaster. The
+      # forecaster signs each /api/cpi/ingest POST with HMAC-SHA256 over
+      # `${timestamp}.${rawBody}` using this secret. Set the SAME value
+      # on the local server's environment for cpi-forecast.
+      - key: CPI_INGEST_SECRET
+        sync: false
 
   - type: web
     name: gcig-client
