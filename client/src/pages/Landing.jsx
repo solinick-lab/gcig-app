@@ -58,6 +58,205 @@ function Reveal({ children, delay = 0, className = '' }) {
   );
 }
 
+const EASE_OUT = 'cubic-bezier(0.16,1,0.3,1)';
+
+// Hook: returns true once the element scrolls into view, then stays true.
+function useInView(threshold = 0.15) {
+  const ref = useRef(null);
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setSeen(true);
+      return;
+    }
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setSeen(true);
+          obs.disconnect();
+        }
+      },
+      { threshold },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [threshold]);
+  return [ref, seen];
+}
+
+// Word-reveal — splits children-as-string into spans that rise individually.
+function WordReveal({ text, base = 0, step = 80, duration = 900, className = '' }) {
+  const [ref, seen] = useInView(0.2);
+  const words = text.split(/(\s+)/);
+  return (
+    <span ref={ref} className={className} style={{ display: 'inline' }}>
+      {words.map((w, i) => {
+        if (/^\s+$/.test(w)) return <span key={i}>{w}</span>;
+        return (
+          <span
+            key={i}
+            style={{
+              display: 'inline-block',
+              opacity: seen ? 1 : 0,
+              transform: seen ? 'translateY(0)' : 'translateY(40%)',
+              transition: `opacity ${duration}ms ${EASE_OUT} ${base + i * step}ms, transform ${duration}ms ${EASE_OUT} ${base + i * step}ms`,
+              willChange: 'transform, opacity',
+            }}
+          >
+            {w}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+// Gold rule that draws across left → right when in view. Drop-in
+// replacement for `<div className="h-px w-12 bg-gold" />` patterns.
+function RuleSweep({ width = 'w-12', color = 'bg-gold', delay = 0, className = '' }) {
+  const [ref, seen] = useInView(0.3);
+  return (
+    <div ref={ref} className={`relative h-px ${width} ${className}`}>
+      <div
+        className={`absolute inset-0 ${color}`}
+        style={{
+          transformOrigin: 'left',
+          transform: seen ? 'scaleX(1)' : 'scaleX(0)',
+          transition: `transform 1100ms cubic-bezier(0.77,0,0.175,1) ${delay}ms`,
+        }}
+      />
+    </div>
+  );
+}
+
+// CountUp — animates an integer from 0 → target once it's visible. The
+// final formatted string is shown to assistive tech immediately so the
+// counter never reads as "0" to a screen reader.
+function CountUp({ target, duration = 1400, className = '' }) {
+  const [ref, seen] = useInView(0.4);
+  const [n, setN] = useState(0);
+  const reduced =
+    typeof window !== 'undefined' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  useEffect(() => {
+    if (!seen || reduced) {
+      setN(target);
+      return;
+    }
+    const start = performance.now();
+    let raf;
+    function tick(now) {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+      setN(Math.round(eased * target));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    }
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [seen, target, duration, reduced]);
+  return (
+    <span ref={ref} className={className} aria-label={String(target)}>
+      <span aria-hidden="true">{n}</span>
+    </span>
+  );
+}
+
+// Top-of-viewport scroll progress hairline.
+function ScrollProgress() {
+  const [pct, setPct] = useState(0);
+  useEffect(() => {
+    let ticking = false;
+    const update = () => {
+      const h = document.documentElement;
+      const scrolled = h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight);
+      setPct(scrolled * 100);
+      ticking = false;
+    };
+    const onScroll = () => {
+      if (!ticking) {
+        requestAnimationFrame(update);
+        ticking = true;
+      }
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    update();
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 2,
+        zIndex: 200,
+        pointerEvents: 'none',
+      }}
+    >
+      <div
+        style={{
+          height: '100%',
+          width: `${pct}%`,
+          background: '#C9A84C',
+          transition: 'width 80ms linear',
+        }}
+      />
+    </div>
+  );
+}
+
+// Mouse-spring parallax for the hero. Subtly translates a target ref
+// based on cursor position inside the section, with a critically-damped
+// lerp so it trails the cursor instead of snapping.
+function useHeroParallax(scopeRef, targetRef, range = 12) {
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const scope = scopeRef.current;
+    const target = targetRef.current;
+    if (!scope || !target) return;
+
+    let tx = 0, ty = 0, cx = 0, cy = 0;
+    let raf = null, inside = false;
+
+    function onMove(e) {
+      const r = scope.getBoundingClientRect();
+      const nx = (e.clientX - r.left) / r.width - 0.5;
+      const ny = (e.clientY - r.top) / r.height - 0.5;
+      tx = nx * range;
+      ty = ny * (range * 0.6);
+      inside = true;
+      if (!raf) raf = requestAnimationFrame(tick);
+    }
+    function onLeave() {
+      tx = 0;
+      ty = 0;
+      inside = false;
+      if (!raf) raf = requestAnimationFrame(tick);
+    }
+    function tick() {
+      cx += (tx - cx) * 0.06;
+      cy += (ty - cy) * 0.06;
+      target.style.transform = `translate3d(${cx.toFixed(2)}px, ${cy.toFixed(2)}px, 0) scale(1.04)`;
+      if (Math.abs(tx - cx) > 0.05 || Math.abs(ty - cy) > 0.05 || inside) {
+        raf = requestAnimationFrame(tick);
+      } else {
+        raf = null;
+      }
+    }
+    scope.addEventListener('pointermove', onMove, { passive: true });
+    scope.addEventListener('pointerleave', onLeave);
+    return () => {
+      scope.removeEventListener('pointermove', onMove);
+      scope.removeEventListener('pointerleave', onLeave);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [scopeRef, targetRef, range]);
+}
+
 export default function Landing() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -68,6 +267,7 @@ export default function Landing() {
 
   return (
     <div className="min-h-screen bg-white font-sans text-navy antialiased">
+      <ScrollProgress />
       <Header />
       <Hero />
       <Premise />
@@ -83,15 +283,17 @@ function Header() {
   return (
     <header className="border-b border-navy-50">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-4 md:px-10 md:py-7">
-        <Link to="/" className="flex items-center gap-2 md:gap-3 min-w-0">
+        <Link to="/" className="group flex items-center gap-2 md:gap-3 min-w-0">
           <img
             src="/grace-logo.png"
             alt="Grace Church School"
             className="h-8 w-auto shrink-0 md:h-10"
+            style={{ transition: `transform 500ms ${EASE_OUT}` }}
             onError={(e) => {
               e.currentTarget.style.display = 'none';
             }}
           />
+          <style>{`.group:hover img[alt="Grace Church School"] { transform: rotate(-8deg); }`}</style>
           <div className="leading-tight min-w-0">
             <div className="font-serif text-base font-semibold tracking-tight text-navy md:text-lg">
               The Griffin Fund
@@ -105,48 +307,74 @@ function Header() {
         </Link>
         <Link
           to="/login"
-          className="shrink-0 inline-flex items-center gap-2 border border-navy px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-navy transition hover:bg-navy hover:text-white md:px-5 md:py-2 md:text-xs md:tracking-[0.2em]"
+          className="member-login shrink-0 inline-flex items-center gap-2 border border-navy px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-navy md:px-5 md:py-2 md:text-xs md:tracking-[0.2em]"
+          style={{ transition: `background-color 220ms ${EASE_OUT}, color 220ms ${EASE_OUT}, transform 160ms ${EASE_OUT}` }}
         >
           <span className="hidden sm:inline">Member Login</span>
           <span className="sm:hidden">Sign In</span>
+          <span className="member-login-arrow inline-block" aria-hidden="true">→</span>
         </Link>
+        <style>{`
+          .member-login:hover { background: #1B2A4A; color: #fff; }
+          .member-login:active { transform: scale(0.97); }
+          .member-login-arrow { transition: transform 220ms ${EASE_OUT}; transform: translateX(0); }
+          .member-login:hover .member-login-arrow { transform: translateX(4px); }
+        `}</style>
       </div>
     </header>
   );
 }
 
 function Hero() {
+  const sectionRef = useRef(null);
+  const bgRef = useRef(null);
+  useHeroParallax(sectionRef, bgRef, 18);
+
   return (
-    <section className="relative border-b border-navy-50 overflow-hidden">
-      {/* Parallax background — disabled on mobile (iOS fixed-bg bug) */}
+    <section ref={sectionRef} className="relative border-b border-navy-50 overflow-hidden">
+      {/* Parallax background — disabled on mobile (iOS fixed-bg bug).
+          The mouse-spring also translates this layer, so we keep the cover
+          slightly larger via scale(1.04) to hide the edges. */}
       <style>{`
         .hero-bg {
           background-image: url('/hero-skyline.jpg');
           background-size: cover;
           background-position: center;
           background-attachment: fixed;
+          transform: scale(1.04);
+          will-change: transform;
         }
         @media (max-width: 767px) {
           .hero-bg { background-attachment: scroll; }
         }
+        @keyframes heroEyebrowFade {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .hero-eyebrow { animation: heroEyebrowFade 800ms ${EASE_OUT} both; animation-delay: 1400ms; }
       `}</style>
-      <div className="hero-bg absolute inset-0" aria-hidden="true" />
+      <div ref={bgRef} className="hero-bg absolute inset-0" aria-hidden="true" />
       <div className="absolute inset-0 bg-white/[0.88]" aria-hidden="true" />
 
       <div className="relative">
-        <Reveal>
-          <div className="mx-auto max-w-5xl px-4 py-16 md:px-10 md:py-36">
-            <div className="mb-6 h-px w-12 bg-gold md:mb-8 md:w-16" />
-            <h1 className="font-serif text-3xl font-semibold leading-[1.15] tracking-tight text-navy md:text-6xl">
-              The Griffin Fund was founded on the premise that disciplined
-              investing is best learned by doing — with real capital, rigorous
-              research, and accountability to the school community.
-            </h1>
-            <div className="mt-8 text-[10px] font-semibold uppercase tracking-[0.25em] text-navy-400 md:mt-10 md:text-[11px] md:tracking-[0.3em]">
-              Grace Church School · Est. 2021
-            </div>
+        <div className="mx-auto max-w-5xl px-4 py-16 md:px-10 md:py-36">
+          <RuleSweep
+            width="w-12 md:w-16"
+            color="bg-gold"
+            className="mb-6 md:mb-8"
+          />
+          <h1 className="font-serif text-3xl font-semibold leading-[1.15] tracking-tight text-navy md:text-6xl">
+            <WordReveal
+              text="The Griffin Fund was founded on the premise that disciplined investing is best learned by doing — with real capital, rigorous research, and accountability to the school community."
+              base={300}
+              step={45}
+              duration={1000}
+            />
+          </h1>
+          <div className="hero-eyebrow mt-8 text-[10px] font-semibold uppercase tracking-[0.25em] text-navy-400 md:mt-10 md:text-[11px] md:tracking-[0.3em]">
+            Grace Church School · Est. 2021
           </div>
-        </Reveal>
+        </div>
       </div>
     </section>
   );
@@ -162,7 +390,7 @@ function Premise() {
               <div className="text-[10px] font-semibold uppercase tracking-[0.25em] text-gold-700 md:text-[11px] md:tracking-[0.3em]">
                 The Fund
               </div>
-              <div className="mt-2 h-px w-10 bg-navy" />
+              <RuleSweep width="w-10" color="bg-navy" className="mt-2" delay={150} />
             </div>
             <div className="font-serif text-[17px] leading-relaxed text-navy md:text-xl">
               <p>
@@ -217,7 +445,7 @@ function Pillars() {
             <div className="text-[10px] font-semibold uppercase tracking-[0.25em] text-gold-700 md:text-[11px] md:tracking-[0.3em]">
               How we invest
             </div>
-            <div className="mt-2 h-px w-10 bg-navy" />
+            <RuleSweep width="w-10" color="bg-navy" className="mt-2" delay={150} />
             <h2 className="mt-5 font-serif text-2xl font-semibold leading-tight text-navy md:mt-6 md:text-4xl">
               Three principles guide everything the fund does.
             </h2>
@@ -225,23 +453,49 @@ function Pillars() {
         </Reveal>
         <div className="grid gap-10 md:grid-cols-3 md:gap-10">
           {pillars.map((p, i) => (
-            <Reveal key={p.heading} delay={i * 100}>
-              <div>
-                <div className="font-serif text-4xl font-light text-gold md:text-5xl">
-                  {String(i + 1).padStart(2, '0')}
-                </div>
-                <h3 className="mt-3 font-serif text-xl font-semibold text-navy md:mt-4 md:text-2xl">
-                  {p.heading}
-                </h3>
-                <p className="mt-3 text-[14px] leading-relaxed text-navy-500 md:text-[15px]">
-                  {p.body}
-                </p>
-              </div>
-            </Reveal>
+            <Pillar key={p.heading} index={i} pillar={p} />
           ))}
         </div>
       </div>
     </section>
+  );
+}
+
+// Single pillar card. Numeral rises with a slight scale, then heading and
+// body fade in after, all gated on the card itself entering view.
+function Pillar({ pillar, index }) {
+  const [ref, seen] = useInView(0.25);
+  const stagger = index * 120;
+  const numStyle = {
+    display: 'inline-block',
+    opacity: seen ? 1 : 0,
+    transform: seen ? 'translateY(0) scale(1)' : 'translateY(28px) scale(0.94)',
+    transition: `opacity 1100ms ${EASE_OUT} ${stagger}ms, transform 1100ms ${EASE_OUT} ${stagger}ms`,
+    willChange: 'transform, opacity',
+  };
+  const textStyle = (extraDelay) => ({
+    opacity: seen ? 1 : 0,
+    transform: seen ? 'translateY(0)' : 'translateY(14px)',
+    transition: `opacity 800ms ${EASE_OUT} ${stagger + extraDelay}ms, transform 800ms ${EASE_OUT} ${stagger + extraDelay}ms`,
+  });
+  return (
+    <div ref={ref}>
+      <div className="font-serif text-4xl font-light text-gold md:text-5xl" style={numStyle}>
+        {String(index + 1).padStart(2, '0')}
+      </div>
+      <h3
+        className="mt-3 font-serif text-xl font-semibold text-navy md:mt-4 md:text-2xl"
+        style={textStyle(280)}
+      >
+        {pillar.heading}
+      </h3>
+      <p
+        className="mt-3 text-[14px] leading-relaxed text-navy-500 md:text-[15px]"
+        style={textStyle(420)}
+      >
+        {pillar.body}
+      </p>
+    </div>
   );
 }
 
@@ -306,13 +560,17 @@ function Leadership() {
 
   return (
     <section className="border-b border-navy-50">
+      <style>{`
+        .member-row:hover { transform: translateX(4px); }
+        .member-row:hover .member-avatar { box-shadow: 0 6px 20px -8px rgba(27, 42, 74, 0.35); }
+      `}</style>
       <div className="mx-auto max-w-6xl px-4 py-14 md:px-10 md:py-28">
         <Reveal>
           <div className="mb-10 max-w-2xl md:mb-16">
             <div className="text-[10px] font-semibold uppercase tracking-[0.25em] text-gold-700 md:text-[11px] md:tracking-[0.3em]">
               Leadership
             </div>
-            <div className="mt-2 h-px w-10 bg-navy" />
+            <RuleSweep width="w-10" color="bg-navy" className="mt-2" delay={150} />
             <h2 className="mt-5 font-serif text-2xl font-semibold leading-tight text-navy md:mt-6 md:text-4xl">
               Led from within the club.
             </h2>
@@ -333,7 +591,10 @@ function Leadership() {
                 <ul className="space-y-4">
                   {group.members.map((m, mi) => (
                     <Reveal key={m.name} delay={gi * 100 + (mi + 1) * 100}>
-                      <li className="flex items-center gap-4">
+                      <li
+                        className="member-row flex items-center gap-4"
+                        style={{ transition: `transform 280ms ${EASE_OUT}` }}
+                      >
                         <MemberAvatar member={m} gender={genderMap.get(m.name)} />
                         <div className="min-w-0">
                           <div className="font-serif text-lg font-semibold text-navy">
@@ -364,7 +625,7 @@ function Leadership() {
 
 function Numbers() {
   const stats = [
-    { value: '2021', label: 'Founded' },
+    { value: '2021', label: 'Founded', countUp: 2021 },
     { value: 'Six figures', label: 'Capital under management' },
     { value: 'US equities, ETFs', label: 'Investment universe' },
     { value: 'Quarterly', label: 'Advisory board review' },
@@ -384,7 +645,7 @@ function Numbers() {
               */}
               <div className="border-l border-navy-100 px-4 odd:border-l-0 md:px-6 md:odd:border-l md:first:border-l-0">
                 <div className="font-serif text-xl font-semibold leading-tight text-navy md:text-3xl">
-                  {s.value}
+                  {s.countUp ? <CountUp target={s.countUp} duration={1500} /> : s.value}
                 </div>
                 <div className="mt-2 text-[9px] font-semibold uppercase tracking-[0.2em] text-navy-400 md:text-[10px] md:tracking-[0.25em]">
                   {s.label}
@@ -453,7 +714,8 @@ function MemberAvatar({ member, gender }) {
 
   return (
     <div
-      className={`relative h-12 w-12 shrink-0 overflow-hidden rounded-full border border-navy-100 ${tint.bg}`}
+      className={`member-avatar relative h-12 w-12 shrink-0 overflow-hidden rounded-full border border-navy-100 ${tint.bg}`}
+      style={{ transition: `box-shadow 320ms ${EASE_OUT}` }}
     >
       {member.photo && (
         <img
