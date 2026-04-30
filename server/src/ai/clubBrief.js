@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import prisma from '../db.js';
 import { getSheetPortfolio } from '../services/sheetPortfolio.js';
 import { getNewsForTicker } from '../services/news.js';
+import { getRecentFilingsForTickers } from '../services/secFilings.js';
+import { getMacroSnapshot } from '../services/fredMacro.js';
 import {
   getUpcomingEarningsBatch,
   getAnalystConsensus,
@@ -700,6 +702,79 @@ async function buildLiveContext() {
     if (sections.length > 0) newsBlock = sections.join('\n\n');
   }
 
+  // Recent SEC filings on held tickers (free EDGAR data). Filings are
+  // dated and authoritative — the model can reference them with much
+  // more confidence than free-text news. Scoped to "interesting" form
+  // types so we don't drown in routine Form 4 / 13F noise. Last ~30
+  // days so we cover the typical earnings-and-proxy season.
+  let filingsBlock =
+    '_No recent SEC filings on file for current holdings._';
+  if (heldTickers.length > 0) {
+    try {
+      const FRESH_FORMS = new Set([
+        '8-K',
+        '10-Q',
+        '10-K',
+        'DEF 14A',
+        'DEFA14A',
+        'S-1',
+        'S-3',
+        'S-3ASR',
+      ]);
+      const filingsCutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
+      const byTicker = await getRecentFilingsForTickers(heldTickers, { limit: 5 });
+      const filingSections = [];
+      for (const [ticker, list] of Object.entries(byTicker)) {
+        const fresh = (list || [])
+          .filter((f) => FRESH_FORMS.has(f.form) && f.filingDate >= filingsCutoff)
+          .slice(0, 4);
+        if (fresh.length === 0) continue;
+        const lines = [`**${ticker}**`];
+        for (const f of fresh) {
+          lines.push(`  - ${f.filingDate} · ${f.form} — ${f.description || f.form}`);
+        }
+        filingSections.push(lines.join('\n'));
+      }
+      if (filingSections.length > 0) {
+        filingsBlock = filingSections.join('\n\n');
+      }
+    } catch (err) {
+      console.warn('clubBrief: SEC filings fetch failed:', err.message);
+    }
+  }
+
+  // Macro snapshot (FRED). Lets the model answer "what's the
+  // backdrop?" / "where are rates?" with real numbers instead of
+  // making up vague bond-market commentary. Hidden when FRED isn't
+  // configured.
+  let macroBlock = '_Macro snapshot unavailable (FRED not configured)._';
+  try {
+    const macro = await getMacroSnapshot();
+    if (macro?.configured && macro.indicators?.length > 0) {
+      macroBlock = macro.indicators
+        .map((ind) => {
+          let v = ind.value;
+          if (ind.unit === '$') v = `$${v}`;
+          else if (ind.unit === '%') v = `${v}%`;
+          let chg = '';
+          if (ind.change != null && Number.isFinite(Number(ind.change))) {
+            const num = Number(ind.change);
+            const sign = num > 0 ? '+' : num < 0 ? '−' : '±';
+            const abs = Math.abs(num).toFixed(2);
+            const suffix = ind.unit === '%' ? 'pp' : '';
+            chg = ` (${sign}${abs}${suffix} d/d)`;
+          }
+          const asOf = ind.asOf ? `, as of ${ind.asOf}` : '';
+          return `- **${ind.label}**: ${v}${chg}${asOf}`;
+        })
+        .join('\n');
+    }
+  } catch (err) {
+    console.warn('clubBrief: macro fetch failed:', err.message);
+  }
+
   // Open votes.
   let openBlock = '_No open votes right now._';
   if (openVotes.status === 'fulfilled' && openVotes.value.length > 0) {
@@ -837,6 +912,20 @@ async function buildLiveContext() {
     '_company name from a ticker symbol alone._',
     '',
     intelBlock,
+    '',
+    '### Macro Snapshot (FRED, latest available)',
+    '_Use these numbers when a member asks about rates, the dollar,_',
+    '_oil, the VIX, or inflation — never invent macro figures from_',
+    '_training data when these are present._',
+    '',
+    macroBlock,
+    '',
+    '### Recent SEC Filings (held tickers, last 30 days)',
+    '_Authoritative + dated. When the user asks "did NOC file anything?"_',
+    '_or "any 10-Qs lately?", lead with this section. 8-K = material event,_',
+    '_10-Q = quarterly report, 10-K = annual report, DEF 14A = proxy._',
+    '',
+    filingsBlock,
     '',
     '### Recent News on Holdings (last 30 days)',
     '_Top-ranked articles from the club\'s news pipeline. Score is 0–10;_',

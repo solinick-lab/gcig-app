@@ -72,12 +72,16 @@ export default function Dashboard() {
   // render a placeholder instead of disappearing entirely.
   const [dirData, setDirData] = useState(null);
   const [dirLoading, setDirLoading] = useState(true);
+  // FRED macro snapshot. Cheap (1h server cache). Hidden when
+  // FRED_API_KEY isn't configured — endpoint returns configured: false.
+  const [macro, setMacro] = useState(null);
 
   useEffect(() => {
     api.get('/dashboard').then((r) => setDashboard(r.data)).catch(() => setDashboard({}));
     api.get('/holdings/quotes').then((r) => setQuotes(r.data)).catch(() => setQuotes(null));
     api.get('/holdings/history').then((r) => setHistory(r.data || [])).catch(() => setHistory([]));
     api.get('/holdings/earnings').then((r) => setEarnings(r.data)).catch(() => setEarnings(null));
+    api.get('/dashboard/macro').then((r) => setMacro(r.data)).catch(() => setMacro(null));
     // DIR runs in parallel with the dashboard request. On cache miss
     // it can take 10-30s; on cache hit it's instant. The page
     // renders without waiting either way.
@@ -127,6 +131,10 @@ export default function Dashboard() {
         holdings={quotes?.holdings}
         history={normalizedHistory}
       />
+
+      {macro?.configured && macro.indicators?.length > 0 && (
+        <MacroStrip macro={macro} />
+      )}
 
       {/* DIR text comes from its own endpoint; on the very first load
           of a new ET review-day it can take 10-30s for the LLM to
@@ -422,6 +430,78 @@ function Mover({ holding }) {
 // Slot-reserving placeholder that renders while the DIR endpoint is
 // still working. Three pulsing skeleton lines mimic the actual
 // paragraph height so the page doesn't jump when the real card lands.
+// ─── Macro strip ────────────────────────────────────────────────────────
+// Tiny grid of macro indicators (10Y, VIX, USD, oil, CPI). Each tile
+// shows the latest reading with a colored day-over-day chip. Designed
+// to slot above the Day-in-Review without dominating the page.
+
+function MacroStrip({ macro }) {
+  const indicators = macro.indicators || [];
+  if (indicators.length === 0) return null;
+
+  const formatValue = (ind) => {
+    if (ind.unit === '$') return `$${ind.value}`;
+    if (ind.unit === '%') return `${ind.value}%`;
+    return ind.value;
+  };
+
+  const formatChange = (ind) => {
+    if (ind.change == null) return null;
+    const v = Number(ind.change);
+    if (!Number.isFinite(v)) return null;
+    const sign = v > 0 ? '+' : v < 0 ? '−' : '±';
+    const abs = Math.abs(v).toFixed(2);
+    if (ind.unit === '%') return `${sign}${abs}pp`;
+    if (ind.unit === '$') return `${sign}$${abs}`;
+    return `${sign}${abs}`;
+  };
+
+  return (
+    <div className="rounded-xl border border-navy-100 bg-white px-4 py-3 shadow-card md:px-5 md:py-4">
+      <div className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-gold-700">
+        <span className="h-px w-5 bg-gold" />
+        Macro Snapshot
+        <span className="ml-auto text-[10px] normal-case tracking-normal text-navy-400">
+          via FRED
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5 md:gap-4">
+        {indicators.map((ind) => {
+          const change = formatChange(ind);
+          const tone =
+            ind.change == null
+              ? 'text-navy-400'
+              : Number(ind.change) > 0
+                ? 'text-emerald-600'
+                : Number(ind.change) < 0
+                  ? 'text-red-600'
+                  : 'text-navy-400';
+          return (
+            <div key={ind.id} className="min-w-0">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-navy-400">
+                {ind.label}
+              </div>
+              <div className="mt-1 font-serif text-xl font-semibold tabular-nums text-navy md:text-2xl">
+                {formatValue(ind)}
+              </div>
+              {change && (
+                <div className={`mt-0.5 text-[11px] font-semibold tabular-nums ${tone}`}>
+                  {change}
+                </div>
+              )}
+              {ind.asOf && (
+                <div className="text-[9px] text-navy-300">
+                  as of {ind.asOf}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function DayInReviewPlaceholder() {
   return (
     <div className="rounded-2xl border border-gold-200 bg-[#FFFDF5] p-5 shadow-card md:p-7">

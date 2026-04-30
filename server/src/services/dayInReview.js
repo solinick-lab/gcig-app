@@ -2,6 +2,7 @@ import prisma from '../db.js';
 import { getSheetPortfolio } from './sheetPortfolio.js';
 import { generateDayInReview } from './articleSummarizer.js';
 import { getNewsForTicker } from './news.js';
+import { getRecentFilingsForTickers } from './secFilings.js';
 
 // Day-in-Review service. Owns the cache, the ET review-day key, the
 // payload builder, and the LLM-call orchestration.
@@ -125,6 +126,32 @@ async function buildPayload() {
       }),
     ]);
 
+  // Recent SEC filings on held tickers, scoped to past ~3 days so the
+  // DIR mentions only fresh material events (8-K, 10-Q, 10-K). Routine
+  // forms (Form 4 insider trades, 13F institutional reports) are
+  // filtered out — they happen constantly and add noise.
+  let recentFilings = [];
+  if (heldTickers && heldTickers.length > 0) {
+    try {
+      const FRESH_FORMS = new Set(['8-K', '10-Q', '10-K', 'DEF 14A', 'DEFA14A']);
+      const cutoff = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
+      const byTicker = await getRecentFilingsForTickers(heldTickers, { limit: 5 });
+      for (const [ticker, list] of Object.entries(byTicker)) {
+        for (const f of list || []) {
+          if (!FRESH_FORMS.has(f.form)) continue;
+          if (!f.filingDate || f.filingDate < cutoff) continue;
+          recentFilings.push({ ticker, ...f });
+        }
+      }
+      recentFilings.sort((a, b) => b.filingDate.localeCompare(a.filingDate));
+      recentFilings = recentFilings.slice(0, 5);
+    } catch (err) {
+      console.warn('DIR: SEC filings fetch failed:', err.message);
+    }
+  }
+
   let portfolio = null;
   if (snapshots.length >= 2) {
     const end = snapshots[snapshots.length - 1];
@@ -149,6 +176,7 @@ async function buildPayload() {
     openVotes: openVotes.slice(0, 4),
     closedVotes: closedVotes.slice(0, 4),
     topNews,
+    recentFilings,
   };
 }
 

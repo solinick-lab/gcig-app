@@ -123,6 +123,7 @@ import {
   getUpcomingEarningsBatch,
   getAnalystConsensus,
 } from '../services/marketData.js';
+import { getRecentFilings } from '../services/secFilings.js';
 
 const router = Router();
 
@@ -647,6 +648,20 @@ router.get('/:ticker/consensus', async (req, res) => {
   const data = await getAnalystConsensus(ticker);
   if (!data) return res.json({ ticker, covered: false });
   res.json({ ticker, covered: true, ...data });
+});
+
+// Recent SEC filings for a ticker. Free EDGAR data, no API key —
+// 6h cache per ticker server-side.
+router.get('/:ticker/filings', async (req, res) => {
+  const ticker = normalizeTicker(req.params.ticker);
+  if (!ticker) return res.status(400).json({ error: 'Ticker required' });
+  try {
+    const filings = await getRecentFilings(ticker, { limit: 10 });
+    res.json({ ticker, filings });
+  } catch (err) {
+    console.error(`filings(${ticker}) failed:`, err.message);
+    res.status(502).json({ error: 'Failed to fetch SEC filings' });
+  }
 });
 
 // Single-ticker earnings lookup — convenience for the holding detail modal

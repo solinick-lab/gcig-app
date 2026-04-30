@@ -4,6 +4,7 @@ import { verifyJwt } from '../middleware/auth.js';
 import { getSheetPortfolio } from '../services/sheetPortfolio.js';
 import { eventAudienceWhere } from './events.js';
 import { getCached, regenerate } from '../services/dayInReview.js';
+import { getMacroSnapshot } from '../services/fredMacro.js';
 
 const router = Router();
 
@@ -158,6 +159,18 @@ router.get('/day-in-review', async (_req, res) => {
     return res.json({ dayInReview: null, dayInReviewAt: null, cached: false });
   }
   res.json(result);
+});
+
+// Macro snapshot from FRED — 1h cache server-side. Returns
+// { configured: false } when FRED_API_KEY isn't set so the client
+// can hide the card cleanly without throwing errors.
+router.get('/macro', async (_req, res) => {
+  try {
+    res.json(await getMacroSnapshot());
+  } catch (err) {
+    console.error('macro fetch failed:', err.message);
+    res.status(500).json({ error: 'Failed to fetch macro snapshot' });
+  }
 });
 
 export default router;

@@ -183,19 +183,20 @@ export async function generateWeekInReview(payload) {
 // cover roughly the last 24 hours. Generated once per day at / after
 // 4pm ET so the paragraph represents the day's market close.
 
-const DIR_SYSTEM_PROMPT = `You are writing a one-paragraph daily briefing for members of a student-run investment club, stamped "as of 4:00 PM ET market close". The pitch, vote, and portfolio fields in the payload cover roughly the last 24 hours. News in "topNews" is the most material recent coverage for the club's holdings — it may be from today or somewhat older.
+const DIR_SYSTEM_PROMPT = `You are writing a one-paragraph daily briefing for members of a student-run investment club, stamped "as of 4:00 PM ET market close". The pitch, vote, and portfolio fields in the payload cover roughly the last 24 hours. News in "topNews" is the most material recent coverage for the club's holdings — it may be from today or somewhat older. "recentFilings" is SEC filings on held tickers from the past ~3 days; these ARE dated and you can refer to them confidently.
 
 STRICT RULES:
-1. Only reference tickers that appear in the input payload — specifically in "heldTickers", "newPitches.ticker", "upcomingPitches.ticker", "openVotes.ticker", "closedVotes.ticker", or "topNews.ticker". NEVER mention any other company or ticker by name.
+1. Only reference tickers that appear in the input payload — specifically in "heldTickers", "newPitches.ticker", "upcomingPitches.ticker", "openVotes.ticker", "closedVotes.ticker", "topNews.ticker", or "recentFilings.ticker". NEVER mention any other company or ticker by name.
 2. Only cite news items that are present in "topNews". If "topNews" is empty, do NOT mention news at all — don't invent headlines.
 3. "topNews" is sorted by materiality, most-material first. Each entry has a "score" 0-10; higher = more important. Prioritize stories near the top of the list. If a story's score is below 6 it's at best a minor mention — give it at most half a clause, or skip it entirely. Don't describe low-score items as "big" or "major".
 4. You do NOT know when each news item was published. Frame news neutrally ("recent coverage on X", "news about Y"). NEVER claim a news item happened "today" unless it clearly did from context.
-5. The club does NOT hold every company. If a ticker isn't in "heldTickers", do not describe any event as affecting "our position" in it.
-6. Prefer concrete numbers from the input (pitch counts, vote tallies, portfolio $ and % change) over vague language.
-7. Frame portfolio moves as today's close — e.g. "the portfolio closed up $X (Y%) at $Z" rather than "over the week".
-8. Write ONE paragraph, max 70 words, plain prose, no bullets, no headers.
+5. SEC filings in "recentFilings" ARE dated (filingDate). When mentioning one, name the form type (8-K, 10-Q, 10-K) and the date, e.g. "NOC filed an 8-K on Apr 21". Don't speculate on what's in the filing — only that it was filed.
+6. The club does NOT hold every company. If a ticker isn't in "heldTickers", do not describe any event as affecting "our position" in it.
+7. Prefer concrete numbers from the input (pitch counts, vote tallies, portfolio $ and % change) over vague language.
+8. Frame portfolio moves as today's close — e.g. "the portfolio closed up $X (Y%) at $Z" rather than "over the week".
+9. Write ONE paragraph, max 80 words, plain prose, no bullets, no headers.
 
-If the day was genuinely quiet (no pitches, no votes, trivial portfolio move, no news), return exactly: INSUFFICIENT`;
+If the day was genuinely quiet (no pitches, no votes, trivial portfolio move, no news, no filings), return exactly: INSUFFICIENT`;
 
 export async function generateDayInReview(payload) {
   const out = await callChat(

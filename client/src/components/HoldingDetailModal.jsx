@@ -60,6 +60,7 @@ export default function HoldingDetailModal({ holding, onClose }) {
   const [coverage, setCoverage] = useState(null);
   const [earnings, setEarnings] = useState(null); // { covered, date, hour, epsEstimate, ... } or null
   const [consensus, setConsensus] = useState(null); // { covered, strongBuy, buy, hold, sell, ... } or null
+  const [filings, setFilings] = useState(null); // [{ form, filingDate, description, url, ... }]
   const [lots, setLots] = useState([]);
   const [news, setNews] = useState(null);
   const [newsError, setNewsError] = useState('');
@@ -95,6 +96,7 @@ export default function HoldingDetailModal({ holding, onClose }) {
     setCoverage(null);
     setEarnings(null);
     setConsensus(null);
+    setFilings(null);
     setLots([]);
     setNews(null);
     setNewsError('');
@@ -151,14 +153,20 @@ export default function HoldingDetailModal({ holding, onClose }) {
         .get(`/holdings/${encodeURIComponent(ticker)}/consensus`)
         .then(({ data }) => data)
         .catch(() => null),
-    ]).then(([infoData, coverageData, lotsData, earningsData, consensusData]) => {
-      if (cancelled) return;
-      setInfo(infoData);
-      setCoverage(coverageData);
-      setLots(lotsData);
-      setEarnings(earningsData);
-      setConsensus(consensusData);
-      setLoading(false);
+      api
+        .get(`/holdings/${encodeURIComponent(ticker)}/filings`)
+        .then(({ data }) => data?.filings || [])
+        .catch(() => []),
+    ]).then(
+      ([infoData, coverageData, lotsData, earningsData, consensusData, filingsData]) => {
+        if (cancelled) return;
+        setInfo(infoData);
+        setCoverage(coverageData);
+        setLots(lotsData);
+        setEarnings(earningsData);
+        setConsensus(consensusData);
+        setFilings(filingsData);
+        setLoading(false);
 
       // News is fired AFTER the info call resolves so we can pass the
       // company name along — that gives dramatically cleaner results than
@@ -531,6 +539,11 @@ export default function HoldingDetailModal({ holding, onClose }) {
               coverage — index ETFs and thinly-followed names come back
               uncovered and we simply hide the block. */}
           {consensus?.covered && <ConsensusBar consensus={consensus} />}
+
+          {/* SEC filings — recent 8-K / 10-Q / 10-K / proxy filings
+              from EDGAR. Free, no key. Hidden when the ticker doesn't
+              map to a CIK (most ETFs / foreign issues). */}
+          {filings && filings.length > 0 && <FilingsList filings={filings} />}
 
           {/* Stats grid */}
           <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
@@ -1400,6 +1413,100 @@ function NextEarningsBanner({ earnings }) {
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── SEC Filings list ─────────────────────────────────────────────────
+// Compact stack of the most recent EDGAR filings. Form-type pill is
+// color-coded so 8-Ks (events) jump out, 10-Q/10-K are accented but
+// secondary, and routine forms (4, 13G, etc.) sit in neutral gray.
+// Click → opens the actual filing on sec.gov in a new tab.
+
+const FORM_TONE = {
+  '8-K': 'bg-rose-50 text-rose-800 border-rose-200',
+  '10-Q': 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  '10-K': 'bg-emerald-100 text-emerald-900 border-emerald-300',
+  'DEF 14A': 'bg-gold-100/60 text-navy border-gold-200',
+  'DEFA14A': 'bg-gold-100/60 text-navy border-gold-200',
+  'S-3': 'bg-sky-50 text-sky-800 border-sky-200',
+  'S-3ASR': 'bg-sky-50 text-sky-800 border-sky-200',
+  'S-1': 'bg-sky-50 text-sky-800 border-sky-200',
+  '4': 'bg-navy-50 text-navy-500 border-navy-100',
+  '13F-HR': 'bg-navy-50 text-navy-500 border-navy-100',
+  'SC 13G': 'bg-navy-50 text-navy-500 border-navy-100',
+  'SC 13D': 'bg-navy-50 text-navy-500 border-navy-100',
+  'ARS': 'bg-navy-50 text-navy-500 border-navy-100',
+};
+
+const FORM_DESCRIPTION = {
+  '8-K': 'Material event',
+  '10-Q': 'Quarterly report',
+  '10-K': 'Annual report',
+  'DEF 14A': 'Proxy statement',
+  'DEFA14A': 'Additional proxy material',
+  'S-3': 'Shelf registration',
+  'S-3ASR': 'Auto-effective shelf reg.',
+  'S-1': 'Registration statement',
+  '4': 'Insider trade',
+  '13F-HR': 'Institutional holdings',
+  'SC 13G': '5%+ passive ownership',
+  'SC 13D': '5%+ active ownership',
+  'ARS': 'Annual report to security-holders',
+};
+
+function FilingsList({ filings }) {
+  // Cap at 6 to keep the modal compact; users who want more can hit
+  // the EDGAR company page.
+  const shown = filings.slice(0, 6);
+  return (
+    <div className="rounded-lg border border-navy-100 bg-white px-3 py-3">
+      <div className="mb-2 flex items-center gap-2">
+        <FileText className="h-3.5 w-3.5 text-navy-400" />
+        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gold-700">
+          Recent SEC Filings
+        </span>
+        <span className="ml-auto text-[10px] text-navy-400">
+          via EDGAR · free
+        </span>
+      </div>
+      <ul className="divide-y divide-navy-50">
+        {shown.map((f) => {
+          const tone =
+            FORM_TONE[f.form] || 'bg-navy-50 text-navy-500 border-navy-100';
+          const sub = FORM_DESCRIPTION[f.form];
+          let dateLabel = f.filingDate;
+          try {
+            dateLabel = format(new Date(`${f.filingDate}T00:00:00`), 'MMM d, yyyy');
+          } catch {
+            /* keep raw */
+          }
+          return (
+            <li key={f.accessionNumber} className="flex items-center gap-2 py-1.5">
+              <span
+                className={`inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 text-[10px] font-bold ${tone}`}
+              >
+                {f.form || 'FILING'}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold text-navy">
+                  {sub || f.description || f.form}
+                </div>
+                <div className="text-[10px] text-navy-400">{dateLabel}</div>
+              </div>
+              <a
+                href={f.url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-navy-300 transition hover:text-gold"
+                title={`Open ${f.form} on sec.gov`}
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
