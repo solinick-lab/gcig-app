@@ -308,6 +308,39 @@ router.get('/outcomes/mine', async (req, res) => {
     for (const h of portfolio?.holdings || []) {
       if (!h.isCash) holdingsByTicker.set(h.ticker.toUpperCase(), h);
     }
+
+    // Most-recent closed VotingSession per ticker pitched. Lets a yes
+    // vote show as "Voted Yes" even if the trader hasn't executed yet.
+    const voteCallByTicker = new Map();
+    const myTickers = Array.from(
+      new Set(
+        myPitches
+          .map((p) => String(p.ticker || '').toUpperCase())
+          .filter(Boolean)
+      )
+    );
+    if (myTickers.length > 0) {
+      const sessions = await prisma.votingSession.findMany({
+        where: { ticker: { in: myTickers }, status: 'closed' },
+        orderBy: { closedAt: 'desc' },
+        select: {
+          ticker: true,
+          ballots: { select: { action: true } },
+        },
+      });
+      for (const s of sessions) {
+        const key = s.ticker.toUpperCase();
+        if (voteCallByTicker.has(key)) continue;
+        let buys = 0;
+        let nonBuys = 0;
+        for (const b of s.ballots) {
+          if (b.action === 'Buy') buys++;
+          else nonBuys++;
+        }
+        if (buys === 0 && nonBuys === 0) continue;
+        voteCallByTicker.set(key, buys > nonBuys ? 'Buy' : 'NoBuy');
+      }
+    }
     function blendedCost(ticker) {
       const t = ticker.toUpperCase();
       const tickerLots = lots.filter((l) => l.ticker.toUpperCase() === t);
@@ -336,6 +369,25 @@ router.get('/outcomes/mine', async (req, res) => {
 
     const pitchRows = myPitches.map((p) => {
       const o = outcomeFor(p.ticker, p.date);
+      // Effective outcome layered on top of raw votedOutcome so
+      // "voted yes but trader hasn't executed" reads as Approved
+      // rather than Pending. Priority: explicit votedOutcome →
+      // closed VotingSession → held inference.
+      let effectiveOutcome = p.votedOutcome || null;
+      let outcomeInferred = false;
+      if (!effectiveOutcome) {
+        const voteCall = voteCallByTicker.get(o.ticker);
+        if (voteCall === 'Buy') {
+          effectiveOutcome = o.holding ? 'Buy' : 'Approved';
+          outcomeInferred = true;
+        } else if (voteCall === 'NoBuy') {
+          effectiveOutcome = 'NoBuy';
+          outcomeInferred = true;
+        } else if (o.holding) {
+          effectiveOutcome = 'Buy';
+          outcomeInferred = true;
+        }
+      }
       return {
         id: `pitch-${p.id}`,
         type: 'pitch',
@@ -343,6 +395,8 @@ router.get('/outcomes/mine', async (req, res) => {
         date: p.date,
         isPosition: !!o.holding,
         votedOutcome: p.votedOutcome,
+        effectiveOutcome,
+        outcomeInferred,
         buyPrice: o.buyPrice,
         currentPrice: o.currentPrice,
         percent: o.percent,
@@ -369,6 +423,8 @@ router.get('/outcomes/mine', async (req, res) => {
         date: r.date,
         isPosition: !!o.holding,
         votedOutcome: null,
+        effectiveOutcome: o.holding ? 'Buy' : null,
+        outcomeInferred: !!o.holding,
         buyPrice: o.buyPrice,
         currentPrice: o.currentPrice,
         percent: o.percent,
@@ -385,12 +441,20 @@ router.get('/outcomes/mine', async (req, res) => {
         ? withReturn.reduce((s, r) => s + r.percent, 0) / withReturn.length
         : 0;
     const totalPitches = myPitches.length;
-    const pitchesVotedNo = myPitches.filter((p) => p.votedOutcome === 'NoBuy').length;
+    // Voted-no count uses effective outcome so a closed-no VotingSession
+    // counts even without an explicit votedOutcome stamp.
+    const pitchesVotedNo = pitchRows.filter(
+      (r) => r.effectiveOutcome === 'NoBuy'
+    ).length;
     // Hit rate counts pitches AND reports tied to current positions as
     // "buys" (a report that became a holding is tacitly approved coverage).
-    // Denominator = buys + explicitly voted-no pitches.
+    // Approved (vote passed, awaiting trade) also counts — the club
+    // already said yes. Denominator = buys + explicitly voted-no pitches.
     const pitchBuys = pitchRows.filter(
-      (r) => r.isPosition || r.votedOutcome === 'Buy'
+      (r) =>
+        r.isPosition ||
+        r.effectiveOutcome === 'Buy' ||
+        r.effectiveOutcome === 'Approved'
     ).length;
     const reportBuys = reportRows.filter((r) => r.isPosition).length;
     const myBuys = pitchBuys + reportBuys;

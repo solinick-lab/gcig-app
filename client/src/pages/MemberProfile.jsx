@@ -272,16 +272,22 @@ function PitchRow({ item: p }) {
   const tone =
     outcome === 'Buy'
       ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-      : outcome === 'NoBuy'
-        ? 'bg-red-50 text-red-800 border-red-200'
+      : outcome === 'Approved'
+        ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+        : outcome === 'NoBuy'
+          ? 'bg-red-50 text-red-800 border-red-200'
+          : outcome === 'Scheduled'
+            ? 'bg-gold-100/40 text-navy border-gold-200'
+            : 'bg-navy-50 text-navy-500 border-navy-100';
+  const label = outcome === 'Approved' ? 'Voted Yes' : outcome;
+  const tooltip =
+    outcome === 'Approved'
+      ? 'Club voted yes — awaiting execution by the trading team.'
+      : p.outcomeInferred
+        ? 'Inferred from current portfolio — ticker is held so the pitch clearly passed. Raw votedOutcome hasn\'t been set on this row.'
         : outcome === 'Scheduled'
-          ? 'bg-gold-100/40 text-navy border-gold-200'
-          : 'bg-navy-50 text-navy-500 border-navy-100';
-  const tooltip = p.outcomeInferred
-    ? 'Inferred from current portfolio — ticker is held so the pitch clearly passed. Raw votedOutcome hasn\'t been set on this row.'
-    : outcome === 'Scheduled'
-      ? 'Pitch is on the calendar but hasn\'t happened yet.'
-      : undefined;
+          ? 'Pitch is on the calendar but hasn\'t happened yet.'
+          : undefined;
   return (
     <li className="flex items-start gap-3 py-2.5">
       <div className="flex-shrink-0">
@@ -306,8 +312,8 @@ function PitchRow({ item: p }) {
         title={tooltip}
         className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${tone}`}
       >
-        {outcome}
-        {p.outcomeInferred && (
+        {label}
+        {p.outcomeInferred && outcome !== 'Approved' && (
           <span
             className="text-[9px] opacity-70"
             aria-label="Inferred from current holdings"

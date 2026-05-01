@@ -269,11 +269,20 @@ router.get('/:id/profile', async (req, res) => {
     (a, b) => new Date(b.date) - new Date(a.date)
   );
 
-  // Infer an effective outcome so the UI isn't misleading. The
-  // votedOutcome column is often left null even after a vote — if
-  // the ticker is in the current portfolio, the pitch clearly passed
-  // and was bought. If the pitch date is in the future, it's still
-  // scheduled. Leaves the raw votedOutcome available for audit.
+  // Infer an effective outcome so the UI isn't misleading. Three
+  // signals, in priority order:
+  //   1. Pitch.votedOutcome — explicit override, always wins.
+  //   2. Closed VotingSession on the ticker — counts Buy ballots vs
+  //      Hold/Sell. Majority Buy → 'Approved' (vote passed, may not
+  //      yet be executed). Majority not-Buy → 'NoBuy'.
+  //   3. Currently held in portfolio — pitch obviously got bought
+  //      even if both above are missing → 'Buy'.
+  //   4. Future-dated pitch with no signal → 'Scheduled'.
+  //   5. Otherwise → 'Pending'.
+  //
+  // The 'Approved' state distinguishes "club voted yes, traders haven't
+  // executed yet" from "in the book and earning a return". Both are
+  // fine outcomes; just different stages.
   let heldTickers = new Set();
   try {
     const sheet = await getSheetPortfolio();
@@ -285,6 +294,41 @@ router.get('/:id/profile', async (req, res) => {
   } catch {
     /* sheet unreachable — fall back to raw votedOutcome only. */
   }
+
+  // Most-recent closed VotingSession per ticker, with the Buy/NoBuy
+  // call computed from the ballots. Keys are upper-case tickers.
+  const voteOutcomeByTicker = new Map();
+  const pitchTickers = Array.from(
+    new Set(
+      rawPitches
+        .map((p) => String(p.ticker || '').toUpperCase())
+        .filter(Boolean)
+    )
+  );
+  if (pitchTickers.length > 0) {
+    const sessions = await prisma.votingSession.findMany({
+      where: { ticker: { in: pitchTickers }, status: 'closed' },
+      orderBy: { closedAt: 'desc' },
+      select: {
+        ticker: true,
+        closedAt: true,
+        ballots: { select: { action: true } },
+      },
+    });
+    for (const s of sessions) {
+      const key = s.ticker.toUpperCase();
+      if (voteOutcomeByTicker.has(key)) continue; // first iter is most recent
+      let buys = 0;
+      let nonBuys = 0;
+      for (const b of s.ballots) {
+        if (b.action === 'Buy') buys++;
+        else nonBuys++;
+      }
+      if (buys === 0 && nonBuys === 0) continue; // empty session, ignore
+      voteOutcomeByTicker.set(key, buys > nonBuys ? 'Buy' : 'NoBuy');
+    }
+  }
+
   const now = new Date();
   const pitches = rawPitches.map((p) => {
     const ticker = String(p.ticker || '').toUpperCase();
@@ -292,9 +336,25 @@ router.get('/:id/profile', async (req, res) => {
     let effectiveOutcome = p.votedOutcome || null;
     let outcomeInferred = false;
     if (!effectiveOutcome) {
-      if (pitchDate > now) {
+      const voteCall = voteOutcomeByTicker.get(ticker);
+      if (voteCall === 'Buy') {
+        // Vote passed. If the holding's already in the portfolio,
+        // it's a real Buy; otherwise it's an Approved (awaiting trade).
+        if (heldTickers.has(ticker)) {
+          effectiveOutcome = 'Buy';
+          outcomeInferred = true;
+        } else {
+          effectiveOutcome = 'Approved';
+          outcomeInferred = true;
+        }
+      } else if (voteCall === 'NoBuy') {
+        effectiveOutcome = 'NoBuy';
+        outcomeInferred = true;
+      } else if (pitchDate > now) {
         effectiveOutcome = 'Scheduled';
       } else if (heldTickers.has(ticker)) {
+        // No closed vote, no explicit outcome, but it's in the book —
+        // legacy inference for older pitches predating voting sessions.
         effectiveOutcome = 'Buy';
         outcomeInferred = true;
       }

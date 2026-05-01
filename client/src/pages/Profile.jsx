@@ -232,7 +232,9 @@ export default function Profile() {
                   </thead>
                   <tbody className="divide-y divide-navy-50">
                     {mine.rows.map((r) => {
-                      const isNoBuy = r.votedOutcome === 'NoBuy';
+                      const eff = r.effectiveOutcome || r.votedOutcome;
+                      const isNoBuy = eff === 'NoBuy';
+                      const isApproved = eff === 'Approved';
                       const up = (r.percent ?? 0) >= 0;
                       return (
                         <tr key={r.id}>
@@ -267,6 +269,13 @@ export default function Profile() {
                             {isNoBuy ? (
                               <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold uppercase text-red-700">
                                 Voted No
+                              </span>
+                            ) : isApproved ? (
+                              <span
+                                title="Club voted yes — awaiting execution by the trading team."
+                                className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-900"
+                              >
+                                Voted Yes
                               </span>
                             ) : r.percent != null ? (
                               <span
