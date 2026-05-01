@@ -30,38 +30,14 @@ const router = Router();
 
 const TIMESTAMP_TOLERANCE_SECONDS = 5 * 60;
 
-// Capture raw body bytes for HMAC verification while still parsing JSON
-// for the route handler. Skips on GET — no body, signature is over the
-// path + empty body.
-function captureRawBody(req, res, next) {
-  if (req.method === 'GET' || req.method === 'HEAD') {
-    req.rawBody = Buffer.alloc(0);
-    return next();
-  }
-  let buf = Buffer.alloc(0);
-  req.on('data', (chunk) => {
-    buf = Buffer.concat([buf, chunk]);
-  });
-  req.on('end', () => {
-    req.rawBody = buf;
-    if (buf.length === 0) {
-      req.body = {};
-      return next();
-    }
-    try {
-      req.body = JSON.parse(buf.toString('utf8'));
-    } catch {
-      return res.status(400).json({ error: 'Invalid JSON' });
-    }
-    next();
-  });
-  req.on('error', next);
-}
-
 // HMAC verification middleware. Use on every off-platform route. The
 // `pathForSig` is the canonical full path the client signed (e.g.,
 // '/api/cpi/ingest') — pass it explicitly rather than reading req.url
 // because mounting points can shift the apparent path.
+//
+// Body bytes for the signature are captured by index.js's express.json
+// `verify` hook into req.rawBody. GETs have no body, so we fall back to
+// an empty buffer in that case.
 function verifyHmac(pathForSig) {
   return (req, res, next) => {
     const secret = process.env.CPI_INGEST_SECRET;
@@ -104,7 +80,6 @@ function verifyHmac(pathForSig) {
 // directly, so FRED_API_KEY never leaves Render.
 router.get(
   '/fred-panel',
-  captureRawBody,
   verifyHmac('/api/cpi/fred-panel'),
   async (_req, res) => {
     try {
@@ -120,7 +95,6 @@ router.get(
 // ── Off-platform: forecast ingest ─────────────────────────────────────
 router.post(
   '/ingest',
-  captureRawBody,
   verifyHmac('/api/cpi/ingest'),
   async (req, res) => {
     const payload = req.body || {};

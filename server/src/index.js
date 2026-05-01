@@ -71,7 +71,18 @@ app.use(
     exposedHeaders: ['X-New-Token'],
   })
 );
-app.use(express.json({ limit: '2mb' }));
+// `verify` runs before JSON.parse and gets the raw bytes — the only safe
+// place to capture them, because once express.json() finishes the request
+// stream is already drained. Routes that need to validate an HMAC over the
+// exact bytes the client signed (currently /api/cpi/ingest) read req.rawBody.
+app.use(
+  express.json({
+    limit: '2mb',
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 app.use('/api', generalLimiter);
 
 // Serve uploaded files (PDF, PPTX)
