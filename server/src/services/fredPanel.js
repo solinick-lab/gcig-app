@@ -26,13 +26,23 @@ let cache = { at: 0, data: null };
 // If you change one side you must change the other.
 const TARGET_ID = 'CPIAUCSL';
 const SERIES = [
+  // Headline target
   { id: 'CPIAUCSL',     frequency: 'M' },
+  // CPI subcomponents — used by the hierarchical forecaster which
+  // predicts each separately and aggregates. They behave very differently
+  // (food/energy are volatile + commodity-driven, core is sticky + wage-
+  // driven, shelter is slow-moving), so component-level forecasts beat
+  // headline-only forecasts in most academic studies.
+  { id: 'CPIUFDSL',     frequency: 'M' }, // Food
+  { id: 'CPIENGSL',     frequency: 'M' }, // Energy
+  { id: 'CPILFESL',     frequency: 'M' }, // Core (all items less food + energy)
+  // Macro features
   { id: 'DCOILWTICO',   frequency: 'D' },
   { id: 'GASREGW',      frequency: 'D' },
   { id: 'PPIACO',       frequency: 'M' },
   { id: 'PPIFIS',       frequency: 'M' },
   { id: 'CSUSHPISA',    frequency: 'M' },
-  { id: 'CUSR0000SAH1', frequency: 'M' },
+  { id: 'CUSR0000SAH1', frequency: 'M' }, // Shelter (also a subcomponent — kept for backwards compat as a feature)
   { id: 'CES0500000003', frequency: 'M' },
   { id: 'UNRATE',       frequency: 'M' },
   { id: 'M2SL',         frequency: 'M' },
