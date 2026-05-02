@@ -25,6 +25,7 @@ import crypto from 'node:crypto';
 import prisma from '../db.js';
 import { verifyJwt } from '../middleware/auth.js';
 import { getFredPanel } from '../services/fredPanel.js';
+import { getDailyPanel } from '../services/fredDailyPanel.js';
 
 const router = Router();
 
@@ -88,6 +89,25 @@ router.get(
     } catch (err) {
       console.error('fred-panel failed:', err.message);
       res.status(503).json({ error: 'FRED fetch failed' });
+    }
+  }
+);
+
+// ── Off-platform: daily panel for the nowcaster ───────────────────────
+// Returns RAW daily history (no monthly aggregation) for the high-
+// frequency FRED series. The nowcaster uses these to build partial-
+// month features (e.g., "WTI average month-to-date through today")
+// and predict the current month's CPI before BLS releases it.
+router.get(
+  '/daily-panel',
+  verifyHmac('/api/cpi/daily-panel'),
+  async (_req, res) => {
+    try {
+      const panel = await getDailyPanel();
+      res.json(panel);
+    } catch (err) {
+      console.error('daily-panel failed:', err.message);
+      res.status(503).json({ error: 'FRED daily fetch failed' });
     }
   }
 );
