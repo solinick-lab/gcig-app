@@ -28,21 +28,17 @@ const TARGET_ID = 'CPIAUCSL';
 const SERIES = [
   // Headline target
   { id: 'CPIAUCSL',     frequency: 'M' },
-  // CPI subcomponents — used by the hierarchical forecaster which
-  // predicts each separately and aggregates. They behave very differently
-  // (food/energy are volatile + commodity-driven, core is sticky + wage-
-  // driven, shelter is slow-moving), so component-level forecasts beat
-  // headline-only forecasts in most academic studies.
+  // CPI subcomponents — for hierarchical aggregation.
   { id: 'CPIUFDSL',     frequency: 'M' }, // Food
   { id: 'CPIENGSL',     frequency: 'M' }, // Energy
-  { id: 'CPILFESL',     frequency: 'M' }, // Core (all items less food + energy)
-  // Macro features
+  { id: 'CPILFESL',     frequency: 'M' }, // Core
+  // Original macro features.
   { id: 'DCOILWTICO',   frequency: 'D' },
   { id: 'GASREGW',      frequency: 'D' },
   { id: 'PPIACO',       frequency: 'M' },
   { id: 'PPIFIS',       frequency: 'M' },
   { id: 'CSUSHPISA',    frequency: 'M' },
-  { id: 'CUSR0000SAH1', frequency: 'M' }, // Shelter (also a subcomponent — kept for backwards compat as a feature)
+  { id: 'CUSR0000SAH1', frequency: 'M' },
   { id: 'CES0500000003', frequency: 'M' },
   { id: 'UNRATE',       frequency: 'M' },
   { id: 'M2SL',         frequency: 'M' },
@@ -51,6 +47,44 @@ const SERIES = [
   { id: 'MICH',         frequency: 'M' },
   { id: 'INDPRO',       frequency: 'M' },
   { id: 'RSAFS',        frequency: 'M' },
+  // ── NEW DATA (round 5) ─────────────────────────────────────────
+  // Market-implied inflation expectations — the most direct signal
+  // beyond MICH. Daily updated, immune to survey noise.
+  { id: 'T5YIE',        frequency: 'D' }, // 5Y TIPS breakeven
+  { id: 'T10YIE',       frequency: 'D' }, // 10Y TIPS breakeven
+  { id: 'T5YIFR',       frequency: 'D' }, // 5Y forward 5Y inflation expectations
+  // Cleveland Fed alternative inflation measures — these are what the Fed
+  // actually watches. Median CPI and trimmed-mean strip out noise.
+  { id: 'MEDCPIM158SFRBCLE',     frequency: 'M' }, // Median CPI
+  { id: 'TRMMEANCPIM158SFRBCLE', frequency: 'M' }, // 16% trimmed-mean CPI
+  // Atlanta Fed sticky CPI — measures inflation in goods/services with
+  // infrequent price changes. Strong signal for inflation persistence.
+  { id: 'STICKCPIM157SFRBATL',   frequency: 'M' }, // Sticky CPI
+  // Yield curve — inflation expectations + policy stance + recession risk.
+  { id: 'T10Y2Y',       frequency: 'D' }, // 10y minus 2y
+  { id: 'T10Y3M',       frequency: 'D' }, // 10y minus 3m
+  { id: 'DGS2',         frequency: 'D' }, // 2y Treasury
+  { id: 'FEDFUNDS',     frequency: 'M' }, // Effective fed funds rate
+  // Credit spreads — risk pricing leads inflation in stress regimes.
+  { id: 'BAMLH0A0HYM2', frequency: 'D' }, // High-yield bond spread
+  // Labor market depth — wage pressure source.
+  { id: 'ICSA',         frequency: 'W' }, // Initial jobless claims (weekly)
+  { id: 'JTSJOL',       frequency: 'M' }, // JOLTS job openings
+  { id: 'JTSQUL',       frequency: 'M' }, // JOLTS quits
+  // Consumer demand + sentiment.
+  { id: 'UMCSENT',      frequency: 'M' }, // U Michigan sentiment
+  { id: 'PCEPI',        frequency: 'M' }, // PCE price index (the Fed's preferred)
+  { id: 'PCEPILFE',     frequency: 'M' }, // Core PCE
+  // Housing — leads shelter inflation.
+  { id: 'HOUST',        frequency: 'M' }, // Housing starts
+  { id: 'PERMIT',       frequency: 'M' }, // Building permits
+  // Capacity / activity.
+  { id: 'TCU',          frequency: 'M' }, // Capacity utilization
+  // Energy alternatives.
+  { id: 'DCOILBRENTEU', frequency: 'D' }, // Brent crude
+  { id: 'GASDESW',      frequency: 'W' }, // Diesel retail
+  // Commodity sub-indices.
+  { id: 'PPIIDC',       frequency: 'M' }, // PPI industrial commodities
 ];
 
 // Default start: enough history for a 24-month rolling backtest plus
