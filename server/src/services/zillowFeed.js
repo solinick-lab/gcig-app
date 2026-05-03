@@ -47,6 +47,14 @@ const UA =
 const ZORI_URL =
   'https://files.zillowstatic.com/research/public_csvs/zori/Metro_zori_uc_sfrcondomfr_sm_month.csv';
 
+// Zillow Home Value Index (ZHVI) — captures sale prices, leading indicator
+// for housing wealth, mortgage payments, and ultimately rents themselves.
+// Cap rate considerations: when home prices rise faster than rents,
+// landlords push rents up to maintain yield. Same CSV layout as ZORI;
+// same "United States" national row selection.
+const ZHVI_URL =
+  'https://files.zillowstatic.com/research/public_csvs/zhvi/Metro_zhvi_uc_sfrcondo_tier_0.33_0.67_sm_sa_month.csv';
+
 // Fallback proxy: FRED's Case-Shiller National Home Price Index. This is
 // served as a CSV without an API key from FRED's `fredgraph.csv` endpoint.
 const CASE_SHILLER_URL =
@@ -100,12 +108,55 @@ function fetchText(url) {
   });
 }
 
-// Minimal CSV row splitter. ZORI / Case-Shiller don't use embedded quotes
-// or commas inside fields, so a plain split on `,` is safe. We strip CR
-// to handle Windows line endings.
+// Minimal CSV row splitter. The metro-level Zillow CSV DOES embed commas
+// inside quoted fields (e.g. `"New York, NY"`), so we handle quoted fields.
+// We strip CR to handle Windows line endings.
 function splitCsvLine(line) {
-  return line.replace(/\r$/, '').split(',');
+  const s = line.replace(/\r$/, '');
+  const out = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '"') {
+      if (inQuotes && s[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      out.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  out.push(cur);
+  return out;
 }
+
+// Top-15 metros (BLS-weighted urban areas, by Zillow SizeRank). Keys are
+// the labels we expose to clients; values are arrays of accepted matches
+// against Zillow's RegionName column. Matching is case-insensitive and
+// uses startsWith on the comma-prefixed metro name (e.g. "New York,").
+const METRO_TARGETS = [
+  { key: 'New York', match: ['new york,'] },
+  { key: 'Los Angeles', match: ['los angeles,'] },
+  { key: 'Chicago', match: ['chicago,'] },
+  { key: 'Dallas', match: ['dallas,'] },
+  { key: 'Houston', match: ['houston,'] },
+  { key: 'Washington', match: ['washington,'] },
+  { key: 'Philadelphia', match: ['philadelphia,'] },
+  { key: 'Miami', match: ['miami,'] },
+  { key: 'Atlanta', match: ['atlanta,'] },
+  { key: 'Boston', match: ['boston,'] },
+  { key: 'Phoenix', match: ['phoenix,'] },
+  { key: 'San Francisco', match: ['san francisco,'] },
+  { key: 'Riverside', match: ['riverside,'] },
+  { key: 'Detroit', match: ['detroit,'] },
+  { key: 'Seattle', match: ['seattle,'] },
+];
 
 // Parse a YYYY-MM-DD style header into a Date. Returns null if not a date.
 function parseDateHeader(s) {
@@ -115,9 +166,35 @@ function parseDateHeader(s) {
   return `${m[1]}-${m[2]}-01`; // normalize to month-start
 }
 
-// Parse Zillow's national ZORI CSV. Returns an array of {date, level}
+// Convert one CSV row's date columns into a sorted [{date, level}] series.
+function rowToSeries(cols, dateIdx) {
+  const out = [];
+  for (const { i, date } of dateIdx) {
+    const raw = cols[i];
+    if (raw === undefined || raw === null || raw === '') continue;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) continue;
+    out.push({ date, level: n });
+  }
+  out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  return out;
+}
+
+// Parse Zillow's national CSV (works for both ZORI and ZHVI which share
+// the same column layout: RegionID, SizeRank, RegionName, RegionType,
+// StateName, then trailing month columns). Returns an array of {date, level}
 // sorted ascending by date, or null if parsing fails.
-function parseZoriCsv(text) {
+function parseZillowNationalCsv(text) {
+  const full = parseZillowFullCsv(text, /*wantMetros=*/false);
+  if (!full || !full.national) return null;
+  return full.national;
+}
+
+// Parse Zillow's metro-level CSV and return BOTH the national series and
+// (optionally) a map of top-15 metro -> series. Returns null if header
+// parse fails. Individual metros that fail to parse are simply omitted
+// from the returned `metros` map.
+function parseZillowFullCsv(text, wantMetros = true) {
   const lines = text.split('\n').filter((l) => l.length > 0);
   if (lines.length < 2) return null;
   const header = splitCsvLine(lines[0]);
@@ -142,37 +219,64 @@ function parseZoriCsv(text) {
   }
   if (nameCol < 0) return null;
 
-  // Find the United States row. Zillow uses RegionType="country" and
-  // RegionName="United States" for the national series. SizeRank=0 is
-  // also a reliable selector.
+  // Index target metros for fast lookup.
+  const lowerToKey = new Map();
+  if (wantMetros) {
+    for (const t of METRO_TARGETS) {
+      for (const m of t.match) lowerToKey.set(m, t.key);
+    }
+  }
+  const remaining = wantMetros
+    ? new Set(METRO_TARGETS.map((t) => t.key))
+    : new Set();
+
   let usRow = null;
+  const metroRows = new Map(); // key -> cols array
+
   for (let r = 1; r < lines.length; r++) {
     const cols = splitCsvLine(lines[r]);
     if (cols.length < header.length) continue;
-    const name = cols[nameCol];
+    const name = cols[nameCol] || '';
     const type = typeCol >= 0 ? cols[typeCol] : '';
     const rank = sizeRankCol >= 0 ? cols[sizeRankCol] : '';
+
+    // Match national row.
     if (
-      name === 'United States' ||
-      type === 'country' ||
-      rank === '0'
+      !usRow &&
+      (name === 'United States' || type === 'country' || rank === '0')
     ) {
       usRow = cols;
-      break;
     }
+
+    // Match metro rows. Zillow names look like "New York, NY".
+    if (wantMetros && remaining.size > 0) {
+      const lowered = name.toLowerCase();
+      for (const [prefix, key] of lowerToKey) {
+        if (remaining.has(key) && lowered.startsWith(prefix)) {
+          metroRows.set(key, cols);
+          remaining.delete(key);
+          break;
+        }
+      }
+    }
+
+    if (usRow && (!wantMetros || remaining.size === 0)) break;
   }
   if (!usRow) return null;
 
-  const out = [];
-  for (const { i, date } of dateIdx) {
-    const raw = usRow[i];
-    if (raw === undefined || raw === null || raw === '') continue;
-    const n = Number(raw);
-    if (!Number.isFinite(n)) continue;
-    out.push({ date, level: n });
+  const national = rowToSeries(usRow, dateIdx);
+  const metros = {};
+  if (wantMetros) {
+    for (const [key, cols] of metroRows) {
+      try {
+        const s = rowToSeries(cols, dateIdx);
+        if (s && s.length >= 13) metros[key] = s;
+      } catch {
+        // skip this metro on per-row failure; we keep what we have.
+      }
+    }
   }
-  out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-  return out;
+  return { national, metros };
 }
 
 // Parse FRED's `fredgraph.csv` for a single series. Format:
@@ -231,17 +335,57 @@ function annotateHistory(series, n) {
   return out.slice(-n);
 }
 
+// Fetch the Zillow Home Value Index (ZHVI) national series. Independent of
+// the rent index: ZHVI scrape failures should NOT poison the rent response
+// — they degrade gracefully to `zhvi: null` so the Python side can fall
+// back to ZORI-only features.
+async function fetchZhviHistory() {
+  try {
+    const raw = await fetchText(ZHVI_URL);
+    const series = parseZillowNationalCsv(raw);
+    if (!series || series.length < 13) {
+      throw new Error(
+        `ZHVI parse returned ${series ? series.length : 'null'} points`,
+      );
+    }
+    return { history: annotateHistory(series, 60) };
+  } catch (err) {
+    console.warn('zillowFeed: ZHVI scrape failed —', err.message || err);
+    return null;
+  }
+}
+
+// Build the `metros` map (key -> {history}) from a parsed Zillow CSV.
+// Wrapped to never throw — on any failure returns {}. This lets us add
+// metro-level features without risking the national rent payload.
+function buildMetrosBlock(parsed) {
+  const out = {};
+  if (!parsed || !parsed.metros || typeof parsed.metros !== 'object') return out;
+  for (const [key, series] of Object.entries(parsed.metros)) {
+    try {
+      if (!Array.isArray(series) || series.length < 13) continue;
+      out[key] = { history: annotateHistory(series, 36) };
+    } catch {
+      // skip metro on annotate failure
+    }
+  }
+  return out;
+}
+
 // Public: returns
 //   {
 //     ok: true,
 //     fetchedAt: ISO,
 //     source: 'zillow_zori' | 'case_shiller',
 //     usedFallback: bool,
-//     history: [{date, level, yoy, mom}, ...]   // up to 36 months
+//     history: [{date, level, yoy, mom}, ...]   // up to 36 months (national rent — backward-compat)
+//     national: { history: [...] }              // same as `history`, namespaced
+//     metros:   { "<Metro>": { history: [...] }, ... }   // top-15 metros (may be empty on fallback)
+//     zhvi: { history: [{date, level, yoy, mom}, ...] } | null   // up to 60 months
 //   }
 // On total failure:
 //   { ok: false, fetchedAt: ISO, source: null, usedFallback: false,
-//     history: [], error: '...' }
+//     history: [], national: { history: [] }, metros: {}, zhvi: null, error: '...' }
 export async function getZillowRent({ forceFresh = false } = {}) {
   if (!forceFresh && cache.data && Date.now() - cache.at < CACHE_TTL_MS) {
     return cache.data;
@@ -250,22 +394,46 @@ export async function getZillowRent({ forceFresh = false } = {}) {
   const fetchedAt = new Date().toISOString();
   let zoriErr = null;
 
-  // 1) Try Zillow ZORI.
+  // Kick off ZHVI fetch in parallel — it's independent of ZORI/Case-Shiller.
+  const zhviPromise = fetchZhviHistory();
+
+  // 1) Try Zillow ZORI (metro-level CSV — gives us BOTH national + metros).
   try {
     const raw = await fetchText(ZORI_URL);
-    const series = parseZoriCsv(raw);
-    if (!series || series.length < 13) {
+    let parsed = null;
+    try {
+      parsed = parseZillowFullCsv(raw, /*wantMetros=*/true);
+    } catch (parseErr) {
+      console.warn('zillowFeed: metro parse error —', parseErr.message || parseErr);
+      parsed = null;
+    }
+    // If full parse failed, fall back to the national-only path so we
+    // still get `history`.
+    let nationalSeries;
+    let metros = {};
+    if (parsed && parsed.national && parsed.national.length >= 13) {
+      nationalSeries = parsed.national;
+      metros = buildMetrosBlock(parsed);
+    } else {
+      nationalSeries = parseZillowNationalCsv(raw);
+      metros = {};
+    }
+    if (!nationalSeries || nationalSeries.length < 13) {
       throw new Error(
-        `ZORI parse returned ${series ? series.length : 'null'} points`,
+        `ZORI parse returned ${nationalSeries ? nationalSeries.length : 'null'} points`,
       );
     }
-    const history = annotateHistory(series, 36);
+    const history = annotateHistory(nationalSeries, 36);
+    const zhvi = await zhviPromise;
     const data = {
       ok: true,
       fetchedAt,
       source: 'zillow_zori',
       usedFallback: false,
       history,
+      national: { history },
+      metros,
+      zhvi,
     };
     cache = { at: Date.now(), data };
     return data;
@@ -274,7 +442,7 @@ export async function getZillowRent({ forceFresh = false } = {}) {
     console.warn('zillowFeed: ZORI scrape failed —', zoriErr);
   }
 
-  // 2) Fallback: Case-Shiller via FRED CSV.
+  // 2) Fallback: Case-Shiller via FRED CSV. Metros aren't available here.
   try {
     const raw = await fetchText(CASE_SHILLER_URL);
     const series = parseFredGraphCsv(raw);
@@ -284,24 +452,32 @@ export async function getZillowRent({ forceFresh = false } = {}) {
       );
     }
     const history = annotateHistory(series, 36);
+    const zhvi = await zhviPromise;
     const data = {
       ok: true,
       fetchedAt,
       source: 'case_shiller',
       usedFallback: true,
       history,
+      national: { history },
+      metros: {},
+      zhvi,
       zoriError: zoriErr,
     };
     cache = { at: Date.now(), data };
     return data;
   } catch (err) {
     console.warn('zillowFeed: Case-Shiller fallback failed —', err.message);
+    const zhvi = await zhviPromise;
     const data = {
       ok: false,
       fetchedAt,
       source: null,
       usedFallback: false,
       history: [],
+      national: { history: [] },
+      metros: {},
+      zhvi,
       error: `zori: ${zoriErr || 'n/a'}; caseShiller: ${err.message}`,
     };
     // Cache the failure briefly so we recover quickly when the upstream
