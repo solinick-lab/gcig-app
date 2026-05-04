@@ -21,18 +21,26 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(!!localStorage.getItem('gcig_token'));
 
   useEffect(() => {
-    const token = localStorage.getItem('gcig_token');
-    if (!token) {
+    // Snapshot the token at the very start. If it changes mid-flight
+    // (e.g. user completes a Google sign-in while /auth/me is still
+    // pending — easy on Safari, where the first fetch can take a
+    // moment), we ignore the response. Otherwise a stale-token 401
+    // would clobber the fresh login by running clearSession in the
+    // catch, kicking the user out on their first click.
+    const initialToken = localStorage.getItem('gcig_token');
+    if (!initialToken) {
       setLoading(false);
       return;
     }
     api
       .get('/auth/me')
       .then((res) => {
+        if (localStorage.getItem('gcig_token') !== initialToken) return;
         setUser(res.data);
         localStorage.setItem('gcig_user', JSON.stringify(res.data));
       })
       .catch(() => {
+        if (localStorage.getItem('gcig_token') !== initialToken) return;
         clearSession();
         setUser(null);
       })

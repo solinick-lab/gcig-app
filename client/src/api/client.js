@@ -49,6 +49,12 @@ api.interceptors.request.use((config) => {
 // verifyJwt → no valid X-New-Token could have been set. Reading from
 // those responses risks writing garbage into localStorage from a
 // malicious or buggy reverse proxy.
+//
+// Also: only rotate if the token in localStorage is still the SAME
+// one we sent. If a concurrent login (e.g. Google sign-in completing
+// while a /auth/me is still in flight on Safari) has already written
+// a fresh token, the X-New-Token here is for the previous session —
+// writing it would clobber the new login.
 function maybeRotateToken(res) {
   if (!res) return;
   const ok =
@@ -56,11 +62,12 @@ function maybeRotateToken(res) {
   if (!ok) return;
   const fresh =
     res?.headers?.['x-new-token'] || res?.headers?.['X-New-Token'];
-  if (fresh && typeof fresh === 'string' && fresh.length > 20) {
-    const prev = localStorage.getItem('gcig_token');
-    if (fresh !== prev) {
-      localStorage.setItem('gcig_token', fresh);
-    }
+  if (!fresh || typeof fresh !== 'string' || fresh.length < 20) return;
+  const sent = res.config?._tokenAtSend;
+  const current = localStorage.getItem('gcig_token');
+  if (sent && current && sent !== current) return; // raced; discard
+  if (fresh !== current) {
+    localStorage.setItem('gcig_token', fresh);
   }
 }
 
