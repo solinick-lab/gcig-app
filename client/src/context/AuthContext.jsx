@@ -21,12 +21,6 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(!!localStorage.getItem('gcig_token'));
 
   useEffect(() => {
-    // Snapshot the token at the very start. If it changes mid-flight
-    // (e.g. user completes a Google sign-in while /auth/me is still
-    // pending — easy on Safari, where the first fetch can take a
-    // moment), we ignore the response. Otherwise a stale-token 401
-    // would clobber the fresh login by running clearSession in the
-    // catch, kicking the user out on their first click.
     const initialToken = localStorage.getItem('gcig_token');
     if (!initialToken) {
       setLoading(false);
@@ -35,11 +29,19 @@ export function AuthProvider({ children }) {
     api
       .get('/auth/me')
       .then((res) => {
-        if (localStorage.getItem('gcig_token') !== initialToken) return;
+        // Always apply: response was scoped to whatever token we sent,
+        // and the server may have silently rotated it (X-New-Token has
+        // already updated localStorage by the time we get here). Trust
+        // the response data.
         setUser(res.data);
         localStorage.setItem('gcig_user', JSON.stringify(res.data));
       })
       .catch(() => {
+        // Only clear if the token in localStorage is still the one we
+        // sent. If something else (e.g. a concurrent Google sign-in)
+        // wrote a fresh token mid-flight, this 401 is for the OLD
+        // session — clearing would clobber the new login and kick the
+        // user out on their first click.
         if (localStorage.getItem('gcig_token') !== initialToken) return;
         clearSession();
         setUser(null);

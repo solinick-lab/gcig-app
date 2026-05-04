@@ -46,10 +46,17 @@ export default function Login() {
     setSubmitting(true);
     try {
       await googleSignIn(credential);
-      navigate('/dashboard');
+      // Full reload instead of SPA navigation. Eliminates every state
+      // race: AuthProvider initializes from a clean slate with the
+      // new token already persisted, so no in-flight /auth/me with a
+      // pre-login token can clobber the fresh session, and no React
+      // batching/render-timing issue can leave ProtectedRoute reading
+      // a stale user=null. Safari was particularly susceptible to
+      // this — its first cross-origin fetch on a new tab is often
+      // slow enough to race against the Google credential.
+      window.location.replace('/dashboard');
     } catch (err) {
       setError(err.response?.data?.error || 'Google sign-in failed');
-    } finally {
       setSubmitting(false);
     }
   }
@@ -74,7 +81,9 @@ export default function Login() {
         setMessage('');
         setEmailSent(false);
       } else {
-        navigate('/dashboard');
+        // See handleGoogleCredential for the rationale on full reload.
+        window.location.replace('/dashboard');
+        return;
       }
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed');
@@ -89,7 +98,9 @@ export default function Login() {
     setSubmitting(true);
     try {
       await verifyTwoFactor(challengeToken, twoFactorCode.trim());
-      navigate('/dashboard');
+      // Full reload — see handleGoogleCredential for rationale.
+      window.location.replace('/dashboard');
+      return;
     } catch (err) {
       setError(err.response?.data?.error || 'Verification failed');
     } finally {
