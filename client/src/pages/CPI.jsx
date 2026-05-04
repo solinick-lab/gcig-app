@@ -196,9 +196,13 @@ export default function CPI() {
       <PageHeader
         kicker="Macro"
         title="CPI Forecast"
-        subtitle={`3-month-ahead headline CPI, ensemble of SARIMA + Ridge + XGBoost. Forecast generated ${new Date(
-          forecast.runAt
-        ).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}.`}
+        subtitle={`3-month-ahead headline CPI, forecast engine: ${
+          forecast.engineLabel || 'production model'
+        }. Generated ${new Date(forecast.runAt).toLocaleDateString('en-US', {
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric',
+        })}.`}
       />
 
       {/* Headline cards */}
@@ -312,91 +316,66 @@ export default function CPI() {
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* Per-model breakdown */}
-        <Card kicker="Inside the ensemble" title="Per-model contributions">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left text-xs uppercase tracking-wider text-navy-400">
-                <tr>
-                  <th className="py-2">Month</th>
-                  <th className="py-2">SARIMA</th>
-                  <th className="py-2">Ridge</th>
-                  <th className="py-2">XGBoost</th>
-                  <th className="py-2 font-semibold">Ensemble</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-navy-50">
-                {forecast.forecasts.map((f) => (
-                  <tr key={f.month}>
-                    <td className="py-2.5 text-navy">{monthLabel(f.month)}</td>
-                    <td className="py-2.5 tabular-nums text-navy-500">
-                      {formatPct(f.modelContributions.sarima, false)}
-                    </td>
-                    <td className="py-2.5 tabular-nums text-navy-500">
-                      {formatPct(f.modelContributions.ridge, false)}
-                    </td>
-                    <td className="py-2.5 tabular-nums text-navy-500">
-                      {formatPct(f.modelContributions.xgb, false)}
-                    </td>
-                    <td className="py-2.5 font-semibold tabular-nums text-navy">
-                      {formatPct(f.yoy, false)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-navy-400">
-            <span className="font-semibold uppercase tracking-wider text-navy-500">Weights</span>
-            {Object.entries(forecast.weights || {}).map(([k, v]) => (
-              <span
-                key={k}
-                className="inline-flex items-center gap-1 rounded-md bg-navy-50 px-2 py-1 font-medium text-navy"
-              >
-                {k}: {(v * 100).toFixed(1)}%
-              </span>
-            ))}
-          </div>
-        </Card>
-
-        {/* Backtest stats */}
-        <Card kicker="Track record" title="Rolling 24-month backtest">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-gold-700">
-                Ensemble RMSE
-              </div>
-              <div className="mt-1 font-serif text-2xl font-semibold text-navy">
-                {forecast.backtest?.ensembleRmseMom?.toFixed(3) ?? '—'}%
-              </div>
-              <div className="text-xs text-navy-400">MoM error</div>
-            </div>
-            <div>
-              <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-gold-700">
-                Naive baseline
-              </div>
-              <div className="mt-1 font-serif text-2xl font-semibold text-navy-400">
-                {forecast.backtest?.naiveRmseMom?.toFixed(3) ?? '—'}%
-              </div>
-              <div className="text-xs text-navy-400">For comparison</div>
-            </div>
-          </div>
-          <div className="mt-4 space-y-2 text-sm">
-            {Object.entries(forecast.backtest?.perModelRmseMom || {}).map(([k, v]) => (
-              <div key={k} className="flex items-center justify-between">
-                <span className="capitalize text-navy">{k}</span>
-                <span className="tabular-nums text-navy-500">{v.toFixed(3)}%</span>
-              </div>
-            ))}
-          </div>
-          <p className="mt-4 text-xs leading-relaxed text-navy-400">
-            Each month over the last {forecast.backtest?.windowMonths || 24}, we re-fit every model
-            on data available at that point and predicted the next 3 months. RMSE is the
-            root-mean-squared MoM error. Lower is better.
+      {/* Forecast engine — names the actual production model */}
+      <Card
+        kicker="Forecast engine"
+        title={forecast.engineLabel || 'Production model'}
+      >
+        {forecast.engineDescription && (
+          <p className="text-sm leading-relaxed text-navy-500">
+            {forecast.engineDescription}
           </p>
-        </Card>
-      </div>
+        )}
+        <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-gold-700">
+              Backtest RMSE
+            </div>
+            <div className="mt-1 font-serif text-2xl font-semibold text-navy">
+              {forecast.engineRmseYoy != null
+                ? `${forecast.engineRmseYoy.toFixed(3)}%`
+                : '—'}
+            </div>
+            <div className="text-xs text-navy-400">YoY error, 24-mo window</div>
+          </div>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-gold-700">
+              Naive baseline
+            </div>
+            <div className="mt-1 font-serif text-2xl font-semibold text-navy-400">
+              {forecast.backtest?.naiveRmseMom != null
+                ? `${forecast.backtest.naiveRmseMom.toFixed(3)}%`
+                : '—'}
+            </div>
+            <div className="text-xs text-navy-400">For comparison</div>
+          </div>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-gold-700">
+              Hit ±0.25pp
+            </div>
+            <div className="mt-1 font-serif text-2xl font-semibold text-navy">
+              {forecast.backtest?.perHorizon?.['1']?.hitWithin25bp != null
+                ? `${forecast.backtest.perHorizon['1'].hitWithin25bp.toFixed(0)}%`
+                : '—'}
+            </div>
+            <div className="text-xs text-navy-400">+1mo forecasts in band</div>
+          </div>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-gold-700">
+              Window
+            </div>
+            <div className="mt-1 font-serif text-2xl font-semibold text-navy">
+              {forecast.backtest?.windowMonths || 24}
+            </div>
+            <div className="mt-1 text-xs text-navy-400">months evaluated</div>
+          </div>
+        </div>
+        <p className="mt-5 text-xs leading-relaxed text-navy-400">
+          The headline numbers above come from a single production model — not a vote across
+          many models. The model's identity lives in the forecaster's registry; promoting a new
+          champion updates this page automatically.
+        </p>
+      </Card>
 
       {history.length > 1 && (
         <Card kicker="Prediction history" title="Past forecasts vs. actuals">
