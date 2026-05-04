@@ -7,7 +7,17 @@ const BASE =
 
 export const API_BASE = BASE;
 
-const api = axios.create({ baseURL: BASE });
+// Default axios validateStatus is 2xx only — 304 Not Modified would land in
+// the error branch. We treat 304 as a success because Express returns it
+// when the cached body still matches (ETag), and we still need to read
+// `X-New-Token` off those responses (see maybeRotateToken). Without this,
+// dashboards that mostly hit ETag-cached endpoints could let a token age
+// past its 24h expiry without ever rotating, then 401 in a single click.
+const api = axios.create({
+  baseURL: BASE,
+  validateStatus: (status) =>
+    (status >= 200 && status < 300) || status === 304,
+});
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('gcig_token');
@@ -27,12 +37,23 @@ api.interceptors.request.use((config) => {
 // next request carries the fresh token — active users never hit the
 // 24h expiration, inactive users do (which is the whole point).
 //
-// Only rotate on actual 2xx responses. Error responses (401/403/etc.)
-// can't have come from a successful verifyJwt → no valid X-New-Token
-// could have been set. Reading from those responses risks writing
-// garbage into localStorage from a malicious or buggy reverse proxy.
+// Rotate on 2xx AND 304 responses. 304 is the case that bit us before:
+// Express returns 304 when an ETag-matched body would have been sent,
+// and verifyJwt has already run + set X-New-Token on the response. Per
+// HTTP/1.1, 304 carries fresh metadata (incl. headers) which the cache
+// merges with the stored body — so the new token reaches us even when
+// the body doesn't. Skipping 304 lets tokens silently age out on pages
+// that mostly hit ETag-cached endpoints (e.g. the Dashboard).
+//
+// Error responses (401/403/etc.) can't have come from a successful
+// verifyJwt → no valid X-New-Token could have been set. Reading from
+// those responses risks writing garbage into localStorage from a
+// malicious or buggy reverse proxy.
 function maybeRotateToken(res) {
-  if (!res || res.status < 200 || res.status >= 300) return;
+  if (!res) return;
+  const ok =
+    (res.status >= 200 && res.status < 300) || res.status === 304;
+  if (!ok) return;
   const fresh =
     res?.headers?.['x-new-token'] || res?.headers?.['X-New-Token'];
   if (fresh && typeof fresh === 'string' && fresh.length > 20) {
