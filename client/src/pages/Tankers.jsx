@@ -54,10 +54,12 @@ export default function Tankers() {
         <div>
           <h1 className="text-2xl font-semibold text-navy">Tanker Tracker</h1>
           <p className="text-sm text-navy/60">
-            Hormuz-pass-through view, refreshed every 2 min. Vessels shown were
-            seen in the last 6 hours via free terrestrial AIS — UAE / Oman /
-            strait coverage is strong; western Gulf and Iranian terminals
-            aren't visible without a paid satellite feed.
+            Refreshed every 2 min. Vessels shown were seen in the last 6 hours
+            via free terrestrial AIS — coverage is concentrated near the UAE
+            coast where contributing receivers are dense. The shaded area on
+            the map marks waters out of receiver reach (Iran, Iraq, Kuwait,
+            Saudi, Qatar, Bahrain, most of Oman); paid satellite AIS would
+            close it, and we don't subscribe.
           </p>
         </div>
         <div className="flex items-center gap-3 text-sm text-navy/60">
