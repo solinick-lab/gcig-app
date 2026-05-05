@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Protocol
+from typing import Any, AsyncIterator, Callable, Protocol
 
 from sea_tracker.db import (
     batch_insert_messages,
@@ -29,9 +29,20 @@ async def run_collector(
     *,
     flush_interval_s: float = 1.0,
     max_messages: int | None = None,
+    publish_callback: Callable[[Any], None] | None = None,
+    publish_interval_s: float = 120.0,
 ) -> None:
     """Pump messages from `client.stream()` into DuckDB. Runs forever unless
-    `max_messages` is set (used by tests)."""
+    `max_messages` is set (used by tests).
+
+    If `publish_callback` is set, it's invoked with the live DuckDB
+    connection every `publish_interval_s` seconds. This is how the
+    Windows-side collector pushes 2-min snapshots to gcig-api without
+    a second process — DuckDB on Windows holds an exclusive file lock,
+    so multi-process concurrent access doesn't work; reusing the
+    writer's own connection sidesteps it entirely. Failures in the
+    callback are logged and never crash the collector.
+    """
     con = connect(db_path)
     init_schema(con)
 
@@ -42,6 +53,7 @@ async def run_collector(
     buffer_msgs: list[dict[str, Any]] = []
     buffer_vessels: list[dict[str, Any]] = []
     last_flush = asyncio.get_event_loop().time()
+    last_publish = asyncio.get_event_loop().time()
     seen = 0
 
     try:
@@ -62,6 +74,15 @@ async def run_collector(
                     upsert_vessel(con, **v)
                 buffer_vessels.clear()
                 last_flush = now
+
+            if publish_callback is not None and (now - last_publish) >= publish_interval_s:
+                try:
+                    publish_callback(con)
+                except Exception as exc:
+                    logger.warning("snapshot publish failed: %s", exc)
+                # Mark the attempt regardless — don't retry-storm if
+                # Render is down for an extended window.
+                last_publish = now
 
             if max_messages is not None and seen >= max_messages:
                 break

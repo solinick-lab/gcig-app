@@ -71,13 +71,38 @@ def _resolve_aisstream_key(cfg) -> str:
 
 
 @app.command()
-def collect(config: Path = typer.Option(Path("config.toml"), "--config", "-c")) -> None:
-    """Run the live AIS collector (foreground)."""
+def collect(
+    config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
+    publish_interval: float = typer.Option(
+        120.0, "--publish-interval",
+        help="Seconds between snapshot publishes. 0 disables in-process publishing.",
+    ),
+) -> None:
+    """Run the live AIS collector (foreground).
+
+    The collector also publishes a snapshot to gcig-api every
+    `--publish-interval` seconds using its own DuckDB connection,
+    because Windows DuckDB doesn't allow a second reader process
+    while the writer is up.
+    """
     cfg = load_config(config)
     _setup_logging(cfg.log_dir, "collect")
     api_key = _resolve_aisstream_key(cfg)
     client = AISStreamClient(api_key=api_key, bbox=cfg.bbox)
-    asyncio.run(run_collector(client, cfg.db_path))
+
+    callback = None
+    if publish_interval > 0:
+        def _publish(con):
+            now = datetime.utcnow()
+            publish_snapshot_now(con, bbox=cfg.bbox, now=now)
+        callback = _publish
+
+    asyncio.run(run_collector(
+        client,
+        cfg.db_path,
+        publish_callback=callback,
+        publish_interval_s=publish_interval,
+    ))
 
 
 @app.command()
