@@ -23,10 +23,10 @@ class MessageRow(TypedDict, total=False):
     raw: str
 
 
-def connect(path: Path | str) -> duckdb.DuckDBPyConnection:
+def connect(path: Path | str, *, read_only: bool = False) -> duckdb.DuckDBPyConnection:
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    return duckdb.connect(str(p))
+    return duckdb.connect(str(p), read_only=read_only)
 
 
 def init_schema(con: duckdb.DuckDBPyConnection) -> None:

@@ -41,9 +41,10 @@ def _setup_logging(log_dir: Path, name: str) -> None:
     root.addHandler(handler)
 
 
-def _open_db(cfg) -> "duckdb.DuckDBPyConnection":
-    con = connect(cfg.db_path)
-    init_schema(con)
+def _open_db(cfg, *, read_only: bool = False) -> "duckdb.DuckDBPyConnection":
+    con = connect(cfg.db_path, read_only=read_only)
+    if not read_only:
+        init_schema(con)
     return con
 
 
@@ -193,7 +194,7 @@ def publish_signals(
     """Read last N days from signals_daily and POST to gcig-api."""
     cfg = load_config(config)
     _setup_logging(cfg.log_dir, "publish")
-    con = _open_db(cfg)
+    con = _open_db(cfg, read_only=True)
     try:
         out = publish_signals_window(con, days=days)
         console.print(out)
@@ -208,7 +209,7 @@ def publish_snapshot(
     """Build and POST the rolling-latest vessel + signals snapshot."""
     cfg = load_config(config)
     _setup_logging(cfg.log_dir, "publish")
-    con = _open_db(cfg)
+    con = _open_db(cfg, read_only=True)
     try:
         now = datetime.utcnow()
         out = publish_snapshot_now(con, bbox=cfg.bbox, now=now)
