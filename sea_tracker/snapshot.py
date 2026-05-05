@@ -116,7 +116,15 @@ def build_snapshot(
     *,
     bbox: tuple[float, float, float, float],
     now: datetime,
-    freshness_minutes: int = 30,
+    # Default 6 h instead of 30 min: AISStream's free tier delivers
+    # the Persian Gulf at roughly 0.1 msg/sec, so a 30-min window
+    # only catches the dozen-or-so MMSIs that happen to transmit
+    # inside it and the map looks empty. Widening to 6 h surfaces
+    # most vessels we've recorded over the past quarter-day, which
+    # matches what members actually want to see (recent activity in
+    # the Gulf). Stale positions are mitigated by the per-vessel
+    # `lastSeen` timestamp the drawer already shows.
+    freshness_minutes: int = 360,
     trail_hours: int = 24,
     trail_tolerance_deg: float = 0.0005,  # ~50 m at this latitude
     trail_max_points: int = 200,
