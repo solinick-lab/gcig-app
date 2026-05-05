@@ -523,6 +523,31 @@ model CpiForecast {
   @@index([runAt])
 }
 
+// One row per (date, signalName). Mirrors DuckDB's signals_daily on
+// the Windows server, with the latest publish winning on conflict.
+// History feeds the sparklines on the /tankers panel.
+model SeaSignal {
+  date       DateTime @db.Date
+  signalName String
+  value      Float?
+  updatedAt  DateTime @updatedAt
+
+  @@id([date, signalName])
+  @@index([signalName, date])
+}
+
+// Singleton row keyed on a fixed id. publish-snapshot upserts the
+// rolling-latest payload here every two minutes. Storing the whole
+// shape as Json keeps the schema flexible: we can add fields without
+// migrations as the map UI evolves.
+model SeaSnapshot {
+  id          Int      @id @default(1)
+  snapshotAt  DateTime
+  vesselCount Int
+  payload     Json
+  updatedAt   DateTime @updatedAt
+}
+
 // LLM-generated priority tag for a news article, keyed by URL. Lets us skip
 // re-ranking articles we've already classified — articles don't change after
 // publish, so the classification is stable. One row per unique URL. `model`
