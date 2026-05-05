@@ -1,6 +1,10 @@
 # Copy this file to `config.toml` next to the sea_tracker package on the
 # Windows server and fill in the placeholders. Do NOT commit config.toml.
 
+# AISStream API key. Normally LEAVE THIS AS THE PLACEHOLDER — the
+# collector pulls the real key from Render's /api/sea/secrets at
+# startup so it never has to live on disk on this machine. Override
+# with a real key here only for offline testing.
 [aisstream]
 api_key = "REPLACE_ME_AISSTREAM_KEY"
 

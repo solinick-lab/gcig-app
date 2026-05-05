@@ -63,6 +63,24 @@ function verifyHmac(pathForSig) {
   };
 }
 
+// ── Off-platform: bootstrap external API keys ───────────────────────
+// The Windows-side collector hits this once at startup so the AISStream
+// key never has to live on disk on the server. Same idea as how the
+// CPI forecaster pulls FRED through Render — keeps every external API
+// key behind Render's env settings, with the lone unavoidable secret
+// (SEA_INGEST_SECRET) shared between Render and the Windows box.
+router.get(
+  '/secrets',
+  verifyHmac('/api/sea/secrets'),
+  async (_req, res) => {
+    const aisstreamApiKey = process.env.AISSTREAM_API_KEY || '';
+    if (!aisstreamApiKey) {
+      return res.status(503).json({ error: 'AISSTREAM_API_KEY not set on Render' });
+    }
+    return res.json({ aisstreamApiKey });
+  }
+);
+
 // ── Off-platform: bulk signal upsert ─────────────────────────────────
 router.post(
   '/signals',

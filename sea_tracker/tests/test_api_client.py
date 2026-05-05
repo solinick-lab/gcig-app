@@ -66,3 +66,35 @@ def test_4xx_raises():
         req.post.return_value = resp
         with pytest.raises(RuntimeError, match="signals POST failed"):
             api_client.post_signals([{"date": "2026-05-03", "name": "x", "value": 1}])
+
+
+def test_get_aisstream_key_returns_value():
+    with patch.object(api_client, "requests") as req:
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {"aisstreamApiKey": "abc-123"}
+        req.get.return_value = resp
+        out = api_client.get_aisstream_key()
+    assert out == "abc-123"
+    args, kwargs = req.get.call_args
+    assert args[0] == "https://api.example.com/api/sea/secrets"
+    headers = kwargs["headers"]
+    assert headers["X-Sea-Signature"] == _expected_sig(
+        headers["X-Sea-Timestamp"], "/api/sea/secrets", b""
+    )
+
+
+def test_get_aisstream_key_503_raises():
+    with patch.object(api_client, "requests") as req:
+        resp = MagicMock(status_code=503, text="not configured")
+        req.get.return_value = resp
+        with pytest.raises(RuntimeError, match="secrets GET failed"):
+            api_client.get_aisstream_key()
+
+
+def test_get_aisstream_key_empty_payload_raises():
+    with patch.object(api_client, "requests") as req:
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {"aisstreamApiKey": ""}
+        req.get.return_value = resp
+        with pytest.raises(RuntimeError, match="no aisstreamApiKey"):
+            api_client.get_aisstream_key()

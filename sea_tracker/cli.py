@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import logging.handlers
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from rich.console import Console
 from rich.table import Table
 
 from sea_tracker.ais_client import AISStreamClient
+from sea_tracker.api_client import get_aisstream_key
 from sea_tracker.backtest import run_backtest
 from sea_tracker.collector import run_collector
 from sea_tracker.config import load_config
@@ -45,12 +47,35 @@ def _open_db(cfg) -> "duckdb.DuckDBPyConnection":
     return con
 
 
+def _resolve_aisstream_key(cfg) -> str:
+    # If config.toml has a real key, prefer it (offline testing).
+    if cfg.aisstream_api_key:
+        return cfg.aisstream_api_key
+    # Otherwise pull from Render. Retry with exponential backoff so a
+    # transient outage or cold-start at boot doesn't sink the service —
+    # NSSM will restart on hard failure anyway.
+    delays = [5, 15, 30, 60, 120]
+    last_err: Exception | None = None
+    for attempt, wait in enumerate(delays, start=1):
+        try:
+            return get_aisstream_key()
+        except Exception as exc:
+            last_err = exc
+            logging.getLogger(__name__).warning(
+                "aisstream key fetch failed (attempt %d/%d): %s", attempt, len(delays), exc
+            )
+            if attempt < len(delays):
+                time.sleep(wait)
+    raise RuntimeError(f"could not fetch AISSTREAM key from Render: {last_err}")
+
+
 @app.command()
 def collect(config: Path = typer.Option(Path("config.toml"), "--config", "-c")) -> None:
     """Run the live AIS collector (foreground)."""
     cfg = load_config(config)
     _setup_logging(cfg.log_dir, "collect")
-    client = AISStreamClient(api_key=cfg.aisstream_api_key, bbox=cfg.bbox)
+    api_key = _resolve_aisstream_key(cfg)
+    client = AISStreamClient(api_key=api_key, bbox=cfg.bbox)
     asyncio.run(run_collector(client, cfg.db_path))
 
 

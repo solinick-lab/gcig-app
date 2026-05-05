@@ -47,6 +47,25 @@ def _signed_headers(secret: str, path: str, body: bytes) -> dict[str, str]:
     }
 
 
+def get_aisstream_key() -> str:
+    """GET /api/sea/secrets — fetch the AISStream API key from Render.
+
+    Returns the raw key string. Raises RuntimeError on failure so the
+    caller can decide whether to retry (collector boot) or give up.
+    """
+    api_url, secret = _config()
+    path = "/api/sea/secrets"
+    headers = _signed_headers(secret, path, b"")
+    resp = requests.get(f"{api_url}{path}", headers=headers, timeout=60)
+    if resp.status_code >= 400:
+        raise RuntimeError(f"secrets GET failed: {resp.status_code} {resp.text[:200]}")
+    data = resp.json()
+    key = data.get("aisstreamApiKey")
+    if not key:
+        raise RuntimeError("Render returned no aisstreamApiKey")
+    return key
+
+
 def post_signals(rows: list[dict[str, Any]]) -> dict:
     """POST /api/sea/signals — bulk-upsert signal rows.
 

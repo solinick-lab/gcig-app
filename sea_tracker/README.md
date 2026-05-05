@@ -41,7 +41,8 @@ Scheduler).
    notepad C:\sea_tracker\config.toml
    ```
 
-   Fill in `aisstream.api_key`. Save.
+   Leave `aisstream.api_key` as the placeholder — the collector pulls
+   the real key from Render at startup. Save.
 
 5. Drop a `.env` next to the config:
 
@@ -58,18 +59,24 @@ Scheduler).
 
    Save.
 
-## Generate the shared HMAC secret
+## Render env vars (set both)
 
-Run once on the mac:
+In the Render dashboard for the gcig-api service, add two environment
+variables:
 
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
+- `SEA_INGEST_SECRET` — shared HMAC secret. Generate once on the mac:
 
-Paste that value into:
+  ```bash
+  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+  ```
 
-- Render dashboard → gcig-api → Environment → `SEA_INGEST_SECRET`
-- `C:\sea_tracker\.env` on the Windows box
+  Same hex goes into `C:\sea_tracker\.env` on the Windows box. If they
+  don't match byte-for-byte, every Render call from the box returns
+  401.
+
+- `AISSTREAM_API_KEY` — the real AISStream key. Lives ONLY on Render.
+  The collector fetches it via HMAC-authed `GET /api/sea/secrets` at
+  startup.
 
 ## Install the collector as a Windows service (NSSM)
 
