@@ -131,7 +131,7 @@ def signals(
         end = date.today()
         start = end - timedelta(days=days)
         compute_signals_range(con, start_day=start, end_day=end)
-        console.print(f"computed signals {start} → {end}")
+        console.print(f"computed signals {start} -> {end}")
     finally:
         con.close()
 
