@@ -1,0 +1,34 @@
+import SignalCard from './SignalCard';
+
+const ORDER = [
+  'hormuz_outbound_laden_count',
+  'hormuz_inbound_ballast_count',
+  'anchored_tanker_count',
+  'gulf_laden_ballast_ratio',
+  'hormuz_outbound_dwt_proxy',
+  'gulf_total_dwt_proxy',
+  'terminal_departures_saudi',
+  'terminal_departures_iran',
+  'terminal_departures_uae',
+  'terminal_departures_kuwait',
+  'terminal_departures_iraq',
+  'terminal_departures_qatar',
+];
+
+export default function SignalPanel({ signals }) {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {ORDER.map((name) => {
+        const entry = (signals || {})[name] || {};
+        return (
+          <SignalCard
+            key={name}
+            name={name}
+            value={entry.value}
+            asOf={entry.asOf}
+          />
+        );
+      })}
+    </div>
+  );
+}
