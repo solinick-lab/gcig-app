@@ -5,7 +5,7 @@ import json
 import logging
 import logging.handlers
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import typer
@@ -128,7 +128,11 @@ def signals(
     _setup_logging(cfg.log_dir, "batch")
     con = _open_db(cfg)
     try:
-        end = date.today()
+        # AIS timestamps in DuckDB are naive UTC, so signal day-windows
+        # have to be UTC days too. date.today() would return the
+        # server's local date (ET on the Windows box) and silently miss
+        # data that's already in tomorrow's UTC bucket.
+        end = datetime.now(timezone.utc).date()
         start = end - timedelta(days=days)
         compute_signals_range(con, start_day=start, end_day=end)
         console.print(f"computed signals {start} -> {end}")

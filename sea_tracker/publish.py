@@ -4,7 +4,7 @@ single import target."""
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import duckdb
@@ -16,7 +16,7 @@ from sea_tracker.snapshot import build_snapshot
 
 def publish_signals_window(con: duckdb.DuckDBPyConnection, *, days: int) -> dict:
     """Read signals_daily for the last `days` and POST them in one call."""
-    cutoff = date.today() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc).date() - timedelta(days=days)
     rows = con.execute(
         "SELECT date, signal_name, value FROM signals_daily WHERE date >= ? ORDER BY date",
         [cutoff],
