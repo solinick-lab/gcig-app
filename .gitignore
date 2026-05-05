@@ -10,6 +10,6 @@ server/uploads/*
 sea_tracker/config.toml
 sea_tracker/data/
 sea_tracker/logs/
-sea_tracker/__pycache__/
 sea_tracker/.venv/
 sea_tracker/*.egg-info/
+sea_tracker/**/__pycache__/
