@@ -10,12 +10,17 @@ export default function DerivedPanel({ derived }) {
 
   const t = derived.hormuzThroughputMbbl || {};
   const fh = derived.flowHealth || {};
-  const ie = derived.iranExportShare || {};
-  const oc = derived.opecCoordinationZ || {};
   const cp = derived.chokepointPressure || {};
 
+  // We deliberately don't render iranExportShare / opecCoordinationZ
+  // here. Both depend on per-country terminal_departures counts for
+  // Saudi/Iran/Kuwait/Iraq/Qatar — none of which AISStream's
+  // terrestrial-only feed actually sees. Their values would read as
+  // silently-broken zeros. The backend still computes them so they're
+  // ready to surface the day we add a satellite AIS provider.
+
   return (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
       {/* Throughput */}
       <DerivedCard
         title="Hormuz Throughput"
@@ -40,32 +45,6 @@ export default function DerivedPanel({ derived }) {
         }
         footnote="Are tankers actually moving through the strait"
         status={fh.status || 'warming_up'}
-      />
-
-      {/* Iran Export Share */}
-      <DerivedCard
-        title="Iran Export Share"
-        valueText={ie.value === null || ie.value === undefined ? '—' : `${fmt(ie.value, 1)}%`}
-        subtle={
-          ie.value === null
-            ? 'No terminal departures yet'
-            : `${fmt(ie.iran, 0)} of ${fmt(ie.opec_total, 0)} OPEC-Gulf departures`
-        }
-        footnote="Iran's slice of total Gulf exports today"
-        status={ie.status || 'warming_up'}
-      />
-
-      {/* OPEC Coordination */}
-      <DerivedCard
-        title="OPEC Coordination"
-        valueText={oc.value === null || oc.value === undefined ? '—' : `${oc.value > 0 ? '+' : ''}${fmt(oc.value, 2)}σ`}
-        subtle={
-          oc.value === null
-            ? 'Need 7+ days of history'
-            : `Today ${fmt(oc.today, 0)} · 30d mean ${fmt(oc.mean_30d, 1)}`
-        }
-        footnote="Coordinated production move detector (|σ|>2 = unusual)"
-        status={oc.status || 'warming_up'}
       />
 
       {/* Chokepoint Pressure */}
