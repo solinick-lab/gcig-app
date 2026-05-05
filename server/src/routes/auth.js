@@ -615,6 +615,15 @@ router.post('/reset/:token', authLimiter, async (req, res) => {
 // ── Current user / password change ───────────────────────────────────
 
 router.get('/me', verifyJwt, async (req, res) => {
+  // Disable HTTP caching for the auth-bootstrap endpoint. Express's
+  // default ETag handling combined with the client's 304-as-success
+  // shortcut was bouncing users after Google sign-in: if Safari had
+  // a cached /auth/me from a prior session whose user object happens
+  // to be byte-identical to the new one, the server returns 304 with
+  // no body, axios sees status=304, the AuthProvider does setUser(
+  // undefined), and ProtectedRoute kicks them straight to /login. No
+  // ETag, no 304 — every call returns the body.
+  res.set('Cache-Control', 'no-store');
   const user = await prisma.user.findUnique({
     where: { id: req.user.id },
     select: {

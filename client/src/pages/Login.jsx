@@ -45,18 +45,25 @@ export default function Login() {
     setMessage('');
     setSubmitting(true);
     try {
-      await googleSignIn(credential);
-      // Full reload instead of SPA navigation. Eliminates every state
-      // race: AuthProvider initializes from a clean slate with the
-      // new token already persisted, so no in-flight /auth/me with a
-      // pre-login token can clobber the fresh session, and no React
-      // batching/render-timing issue can leave ProtectedRoute reading
-      // a stale user=null. Safari was particularly susceptible to
-      // this — its first cross-origin fetch on a new tab is often
-      // slow enough to race against the Google credential.
+      // Direct flow — bypass AuthContext.googleSignIn so we don't call
+      // setUser before reloading. setUser would re-render Login.jsx
+      // (which has `if (user) return <Navigate to="/dashboard">`) and
+      // SPA-navigate to /dashboard while window.location.replace is
+      // still pending — racing AuthProvider's mount-time /auth/me
+      // against any concurrent state, the very thing we're trying to
+      // avoid. Just persist and hard-reload.
+      const { default: apiClient } = await import('../api/client.js');
+      const res = await apiClient.post('/auth/google', { credential });
+      const token = res?.data?.token;
+      const userData = res?.data?.user;
+      if (!token || !userData) {
+        throw new Error('Login response missing token or user');
+      }
+      localStorage.setItem('gcig_token', token);
+      localStorage.setItem('gcig_user', JSON.stringify(userData));
       window.location.replace('/dashboard');
     } catch (err) {
-      setError(err.response?.data?.error || 'Google sign-in failed');
+      setError(err.response?.data?.error || err.message || 'Google sign-in failed');
       setSubmitting(false);
     }
   }

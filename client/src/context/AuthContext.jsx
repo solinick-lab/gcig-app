@@ -15,8 +15,18 @@ function clearSession() {
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
+    // Safari has occasionally been observed to leave malformed JSON in
+    // localStorage after a forced reload mid-write. Treat any parse
+    // failure as "no user" instead of crashing the whole app — the
+    // /auth/me call below will recover if a valid token is present.
     const raw = localStorage.getItem('gcig_user');
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      localStorage.removeItem('gcig_user');
+      return null;
+    }
   });
   const [loading, setLoading] = useState(!!localStorage.getItem('gcig_token'));
 
@@ -29,10 +39,11 @@ export function AuthProvider({ children }) {
     api
       .get('/auth/me')
       .then((res) => {
-        // Always apply: response was scoped to whatever token we sent,
-        // and the server may have silently rotated it (X-New-Token has
-        // already updated localStorage by the time we get here). Trust
-        // the response data.
+        // 304 with an empty body would set user to undefined and kick
+        // the user to /login on the next render. The /auth/me route
+        // sets Cache-Control: no-store so 304 shouldn't happen here,
+        // but be defensive in case a proxy or older deploy serves one.
+        if (!res || !res.data || typeof res.data !== 'object') return;
         setUser(res.data);
         localStorage.setItem('gcig_user', JSON.stringify(res.data));
       })
