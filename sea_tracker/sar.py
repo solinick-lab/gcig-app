@@ -121,20 +121,33 @@ def find_recent_scenes(
         "Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'operationalMode' "
         "and att/OData.CSC.StringAttribute/Value eq 'IW')"
     )
-    params = {
-        "$filter": filt,
-        "$orderby": "ContentDate/Start desc",
-        "$top": "20",
-    }
-    url = f"{CDSE_ODATA}/Products"
-    resp = requests.get(url, params=params, timeout=60)
-    if resp.status_code >= 400:
-        raise RuntimeError(
-            f"CDSE catalog query failed: {resp.status_code} {resp.text[:300]}"
-        )
-    data = resp.json()
+    # Paginate via $top + $skip. Each page is up to 100 scenes (CDSE
+    # caps page size); a 90-day Hormuz window can return 150+.
+    PAGE = 100
+    HARD_CAP = 1000
+    items: list[dict] = []
+    skip = 0
+    while skip < HARD_CAP:
+        params = {
+            "$filter": filt,
+            "$orderby": "ContentDate/Start desc",
+            "$top": str(PAGE),
+            "$skip": str(skip),
+        }
+        url = f"{CDSE_ODATA}/Products"
+        resp = requests.get(url, params=params, timeout=60)
+        if resp.status_code >= 400:
+            raise RuntimeError(
+                f"CDSE catalog query failed: {resp.status_code} {resp.text[:300]}"
+            )
+        page = resp.json().get("value", [])
+        items.extend(page)
+        if len(page) < PAGE:
+            break
+        skip += PAGE
+
     out: list[SarScene] = []
-    for item in data.get("value", []):
+    for item in items:
         # Attributes is a list of {Name, Value, ValueType}; we just
         # care about a few.
         attrs = {a["Name"]: a.get("Value") for a in (item.get("Attributes") or [])}
