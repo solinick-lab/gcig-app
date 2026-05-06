@@ -124,7 +124,7 @@ export default function Admin() {
   // Tab visibility:
   //   Members — always shown (every executive can see the roster).
   //   Participation — President only (isAdmin).
-  //   Audit Log / Name Inference — super admin only.
+  //   Audit Log / Name Inference / Sandbox — super admin only.
   const tabs = [
     { id: 'members', label: 'Members' },
     ...(isAdmin ? [{ id: 'participation', label: 'Participation' }] : []),
@@ -132,6 +132,7 @@ export default function Admin() {
       ? [
           { id: 'audit', label: 'Audit Log' },
           { id: 'inference', label: 'Name Inference' },
+          { id: 'sandbox', label: 'Sandbox' },
         ]
       : []),
   ];
@@ -177,12 +178,27 @@ export default function Admin() {
         <AuditLog embedded />
       ) : tab === 'inference' && isSuperAdmin ? (
         <NameInferenceTable />
+      ) : tab === 'sandbox' && isSuperAdmin ? (
+        <SandboxPanel />
       ) : tab === 'participation' && isAdmin ? (
         <Participation embedded />
       ) : (
         <Members embedded />
       )}
     </>
+  );
+}
+
+// ─── Sandbox (super-admin only) ────────────────────────────────────────
+// Intentionally blank. Scratchpad for in-progress work that needs the
+// app's auth + layout but isn't ready for its own page or sidebar
+// entry yet. Wire whatever you're testing here, then promote to a
+// real page when it's done.
+function SandboxPanel() {
+  return (
+    <div className="rounded-lg border border-navy-100 bg-white p-8 text-sm text-navy-400">
+      Sandbox — super-admin only. Add test components here.
+    </div>
   );
 }
 
