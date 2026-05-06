@@ -406,8 +406,30 @@ def detect_ships_in_zip(
                         intensity=float(area),
                         likely_tanker=False,
                     ))
-    logger.info("sar: %d detections in %s", len(detections), scene_id)
+    logger.info("sar: %d raw detections in %s", len(detections), scene_id)
+    detections = _filter_at_sea(detections)
+    logger.info("sar: %d detections after land mask in %s", len(detections), scene_id)
     return detections
+
+
+def _filter_at_sea(detections: list[SarDetection]) -> list[SarDetection]:
+    """Drop detections that fall on land using the NOAA GSHHG land
+    mask. Coastline backscatter and inland-water false positives
+    (river deltas, refineries, ports) dominate raw SAR output;
+    masking land removes ~95 % of them in the Persian Gulf.
+
+    The mask is coarse (~1 km resolution at this latitude), so a
+    detection within ~1 km of shore may still be marked as sea —
+    those are mostly real anchored vessels and dockside tankers.
+    """
+    if not detections:
+        return detections
+    try:
+        from global_land_mask import globe
+    except ImportError:
+        logger.warning("global_land_mask not installed — skipping land filter")
+        return detections
+    return [d for d in detections if not bool(globe.is_land(d.lat, d.lon))]
 
 
 def detect_ships(
@@ -453,11 +475,16 @@ def filter_tanker_class(detections: Iterable[SarDetection]) -> list[SarDetection
 # ── Stage 5: Persistence ─────────────────────────────────────────────
 
 def persist(con, detections: Iterable[SarDetection]) -> int:
-    """Insert detections into sar_detections (idempotent on
-    (scene_id, lat, lon))."""
+    """Replace sar_detections rows for these scene_ids with the new
+    set. Keeps re-running the detector idempotent — if we tune the
+    threshold and re-process the same scene, old (now-stale) rows
+    don't pile up alongside the new ones."""
     rows = list(detections)
     if not rows:
         return 0
+    scene_ids = {d.scene_id for d in rows}
+    for sid in scene_ids:
+        con.execute("DELETE FROM sar_detections WHERE scene_id = ?", [sid])
     con.executemany(
         """
         INSERT INTO sar_detections

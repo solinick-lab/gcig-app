@@ -20,6 +20,12 @@ dependencies = [
     "rasterio>=1.3",
     "scipy>=1.13",
     "shapely>=2.0",
+    # Precomputed NOAA GSHHG land mask — gives a vectorised
+    # is_land(lat, lon) lookup. Drops the bulk of SAR false
+    # positives along the Kuwait/Iraq coastline and Shatt al-Arab
+    # delta where AIS-invisible industrial radar reflectors light
+    # up like ships.
+    "global-land-mask>=1.0",
 ]
 
 [project.optional-dependencies]
