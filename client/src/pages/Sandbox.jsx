@@ -4,18 +4,17 @@
 // from whatever's being prototyped here. Currently the home of the
 // Grade Predictor project.
 //
-// The Grade Predictor API is a separate FastAPI service running on
-// the Windows server (sandbox/grade_predictor/). This page talks to
-// it directly via VITE_GP_API_URL — by default localhost:8001 in
-// dev. For prod it should point at a Cloudflare-tunneled hostname
-// like grade.thegriffinfund.org.
+// The Grade Predictor talks to the gcig-api at /api/sandbox/grade-predictor/*,
+// which fans out to the shared LLM client (qwen2.5:14b on the Cloudflare-
+// tunneled local Ollama, with OpenAI fallback). No separate FastAPI
+// service to babysit. Training corpus + per-teacher RAG come later;
+// this is the cold-start prediction path only.
 
 import { Navigate, useNavigate } from 'react-router-dom';
-import { X, Upload, FileText, Sparkles, BookOpen, GraduationCap, Loader2, AlertCircle } from 'lucide-react';
+import { X, Upload, FileText, BookOpen, Loader2, AlertCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
-
-const GP_API_URL = (import.meta.env.VITE_GP_API_URL || 'http://localhost:8001').replace(/\/$/, '');
+import api from '../api/client.js';
 
 export default function Sandbox() {
   const { isSuperAdmin, loading } = useAuth();
@@ -73,84 +72,54 @@ export default function Sandbox() {
 // stay isolated).
 
 function GradePredictor() {
-  const [mode, setMode] = useState('predict'); // 'predict' | 'train'
-  const [teachers, setTeachers] = useState([]);
+  const [health, setHealth] = useState(null);
   const [healthError, setHealthError] = useState(null);
 
-  // Probe /health on mount + load teacher list. If the API is
-  // unreachable the panel renders a friendly explainer instead of
-  // making the buttons silently fail.
+  // Probe /health on mount so the panel can show which provider is
+  // active (local Ollama vs OpenAI fallback) and surface a friendly
+  // banner when neither is reachable.
   useEffect(() => {
     let alive = true;
-    fetch(`${GP_API_URL}/health`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then(() => fetch(`${GP_API_URL}/teachers`))
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((data) => { if (alive) { setTeachers(data); setHealthError(null); } })
-      .catch((err) => { if (alive) setHealthError(err.message || String(err)); });
+    api
+      .get('/sandbox/grade-predictor/health')
+      .then((r) => { if (alive) { setHealth(r.data); setHealthError(null); } })
+      .catch((err) => {
+        if (alive) setHealthError(err.response?.data?.error || err.message || String(err));
+      });
     return () => { alive = false; };
   }, []);
 
-  function refreshTeachers() {
-    fetch(`${GP_API_URL}/teachers`)
-      .then((r) => r.json())
-      .then(setTeachers)
-      .catch(() => {});
-  }
+  const llmDown = health && !health.active;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      {healthError && (
+      {(healthError || llmDown) && (
         <div className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
           <AlertCircle size={18} className="mt-0.5 shrink-0" />
           <div>
-            <div className="font-semibold">Grade Predictor API not reachable</div>
+            <div className="font-semibold">LLM not reachable</div>
             <div className="mt-1 text-xs">
-              Tried <code>{GP_API_URL}/health</code> — {healthError}.<br />
-              Make sure the FastAPI service is running on the Windows server.
-              Set <code>VITE_GP_API_URL</code> at build time to point at the
-              tunneled hostname for production.
+              {healthError
+                ? <>Health check failed — {healthError}.</>
+                : <>Both the local Ollama tunnel and the OpenAI fallback are unavailable.</>}
             </div>
           </div>
         </div>
       )}
-      {teachers.length > 0 && (
+      {health?.active && (
         <div className="rounded-xl border border-navy/10 bg-white p-3 text-xs text-navy/70">
-          <span className="font-semibold text-navy">Corpus:</span>{' '}
-          {teachers.map((t) => `${t.name} (${t.examples})`).join(' · ')}
+          <span className="font-semibold text-navy">Model:</span>{' '}
+          {health.active === 'local'
+            ? <>local Ollama · <code>{health.local?.model}</code> · {health.local?.latencyMs}ms</>
+            : <>OpenAI · <code>{health.openai?.model}</code> · {health.openai?.latencyMs}ms</>}
         </div>
       )}
-      <div className="flex items-center gap-1 rounded-xl border border-navy/10 bg-white p-1 text-sm">
-        <ModeButton active={mode === 'predict'} onClick={() => setMode('predict')} icon={Sparkles}>
-          Predict a grade
-        </ModeButton>
-        <ModeButton active={mode === 'train'} onClick={() => setMode('train')} icon={GraduationCap}>
-          Train with teacher feedback
-        </ModeButton>
-      </div>
-      {mode === 'predict'
-        ? <PredictPanel teachers={teachers} />
-        : <TrainPanel onSaved={refreshTeachers} />}
+      <PredictPanel />
     </div>
   );
 }
 
-function ModeButton({ active, onClick, icon: Icon, children }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 font-medium transition ${
-        active ? 'bg-navy text-white shadow-sm' : 'text-navy/60 hover:bg-navy/5'
-      }`}
-    >
-      <Icon size={16} />
-      {children}
-    </button>
-  );
-}
-
-function PredictPanel({ teachers }) {
+function PredictPanel() {
   const [essay, setEssay] = useState('');
   const [rubric, setRubric] = useState('');
   const [teacher, setTeacher] = useState('');
@@ -162,31 +131,22 @@ function PredictPanel({ teachers }) {
   async function runPredict() {
     setLoading(true); setError(null); setResult(null); setMeta(null);
     try {
-      const resp = await fetch(`${GP_API_URL}/predict`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          teacher: teacher.trim(),
-          essay,
-          rubric: rubric.trim() || null,
-          top_k: 3,
-        }),
+      const { data } = await api.post('/sandbox/grade-predictor/predict', {
+        teacher: teacher.trim(),
+        essay,
+        rubric: rubric.trim() || null,
       });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
       setResult(data.result);
       setMeta({
         examples_used: data.examples_used,
         examples_available: data.examples_available,
       });
     } catch (e) {
-      setError(e.message || String(e));
+      setError(e.response?.data?.error || e.message || String(e));
     } finally {
       setLoading(false);
     }
   }
-
-  const known = teachers.find((t) => t.name.toLowerCase() === teacher.trim().toLowerCase());
 
   return (
     <>
@@ -222,24 +182,16 @@ function PredictPanel({ teachers }) {
             </div>
           </header>
           <div>
-            <label className="text-xs font-medium uppercase tracking-wider text-navy/60">Teacher</label>
+            <label className="text-xs font-medium uppercase tracking-wider text-navy/60">Teacher (optional)</label>
             <input
               value={teacher}
               onChange={(e) => setTeacher(e.target.value)}
               placeholder="e.g. Dr. Hsu"
-              list="known-teachers"
               className="mt-1 w-full rounded-lg border border-navy/15 px-3 py-2 text-sm focus:border-gold focus:outline-none"
             />
-            <datalist id="known-teachers">
-              {teachers.map((t) => <option key={t.name} value={t.name} />)}
-            </datalist>
-            {teacher && (
-              <p className="mt-1 text-[11px] text-navy/50">
-                {known
-                  ? `${known.examples} prior example${known.examples === 1 ? '' : 's'} from this teacher — used as RAG context.`
-                  : "No prior examples for this teacher yet — cold-start prediction will be rubric-only."}
-              </p>
-            )}
+            <p className="mt-1 text-[11px] text-navy/50">
+              Per-teacher RAG comes later. For now, every prediction is cold-start.
+            </p>
           </div>
           <div>
             <label className="text-xs font-medium uppercase tracking-wider text-navy/60">Assignment rubric</label>
@@ -252,12 +204,12 @@ function PredictPanel({ teachers }) {
           </div>
           <button
             type="button"
-            disabled={!essay || !teacher || loading}
+            disabled={!essay || loading}
             onClick={runPredict}
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-navy py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-navy/90 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {loading && <Loader2 size={14} className="animate-spin" />}
-            {loading ? 'Generating… (can take 1–5 min)' : 'Predict grade & generate line-by-line comments'}
+            {loading ? 'Generating…' : 'Predict grade & generate line-by-line comments'}
           </button>
           {error && (
             <p className="text-[11px] text-red-700">{error}</p>
@@ -277,11 +229,11 @@ function ResultPanel({ loading, result, meta, essay }) {
       <section className="rounded-2xl border border-navy/10 bg-white p-8 shadow-sm">
         <div className="flex items-center gap-3 text-navy">
           <Loader2 className="animate-spin" size={20} />
-          <span className="font-medium">qwen3.6:27b is thinking…</span>
+          <span className="font-medium">qwen2.5:14b is thinking…</span>
         </div>
         <p className="mt-2 text-xs text-navy/50">
-          Long essays + rubric + retrieved examples make this a heavy prompt.
-          Expect a 1–5 minute wall-clock at this VRAM tier.
+          Calls the shared local LLM (with OpenAI fallback). Usually 10–60s on
+          this model size.
         </p>
       </section>
     );
@@ -303,11 +255,6 @@ function ResultPanel({ loading, result, meta, essay }) {
           <div className="text-[11px] uppercase tracking-wider text-navy/50">Predicted grade</div>
           <div className="mt-1 text-3xl font-semibold text-navy">{result.grade || '—'}</div>
         </div>
-        {meta && (
-          <div className="text-[11px] text-navy/50">
-            grounded in {meta.examples_used} of {meta.examples_available} prior examples
-          </div>
-        )}
       </header>
 
       {result.overall_feedback && (
@@ -345,133 +292,6 @@ function ResultPanel({ loading, result, meta, essay }) {
         </div>
       )}
     </section>
-  );
-}
-
-function TrainPanel({ onSaved }) {
-  const [essay, setEssay] = useState('');
-  const [feedback, setFeedback] = useState('');
-  const [grade, setGrade] = useState('');
-  const [teacher, setTeacher] = useState('');
-  const [rubric, setRubric] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-  const [savedId, setSavedId] = useState(null);
-
-  async function save() {
-    setSaving(true); setError(null); setSavedId(null);
-    try {
-      const resp = await fetch(`${GP_API_URL}/train`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          teacher: teacher.trim(),
-          essay,
-          feedback,
-          grade: grade.trim(),
-          rubric: rubric.trim() || null,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
-      setSavedId(data.id);
-      setEssay(''); setFeedback(''); setGrade(''); setRubric('');
-      // Keep teacher set so back-to-back uploads for the same
-      // teacher don't require retyping the name.
-      onSaved && onSaved();
-    } catch (e) {
-      setError(e.message || String(e));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="grid gap-6 md:grid-cols-2">
-      <section className="space-y-4 rounded-2xl border border-navy/10 bg-white p-6 shadow-sm">
-        <header className="flex items-start gap-3">
-          <FileText className="mt-1 shrink-0 text-gold" size={20} />
-          <div>
-            <h2 className="text-base font-semibold text-navy">Original essay</h2>
-            <p className="text-xs text-navy/60">The version you submitted to the teacher.</p>
-          </div>
-        </header>
-        <textarea
-          value={essay}
-          onChange={(e) => setEssay(e.target.value)}
-          placeholder="Paste the original essay…"
-          className="h-64 w-full resize-none rounded-lg border border-navy/15 px-3 py-2 text-sm leading-relaxed focus:border-gold focus:outline-none"
-        />
-        <div>
-          <label className="text-xs font-medium uppercase tracking-wider text-navy/60">Rubric (optional)</label>
-          <textarea
-            value={rubric}
-            onChange={(e) => setRubric(e.target.value)}
-            placeholder="If the assignment had a rubric, paste it here so future predictions can break out criteria."
-            className="mt-1 h-24 w-full resize-none rounded-lg border border-navy/15 px-3 py-2 text-sm focus:border-gold focus:outline-none"
-          />
-        </div>
-      </section>
-
-      <section className="space-y-4 rounded-2xl border border-navy/10 bg-white p-6 shadow-sm">
-        <header className="flex items-start gap-3">
-          <GraduationCap className="mt-1 shrink-0 text-gold" size={20} />
-          <div>
-            <h2 className="text-base font-semibold text-navy">What the teacher said</h2>
-            <p className="text-xs text-navy/60">Both the line-by-line comments and the final grade.</p>
-          </div>
-        </header>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wider text-navy/60">Teacher</label>
-            <input
-              value={teacher}
-              onChange={(e) => setTeacher(e.target.value)}
-              placeholder="e.g. Dr. Hsu"
-              className="mt-1 w-full rounded-lg border border-navy/15 px-3 py-2 text-sm focus:border-gold focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wider text-navy/60">Final grade</label>
-            <input
-              value={grade}
-              onChange={(e) => setGrade(e.target.value)}
-              placeholder="e.g. 92, A-, 4/5"
-              className="mt-1 w-full rounded-lg border border-navy/15 px-3 py-2 text-sm focus:border-gold focus:outline-none"
-            />
-          </div>
-        </div>
-        <div>
-          <label className="text-xs font-medium uppercase tracking-wider text-navy/60">Comments / feedback</label>
-          <textarea
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-            placeholder="Paste every margin note, end-comment, rubric scoring…"
-            className="mt-1 h-40 w-full resize-none rounded-lg border border-navy/15 px-3 py-2 text-sm leading-relaxed focus:border-gold focus:outline-none"
-          />
-        </div>
-        <button
-          type="button"
-          disabled={!essay || !feedback || !grade || !teacher || saving}
-          onClick={save}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-navy py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-navy/90 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {saving && <Loader2 size={14} className="animate-spin" />}
-          {saving ? 'Saving…' : 'Save training example'}
-        </button>
-        {error && (
-          <p className="text-[11px] text-red-700">{error}</p>
-        )}
-        {savedId !== null && !error && (
-          <p className="text-[11px] text-emerald-700">
-            Saved as example #{savedId}. Form cleared (teacher kept). Add another?
-          </p>
-        )}
-        <p className="text-[11px] text-navy/40">
-          Saved examples accumulate per teacher in the local SQLite at sandbox/data/grade_predictor.db.
-        </p>
-      </section>
-    </div>
   );
 }
 
