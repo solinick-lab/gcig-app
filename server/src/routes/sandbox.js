@@ -123,12 +123,23 @@ function buildRagPrompt({ essay, teacher, rubric, examples }) {
     '\n--- TASK ---\n' +
       "Produce a grade prediction for the new essay in this teacher's style. " +
       'Output ONLY a JSON object with these keys (no prose before or after):\n' +
-      '  "line_by_line": array of {"quote": "<short verbatim phrase from the essay>", "comment": "<margin note in this teacher\'s voice>"}\n' +
-      '  "overall_feedback": string — 2-4 sentences in the teacher\'s voice\n' +
+      '  "line_by_line": array of {"quote": "<short verbatim phrase from the essay>",' +
+      ' "comment": "<margin note in this teacher\'s voice>",' +
+      ' "severity": "praise" | "suggestion" | "concern",' +
+      ' "category": "<thesis | evidence | analysis | structure | style | mechanics | strength>"}\n' +
+      '  "overall_feedback": string — 2-4 sentences in the teacher\'s voice (the "end comment")\n' +
       '  "grade": string — match the format the teacher used in the examples (letter grade, percent, X/Y, etc.)\n' +
+      '  "letter_grade": string — single letter (A, A-, B+, …) inferred from "grade", omit if uncertain\n' +
+      '  "numeric_grade": integer 0-100 inferred from "grade", omit if uncertain\n' +
+      '  "confidence": "high" | "medium" | "low" — how sure you are given the corpus depth and prompt fit\n' +
+      '  "reasoning": array of 2-4 short strings — why this grade, in this teacher\'s frame\n' +
+      '  "strengths": array of 2-4 short strings — what the essay does well\n' +
+      '  "weaknesses": array of 2-4 short strings — what holds it back\n' +
+      '  "next_steps": array of 2-4 short strings — concrete revision priorities, ordered\n' +
       '  "rubric_breakdown": object mapping rubric criterion → score + one-sentence reason, or null if no rubric was given\n' +
       'Aim for 6-15 line_by_line entries depending on essay length. ' +
-      'Quote phrases that actually appear in the essay verbatim. Do not invent passages.'
+      'Mix praise, suggestions, and concerns. Quote phrases that actually appear ' +
+      'in the essay verbatim. Do not invent passages.'
   );
   return parts.join('\n');
 }
@@ -153,11 +164,20 @@ function buildColdStartPrompt({ essay, teacher, rubric }) {
   parts.push(
     '\n--- TASK ---\n' +
       'Output ONLY a JSON object:\n' +
-      '  "line_by_line": array of {"quote": "...", "comment": "..."}\n' +
-      '  "overall_feedback": string\n' +
+      '  "line_by_line": array of {"quote": "...", "comment": "...",' +
+      ' "severity": "praise" | "suggestion" | "concern",' +
+      ' "category": "<thesis | evidence | analysis | structure | style | mechanics | strength>"}\n' +
+      '  "overall_feedback": string (the "end comment")\n' +
       '  "grade": string (letter grade or percent)\n' +
+      '  "letter_grade": string (single letter, e.g. A-, B+) — omit if uncertain\n' +
+      '  "numeric_grade": integer 0-100 — omit if uncertain\n' +
+      '  "confidence": "low" — always low for cold-start, no prior examples to anchor on\n' +
+      '  "reasoning": array of 2-4 short strings\n' +
+      '  "strengths": array of 2-4 short strings\n' +
+      '  "weaknesses": array of 2-4 short strings\n' +
+      '  "next_steps": array of 2-4 short strings — concrete revision priorities, ordered\n' +
       '  "rubric_breakdown": object | null\n' +
-      'Quote phrases that actually appear verbatim in the essay.'
+      'Mix praise, suggestions, and concerns. Quote phrases that actually appear verbatim in the essay.'
   );
   return parts.join('\n');
 }

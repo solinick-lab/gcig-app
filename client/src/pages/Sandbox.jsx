@@ -21,9 +21,13 @@ import {
   CheckCircle,
   ChevronDown,
   FileText,
+  Lightbulb,
   Loader2,
+  MessageSquare,
   PenLine,
   Send,
+  Star,
+  Target,
   Upload,
   User,
   X,
@@ -640,8 +644,20 @@ function ResultView({
   }
 
   const lineByLine = Array.isArray(result?.line_by_line) ? result.line_by_line : [];
+  const counts = lineByLine.reduce(
+    (acc, c) => {
+      const sev = (c.severity || 'suggestion').toLowerCase();
+      if (sev in acc) acc[sev]++;
+      else acc.suggestion++;
+      return acc;
+    },
+    { praise: 0, suggestion: 0, concern: 0 },
+  );
   const wordCount = essay.trim() ? essay.trim().split(/\s+/).length : 0;
   const paragraphs = essay.split('\n\n').filter((p) => p.trim());
+  const conf = (result?.confidence || '').toLowerCase();
+  const letter = result?.letter_grade || result?.grade || '—';
+  const numeric = result?.numeric_grade ?? null;
 
   return (
     <div className="flex-1 overflow-auto">
@@ -662,23 +678,52 @@ function ResultView({
             <div className="flex items-center gap-6">
               <div className="text-center">
                 <div className="text-5xl font-semibold tracking-tight" style={{ color: C.text }}>
-                  {result?.grade || '—'}
+                  {letter}
                 </div>
+                {numeric != null && (
+                  <div className="text-base mt-1" style={{ color: C.textMute }}>
+                    {numeric}/100
+                  </div>
+                )}
               </div>
               <div className="w-px h-14 hidden lg:block" style={{ background: C.border }} />
               <div>
                 <div className="text-sm" style={{ color: C.textMute }}>
                   Predicted grade{teacher.trim() && <> — in <span className="font-medium" style={{ color: C.text }}>{teacher.trim()}</span>&apos;s style</>}
                 </div>
-                {meta && (
-                  <div className="mt-2 text-[11px]" style={{ color: C.textFaint }}>
-                    {meta.examples_used > 0
-                      ? <>RAG · grounded in {meta.examples_used} of {meta.examples_available} prior {meta.examples_available === 1 ? 'example' : 'examples'}</>
-                      : 'Cold-start prediction — no prior examples for this teacher'}
-                  </div>
-                )}
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  {conf && (
+                    <span
+                      className="text-[11px] px-2 py-0.5 rounded-full font-medium capitalize"
+                      style={confidenceStyle(conf)}
+                    >
+                      {conf} confidence
+                    </span>
+                  )}
+                  {meta && (
+                    <span className="text-[11px]" style={{ color: C.textFaint }}>
+                      {meta.examples_used > 0
+                        ? <>RAG · grounded in {meta.examples_used} of {meta.examples_available} prior {meta.examples_available === 1 ? 'example' : 'examples'}</>
+                        : 'Cold-start prediction'}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
+
+            {(counts.praise + counts.suggestion + counts.concern) > 0 && (
+              <div className="flex items-center gap-4 text-sm flex-wrap">
+                <span className="flex items-center gap-1.5" style={{ color: '#4ade80' }}>
+                  <Star size={14} /> {counts.praise} {counts.praise === 1 ? 'strength' : 'strengths'}
+                </span>
+                <span className="flex items-center gap-1.5" style={{ color: '#fbbf24' }}>
+                  <Lightbulb size={14} /> {counts.suggestion} {counts.suggestion === 1 ? 'suggestion' : 'suggestions'}
+                </span>
+                <span className="flex items-center gap-1.5" style={{ color: '#f87171' }}>
+                  <AlertTriangle size={14} /> {counts.concern} {counts.concern === 1 ? 'concern' : 'concerns'}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -726,24 +771,86 @@ function ResultView({
 
             {lineByLine.length > 0 && (
               <div>
-                <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: C.textFaint }}>
-                  Line-by-line comments
+                <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 flex items-center gap-1.5" style={{ color: C.textFaint }}>
+                  <MessageSquare size={12} /> Line-by-line comments
                 </h3>
                 <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
-                  {lineByLine.map((c, i) => (
+                  {lineByLine.map((c, i) => <CommentCard key={i} comment={c} />)}
+                </div>
+              </div>
+            )}
+
+            {Array.isArray(result?.reasoning) && result.reasoning.length > 0 && (
+              <div className="rounded-xl p-5" style={{ background: C.surface, border: `1px solid ${C.border}` }}>
+                <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: C.text }}>
+                  Grade reasoning
+                </h3>
+                <div className="space-y-2">
+                  {result.reasoning.map((r, i) => (
+                    <div key={i} className="flex items-start gap-2 text-xs" style={{ color: C.textMute }}>
+                      <span
+                        className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5"
+                        style={{ background: 'rgba(255,255,255,0.05)', color: C.textFaint }}
+                      >
+                        {i + 1}
+                      </span>
+                      <span className="leading-relaxed">{r}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {Array.isArray(result?.strengths) && result.strengths.length > 0 && (
+              <div className="rounded-xl p-5" style={{ background: 'rgba(74,222,128,0.04)', border: '1px solid rgba(74,222,128,0.15)' }}>
+                <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 flex items-center gap-1.5" style={{ color: '#4ade80' }}>
+                  <Star size={12} /> Strengths
+                </h3>
+                {result.strengths.map((s, i) => (
+                  <div key={i} className="flex items-start gap-2 text-xs mb-1.5" style={{ color: 'rgba(74,222,128,0.85)' }}>
+                    <CheckCircle size={12} className="mt-0.5 flex-shrink-0" />
+                    <span className="leading-relaxed">{s}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {Array.isArray(result?.weaknesses) && result.weaknesses.length > 0 && (
+              <div className="rounded-xl p-5" style={{ background: 'rgba(251,191,36,0.04)', border: '1px solid rgba(251,191,36,0.15)' }}>
+                <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 flex items-center gap-1.5" style={{ color: '#fbbf24' }}>
+                  <AlertTriangle size={12} /> Areas for improvement
+                </h3>
+                {result.weaknesses.map((w, i) => (
+                  <div key={i} className="flex items-start gap-2 text-xs mb-1.5" style={{ color: 'rgba(251,191,36,0.85)' }}>
+                    <Lightbulb size={12} className="mt-0.5 flex-shrink-0" />
+                    <span className="leading-relaxed">{w}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {Array.isArray(result?.next_steps) && result.next_steps.length > 0 && (
+              <div className="rounded-xl p-5" style={{ background: C.surface, border: `1px solid ${C.border}` }}>
+                <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 flex items-center gap-1.5" style={{ color: C.text }}>
+                  <Target size={12} style={{ color: C.accent }} /> Revision priorities
+                </h3>
+                <div className="space-y-2">
+                  {result.next_steps.map((step, i) => (
                     <div
                       key={i}
-                      className="rounded-xl p-3.5"
-                      style={{ background: C.surface, border: `1px solid ${C.border}` }}
+                      className="flex items-start gap-3 p-3 rounded-xl"
+                      style={{ background: 'rgba(0,0,0,0.25)' }}
                     >
-                      {c.quote && (
-                        <p className="text-[11px] italic mb-1" style={{ color: C.textFaint }}>
-                          &ldquo;{c.quote}&rdquo;
-                        </p>
-                      )}
-                      <p className="text-xs leading-relaxed" style={{ color: 'rgba(255,255,255,0.75)' }}>
-                        {c.comment}
-                      </p>
+                      <span
+                        className="w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0"
+                        style={{
+                          background: i === 0 ? 'rgba(99,152,255,0.15)' : 'rgba(255,255,255,0.05)',
+                          color: i === 0 ? C.accent : C.textFaint,
+                        }}
+                      >
+                        {i + 1}
+                      </span>
+                      <p className="text-xs leading-relaxed" style={{ color: C.textMute }}>{step}</p>
                     </div>
                   ))}
                 </div>
@@ -947,6 +1054,65 @@ function SaveActualFeedback({
       {error && <p className="text-[11px]" style={{ color: '#f87171' }}>{error}</p>}
     </section>
   );
+}
+
+function CommentCard({ comment }) {
+  const sev = (comment.severity || 'suggestion').toLowerCase();
+  const style = severityStyle(sev);
+  return (
+    <div
+      className="rounded-xl p-3.5"
+      style={{ background: style.bg, border: `1px solid ${style.border}` }}
+    >
+      <div className="flex items-start gap-2">
+        <span style={{ color: style.text, marginTop: 2 }}>
+          {sev === 'praise' ? <Star size={13} /> : sev === 'concern' ? <AlertTriangle size={13} /> : <Lightbulb size={13} />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="mb-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: style.text }}>
+              {style.label}{comment.category ? ` — ${comment.category}` : ''}
+            </span>
+          </div>
+          {comment.quote && (
+            <p className="text-[11px] italic mb-1" style={{ color: C.textFaint }}>
+              &ldquo;{comment.quote}&rdquo;
+            </p>
+          )}
+          <p className="text-xs leading-relaxed" style={{ color: 'rgba(255,255,255,0.75)' }}>
+            {comment.comment}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function severityStyle(sev) {
+  if (sev === 'praise') return {
+    bg: 'rgba(74,222,128,0.07)',
+    border: 'rgba(74,222,128,0.18)',
+    text: '#4ade80',
+    label: 'Strength',
+  };
+  if (sev === 'concern') return {
+    bg: 'rgba(239,68,68,0.07)',
+    border: 'rgba(239,68,68,0.18)',
+    text: '#f87171',
+    label: 'Needs work',
+  };
+  return {
+    bg: 'rgba(251,191,36,0.07)',
+    border: 'rgba(251,191,36,0.18)',
+    text: '#fbbf24',
+    label: 'Suggestion',
+  };
+}
+
+function confidenceStyle(conf) {
+  if (conf === 'high') return { background: 'rgba(74,222,128,0.10)', color: '#4ade80' };
+  if (conf === 'low') return { background: 'rgba(239,68,68,0.10)', color: '#f87171' };
+  return { background: 'rgba(251,191,36,0.10)', color: '#fbbf24' };
 }
 
 // Render a list of {author, date, text} comments pulled from a .docx
