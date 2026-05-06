@@ -87,6 +87,19 @@ function maybeRotateToken(res) {
 // it can't accidentally suppress a real expired-session 401 (it
 // only fires when localStorage was actively updated mid-flight).
 
+// Endpoints whose 401 is authoritative — i.e. the response represents a
+// real verdict on the session. Everything else is treated as a per-route
+// permission/data bug, not proof the session is dead. The Calendar page
+// fanning out a dozen GETs in parallel made this matter: one stray 401
+// from a single data endpoint would wipe localStorage and bounce the
+// user mid-render, even though every other call on the page succeeded.
+const AUTH_VERDICT_PATHS = ['/auth/me', '/auth/verify-token'];
+
+function isAuthVerdictRequest(config) {
+  const url = config?.url || '';
+  return AUTH_VERDICT_PATHS.some((p) => url === p || url.endsWith(p));
+}
+
 api.interceptors.response.use(
   (res) => {
     maybeRotateToken(res);
@@ -102,9 +115,16 @@ api.interceptors.response.use(
         // promise rejection.
         return Promise.reject(err);
       }
-      // Either there was no token in the first place, or the token
-      // we sent is still the one in storage and it's been rejected.
-      // Either way the session is over.
+      // Only treat the 401 as "session is over" when it came from a
+      // request that's actually checking the session, OR when no token
+      // was sent at all. A 401 on a random data endpoint while every
+      // other authed call on the page succeeds means the endpoint is
+      // misbehaving, not that the user's logged out — so bubble it up
+      // to the caller's try/catch instead of nuking storage.
+      const sessionVerdict = isAuthVerdictRequest(err.config) || !sent;
+      if (!sessionVerdict) {
+        return Promise.reject(err);
+      }
       localStorage.removeItem('gcig_token');
       localStorage.removeItem('gcig_user');
       const path = window.location.pathname;

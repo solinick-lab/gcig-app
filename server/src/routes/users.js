@@ -34,6 +34,44 @@ function generateTempPassword() {
   return crypto.randomBytes(6).toString('base64url') + '!A1';
 }
 
+// Public lunch availability for leadership. Has to be declared before
+// the router-wide verifyJwt below: the Calendar page mounts and fires
+// this in parallel with /auth/me, and on a freshly-logged-in render
+// the JWT-bearing axios instance can race the auth bootstrap and send
+// a request before the token is wired up. The data is non-sensitive
+// (names + roles + lunch periods of leaders only — Request-a-Pitch
+// needs it before the requester is even a member), so gating it just
+// to satisfy a global middleware was a mistake.
+router.get('/lunch/leaders', async (_req, res) => {
+  const leaders = await prisma.user.findMany({
+    where: {
+      OR: [
+        { role: 'President' },
+        { role: 'PortfolioManager' },
+        { role: 'SeniorPortfolioManager' },
+        { ledIndustries: { some: {} } },
+      ],
+    },
+    select: {
+      id: true,
+      name: true,
+      role: true,
+      lunchSchedule: true,
+      ledIndustries: { select: { id: true, name: true } },
+    },
+    orderBy: { name: 'asc' },
+  });
+  res.json(
+    leaders.map((u) => ({
+      id: u.id,
+      name: u.name,
+      role: u.role,
+      lunchSchedule: u.lunchSchedule || null,
+      industries: u.ledIndustries,
+    }))
+  );
+});
+
 router.use(verifyJwt);
 
 // President-only: participation ranking. Aggregates attendance, pitches,
@@ -97,40 +135,6 @@ router.put('/me/lunch', async (req, res) => {
     data: { lunchSchedule },
   });
   res.json({ lunchSchedule });
-});
-
-// Public lunch availability for the President + every PM. Used by the
-// Request-a-Pitch UI so requesters know which period each leader has free
-// before submitting a meeting time. Doesn't expose anyone outside
-// leadership — non-leaders' schedules stay private.
-router.get('/lunch/leaders', async (_req, res) => {
-  const leaders = await prisma.user.findMany({
-    where: {
-      OR: [
-        { role: 'President' },
-        { role: 'PortfolioManager' },
-        { role: 'SeniorPortfolioManager' },
-        { ledIndustries: { some: {} } },
-      ],
-    },
-    select: {
-      id: true,
-      name: true,
-      role: true,
-      lunchSchedule: true,
-      ledIndustries: { select: { id: true, name: true } },
-    },
-    orderBy: { name: 'asc' },
-  });
-  res.json(
-    leaders.map((u) => ({
-      id: u.id,
-      name: u.name,
-      role: u.role,
-      lunchSchedule: u.lunchSchedule || null,
-      industries: u.ledIndustries,
-    }))
-  );
 });
 
 // All authed users can list members (shown on attendance sheet)
