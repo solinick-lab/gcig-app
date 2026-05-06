@@ -15,3 +15,8 @@ export async function getSignalHistory(signalName, days = 90) {
   });
   return data;
 }
+
+export async function getSarDetections(days = 7) {
+  const { data } = await api.get('/sea/sar-detections', { params: { days } });
+  return data;
+}

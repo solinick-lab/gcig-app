@@ -171,4 +171,98 @@ router.get('/history', async (req, res) => {
   });
 });
 
+// ── Satellite SAR vessel detections (Global Fishing Watch) ───────────
+// Free non-commercial API. We proxy here so GFW_API_TOKEN never
+// touches the browser. GFW data lags real-time by ~5 days but covers
+// the entire Persian Gulf — including Iran, Saudi, Kuwait waters
+// that terrestrial AIS can't reach. Useful for spotting dark-fleet
+// activity and verifying AIS-visible flow.
+//
+// To enable: set GFW_API_TOKEN on Render. Until then this returns
+// `enabled: false` and the React layer hides itself.
+const GFW_BBOX = [
+  [47.5, 23.5], [57.5, 23.5], [57.5, 30.5], [47.5, 30.5], [47.5, 23.5],
+];
+const GFW_DATASET = 'public-global-sar-presence:latest';
+const GFW_REPORT_URL = 'https://gateway.api.globalfishingwatch.org/v3/4wings/report';
+
+let _sarCache = { at: 0, ttlMs: 60 * 60 * 1000, days: null, body: null };
+
+router.get('/sar-detections', async (req, res) => {
+  const token = process.env.GFW_API_TOKEN;
+  if (!token) {
+    return res.json({ enabled: false, reason: 'GFW_API_TOKEN not set on Render' });
+  }
+  const days = Math.min(Math.max(parseInt(req.query.days, 10) || 7, 1), 90);
+
+  const now = Date.now();
+  if (
+    _sarCache.body &&
+    _sarCache.days === days &&
+    (now - _sarCache.at) < _sarCache.ttlMs
+  ) {
+    return res.json(_sarCache.body);
+  }
+
+  // GFW doesn't ship data closer than ~5 days to real-time, so end the
+  // window 5 days back. start = end - days.
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  const end = new Date(now - 5 * 24 * 60 * 60 * 1000);
+  const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
+
+  const url = new URL(GFW_REPORT_URL);
+  url.searchParams.append('datasets[0]', GFW_DATASET);
+  url.searchParams.append('date-range', `${fmt(start)},${fmt(end)}`);
+  url.searchParams.append('temporal-resolution', 'DAILY');
+  url.searchParams.append('spatial-resolution', 'LOW');
+  url.searchParams.append('format', 'JSON');
+
+  const region = {
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      properties: {},
+      geometry: { type: 'Polygon', coordinates: [GFW_BBOX] },
+    }],
+  };
+
+  let upstream;
+  try {
+    upstream = await fetch(url.toString(), {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ region }),
+    });
+  } catch (err) {
+    return res.status(503).json({ enabled: true, error: `GFW network: ${err.message}` });
+  }
+
+  if (!upstream.ok) {
+    const text = await upstream.text().catch(() => '');
+    return res
+      .status(503)
+      .json({ enabled: true, error: `GFW ${upstream.status}: ${text.slice(0, 200)}` });
+  }
+
+  let data;
+  try {
+    data = await upstream.json();
+  } catch (err) {
+    return res.status(503).json({ enabled: true, error: `GFW json: ${err.message}` });
+  }
+
+  const body = {
+    enabled: true,
+    fetchedAt: new Date().toISOString(),
+    dateRange: { start: fmt(start), end: fmt(end) },
+    days,
+    raw: data,
+  };
+  _sarCache = { at: now, ttlMs: _sarCache.ttlMs, days, body };
+  res.json(body);
+});
+
 export default router;

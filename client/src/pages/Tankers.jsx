@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { getLatestSnapshot } from '../api/sea';
 import DerivedPanel from './tankers/DerivedPanel';
+import SarStatusCard from './tankers/SarStatusCard';
 import SignalPanel from './tankers/SignalPanel';
 import VesselMap from './tankers/VesselMap';
 import VesselDrawer from './tankers/VesselDrawer';
@@ -104,6 +105,7 @@ export default function Tankers() {
 
       {snapshot && (
         <>
+          <SarStatusCard />
           <DerivedPanel derived={snapshot.derived} />
           <SignalPanel signals={snapshot.signals} />
           <VesselMap snapshot={snapshot} onVesselClick={setSelectedVessel} />
