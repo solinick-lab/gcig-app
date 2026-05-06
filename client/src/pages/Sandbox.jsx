@@ -132,6 +132,11 @@ function PredictPanel() {
   // SaveActualFeedback panel once the prediction renders.
   const [docComments, setDocComments] = useState([]);
   const [uploading, setUploading] = useState(false);
+  // OneDrive item ID + webUrl for the just-uploaded .docx, threaded
+  // through to the training-data save so the corpus row points at
+  // the original file.
+  const [docFileRef, setDocFileRef] = useState(null);
+  const [docFileUrl, setDocFileUrl] = useState(null);
 
   async function handleDocxUpload(e) {
     const file = e.target.files?.[0];
@@ -153,6 +158,8 @@ function PredictPanel() {
       );
       if (data.text) setEssay(data.text);
       setDocComments(Array.isArray(data.comments) ? data.comments : []);
+      setDocFileRef(data.fileRef || null);
+      setDocFileUrl(data.fileUrl || null);
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Failed to parse .docx');
     } finally {
@@ -216,6 +223,14 @@ function PredictPanel() {
               They'll be pre-filled in the training-data panel below the prediction.
             </div>
           )}
+          {docFileUrl && (
+            <div className="text-[11px] text-navy/50">
+              Saved to OneDrive ·{' '}
+              <a href={docFileUrl} target="_blank" rel="noreferrer" className="underline hover:text-navy">
+                view original
+              </a>
+            </div>
+          )}
         </section>
 
         <section className="space-y-4 rounded-2xl border border-navy/10 bg-white p-6 shadow-sm">
@@ -272,6 +287,8 @@ function PredictPanel() {
           predictedGrade={result.grade || ''}
           predictedFeedback={result.overall_feedback || ''}
           initialFeedback={formatExtractedComments(docComments)}
+          fileRef={docFileRef}
+          fileUrl={docFileUrl}
         />
       )}
     </>
@@ -283,12 +300,22 @@ function PredictPanel() {
 // + comments, and have it land in the training corpus alongside the
 // prediction the model originally made. Reuses the essay + teacher +
 // rubric the student typed in above so they don't have to retype them.
-function SaveActualFeedback({ essay, rubric, teacher, predictedGrade, predictedFeedback, initialFeedback }) {
+function SaveActualFeedback({
+  essay,
+  rubric,
+  teacher,
+  predictedGrade,
+  predictedFeedback,
+  initialFeedback,
+  fileRef,
+  fileUrl,
+}) {
   const [feedback, setFeedback] = useState(initialFeedback || '');
   const [grade, setGrade] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [savedId, setSavedId] = useState(null);
+  const [savedFileUrl, setSavedFileUrl] = useState(null);
 
   // If the user uploads a .docx after the prediction is already on
   // screen, refresh the feedback field with the freshly-extracted
@@ -316,8 +343,11 @@ function SaveActualFeedback({ essay, rubric, teacher, predictedGrade, predictedF
         grade: grade.trim(),
         predictedGrade,
         predictedFeedback,
+        fileRef: fileRef || null,
+        fileUrl: fileUrl || null,
       });
       setSavedId(data.id);
+      setSavedFileUrl(data.essayFileUrl || null);
       setFeedback('');
       setGrade('');
     } catch (e) {
@@ -336,6 +366,14 @@ function SaveActualFeedback({ essay, rubric, teacher, predictedGrade, predictedF
           <div className="mt-1 text-xs">
             Example #{savedId}. The next iteration of the predictor will use
             this {teacher ? `as ${teacher}'s grading style` : 'as cold-start training data'}.
+            {savedFileUrl && (
+              <>
+                {' '}Original essay archived to{' '}
+                <a href={savedFileUrl} target="_blank" rel="noreferrer" className="underline">
+                  OneDrive
+                </a>.
+              </>
+            )}
           </div>
         </div>
       </section>

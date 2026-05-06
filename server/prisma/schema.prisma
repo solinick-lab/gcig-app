@@ -572,6 +572,13 @@ model GradePredictorExample {
   // backtest how close the cold-start prediction came to the truth.
   predictedGrade    String?
   predictedFeedback String?
+  // OneDrive itemId + webUrl for the original essay file. Populated
+  // when a .docx was uploaded (we keep the actual file) or when text
+  // was pasted (we serialize it to .txt and upload). Nullable because
+  // OneDrive may not be authorized at save time, and we'd rather keep
+  // the corpus row than refuse to save it.
+  essayFileRef String?
+  essayFileUrl String?
   createdById Int?
   createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())

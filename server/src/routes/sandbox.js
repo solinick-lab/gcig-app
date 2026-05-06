@@ -4,6 +4,57 @@ import JSZip from 'jszip';
 import prisma from '../db.js';
 import { verifyJwt, requireSuperAdmin } from '../middleware/auth.js';
 import { llmChat, probeProviders } from '../services/llm.js';
+import {
+  uploadFile as oneDriveUpload,
+  isConfigured as oneDriveConfigured,
+} from '../services/oneDriveStorage.js';
+
+// Where every grade-predictor essay lands inside the connected OneDrive.
+// The shared upload helper prepends ONEDRIVE_FOLDER as a parent (default
+// "GriffinFund/Uploads"); we tack on a Sandbox/GradePredictor leg so the
+// essays don't mingle with pitch decks and reports.
+const ONEDRIVE_SUBFOLDER = 'Sandbox/GradePredictor/Essays';
+
+// Best-effort upload: always returns { ref, url } where both are null
+// when OneDrive isn't configured / authorized / reachable. The caller
+// proceeds with the prediction or training-data save either way — we
+// don't want a flaky OneDrive to block the corpus from growing.
+async function tryUploadEssay({ buffer, filename, contentType }) {
+  if (!oneDriveConfigured()) return { ref: null, url: null };
+  try {
+    const item = await oneDriveUpload({
+      buffer,
+      filename: `${ONEDRIVE_SUBFOLDER}/${filename}`,
+      contentType: contentType || 'application/octet-stream',
+    });
+    return { ref: item?.id || null, url: item?.webUrl || null };
+  } catch (err) {
+    console.warn('grade-predictor: OneDrive upload failed:', err.message);
+    return { ref: null, url: null };
+  }
+}
+
+// Filename-safe slug. Strips characters OneDrive / Graph dislike, caps
+// length so a paranoid copy of "the_great_gatsby_fitzgerald_chapter_…"
+// doesn't blow past the 256-char path limit.
+function slugifyForFile(s) {
+  const cleaned = String(s || '')
+    .replace(/[\\/:*?"<>|]+/g, '')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '');
+  return cleaned.slice(0, 60) || 'essay';
+}
+
+function timestampSlug() {
+  // 2026-05-06_141530 — ISO-ish but filesystem-safe.
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+  );
+}
 
 // Sandbox routes — super-admin-only scratch endpoints for in-progress
 // projects. Currently hosts the Grade Predictor, which routes through
@@ -149,6 +200,8 @@ router.post('/grade-predictor/train', async (req, res) => {
     grade,
     predictedGrade,
     predictedFeedback,
+    fileRef: passedFileRef,
+    fileUrl: passedFileUrl,
   } = req.body || {};
 
   if (!essay || typeof essay !== 'string' || essay.trim().length < 20) {
@@ -159,6 +212,26 @@ router.post('/grade-predictor/train', async (req, res) => {
   }
   if (!grade || typeof grade !== 'string' || grade.trim().length < 1) {
     return res.status(400).json({ error: 'grade is required' });
+  }
+
+  // OneDrive persistence: prefer the fileRef the client carried over
+  // from a .docx parse-and-upload. If they pasted essay text directly,
+  // serialize it as a .txt and upload that on save so every saved
+  // training row points at a real file in OneDrive.
+  let essayFileRef = typeof passedFileRef === 'string' ? passedFileRef : null;
+  let essayFileUrl = typeof passedFileUrl === 'string' ? passedFileUrl : null;
+  if (!essayFileRef) {
+    const baseName = slugifyForFile(
+      teacher ? `${teacher}_essay` : 'essay'
+    );
+    const finalName = `${timestampSlug()}_${baseName}.txt`;
+    const { ref, url } = await tryUploadEssay({
+      buffer: Buffer.from(essay, 'utf8'),
+      filename: finalName,
+      contentType: 'text/plain; charset=utf-8',
+    });
+    essayFileRef = ref;
+    essayFileUrl = url;
   }
 
   const row = await prisma.gradePredictorExample.create({
@@ -176,12 +249,19 @@ router.post('/grade-predictor/train', async (req, res) => {
         typeof predictedFeedback === 'string' && predictedFeedback.trim()
           ? predictedFeedback.trim()
           : null,
+      essayFileRef,
+      essayFileUrl,
       createdById: req.user.id,
     },
-    select: { id: true, teacher: true, createdAt: true },
+    select: { id: true, teacher: true, createdAt: true, essayFileUrl: true },
   });
 
-  res.json({ id: row.id, teacher: row.teacher, createdAt: row.createdAt });
+  res.json({
+    id: row.id,
+    teacher: row.teacher,
+    createdAt: row.createdAt,
+    essayFileUrl: row.essayFileUrl,
+  });
 });
 
 // Parse a .docx upload into { text, comments }. text is the body of the
@@ -265,7 +345,19 @@ router.post(
     }
     try {
       const { text, comments } = await parseDocx(req.file.buffer);
-      res.json({ text, comments });
+      // Persist the .docx to OneDrive — original filename, just slugified
+      // and prefixed with a timestamp so two uploads of "Essay.docx" don't
+      // collide. The fileRef + url come back to the client so the training-
+      // data save can carry them through onto the row.
+      const baseName = slugifyForFile(req.file.originalname.replace(/\.docx$/i, ''));
+      const finalName = `${timestampSlug()}_${baseName}.docx`;
+      const { ref, url } = await tryUploadEssay({
+        buffer: req.file.buffer,
+        filename: finalName,
+        contentType:
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+      res.json({ text, comments, fileRef: ref, fileUrl: url });
     } catch (e) {
       console.warn('parse-docx failed:', e.message);
       res
