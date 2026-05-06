@@ -18,6 +18,7 @@ import {
   Send,
   Activity,
   Ship,
+  GraduationCap,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import RoleBadge from './RoleBadge.jsx';
@@ -57,6 +58,7 @@ const NAV_SECTIONS = [
     items: [
       { to: '/admin', label: 'Admin', icon: ShieldAlert, executiveOnly: true },
       { to: '/ai-chat', label: 'AI Assistant', icon: Bot },
+      { to: '/sandbox', label: 'Grade Predictor', icon: GraduationCap },
     ],
   },
   {

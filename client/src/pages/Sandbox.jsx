@@ -1,14 +1,12 @@
-// Sandbox — full-screen scratchpad page for super-admin work in
-// progress. Lives outside the Layout wrapper so it gets the entire
-// viewport, free of the sidebar and page chrome that would distract
-// from whatever's being prototyped here. Currently the home of the
-// Grade Predictor project.
+// Grade Predictor — full-screen page rendered outside the Layout wrapper
+// so the predict + result panels get the whole viewport. Open to every
+// logged-in member of the club; the route is reachable from the sidebar.
 //
-// The Grade Predictor talks to the gcig-api at /api/sandbox/grade-predictor/*,
-// which fans out to the shared LLM client (qwen2.5:14b on the Cloudflare-
-// tunneled local Ollama, with OpenAI fallback). No separate FastAPI
-// service to babysit. Training corpus + per-teacher RAG come later;
-// this is the cold-start prediction path only.
+// Talks to the gcig-api at /api/sandbox/grade-predictor/*, which fans out
+// to the shared LLM client (qwen2.5:7b on the Cloudflare-tunneled local
+// Ollama, with OpenAI fallback). Per-teacher RAG over a corpus of saved
+// (essay, real teacher feedback, real grade) tuples; cold-start prompt
+// fallback for unknown teachers.
 
 import { Navigate, useNavigate } from 'react-router-dom';
 import { X, Upload, FileText, BookOpen, Loader2, AlertCircle, GraduationCap, Check } from 'lucide-react';
@@ -17,28 +15,27 @@ import { useAuth } from '../context/AuthContext.jsx';
 import api from '../api/client.js';
 
 export default function Sandbox() {
-  const { isSuperAdmin, loading } = useAuth();
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
 
   if (loading) return null;
-  if (!isSuperAdmin) return <Navigate to="/dashboard" replace />;
+  if (!user) return <Navigate to="/login" replace />;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-white">
       <header className="flex items-center justify-between border-b border-navy/10 px-6 py-3">
         <div className="flex items-center gap-3">
-          <span className="rounded-md bg-gold/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-gold">
-            Sandbox
-          </span>
           <h1 className="text-lg font-semibold text-navy">Grade Predictor</h1>
-          <span className="text-xs text-navy/40">work in progress</span>
+          <span className="rounded-md bg-gold/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-gold">
+            Beta
+          </span>
         </div>
         <button
           type="button"
-          onClick={() => navigate('/admin')}
+          onClick={() => navigate('/dashboard')}
           className="rounded-full p-2 text-navy/60 hover:bg-navy/5 hover:text-navy"
-          aria-label="Close sandbox"
-          title="Close sandbox"
+          aria-label="Close"
+          title="Close"
         >
           <X size={20} />
         </button>

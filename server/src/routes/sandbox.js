@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import JSZip from 'jszip';
 import prisma from '../db.js';
-import { verifyJwt, requireSuperAdmin } from '../middleware/auth.js';
+import { verifyJwt } from '../middleware/auth.js';
 import { llmChat, probeProviders } from '../services/llm.js';
 import {
   uploadFile as oneDriveUpload,
@@ -65,7 +65,12 @@ function timestampSlug() {
 
 const router = Router();
 
-router.use(verifyJwt, requireSuperAdmin);
+// Open to every logged-in member, not just super admins. The grade
+// predictor is the kind of tool that's most useful student-by-student;
+// gating it to admins meant the people who would use it most couldn't.
+// Cost surface is bounded by JWT auth + the LLM client's existing
+// rate-limit / fallback behavior.
+router.use(verifyJwt);
 
 router.get('/grade-predictor/health', async (_req, res) => {
   const status = await probeProviders({ timeoutMs: 4000 });

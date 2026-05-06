@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useSearchParams } from 'react-router-dom';
 import { RefreshCw, Sparkles, Cloud, Upload, Unplug } from 'lucide-react';
 import api, { API_BASE } from '../api/client.js';
 import PageHeader from '../components/PageHeader.jsx';
@@ -111,7 +111,6 @@ function LlmStatusCard() {
 
 export default function Admin() {
   const { isAdmin, isExecutive, isSuperAdmin } = useAuth();
-  const navigate = useNavigate();
 
   // Page-level gate. Everything under /admin is for the executive tier
   // or above — if a non-executive user lands here via a direct URL,
@@ -125,7 +124,10 @@ export default function Admin() {
   // Tab visibility:
   //   Members — always shown (every executive can see the roster).
   //   Participation — President only (isAdmin).
-  //   Audit Log / Name Inference / Sandbox — super admin only.
+  //   Audit Log / Name Inference — super admin only.
+  // (The Grade Predictor used to live here as a Sandbox tab; it now
+  // has its own sidebar entry available to every member, so the
+  // redundant admin shortcut was removed.)
   const tabs = [
     { id: 'members', label: 'Members' },
     ...(isAdmin ? [{ id: 'participation', label: 'Participation' }] : []),
@@ -133,7 +135,6 @@ export default function Admin() {
       ? [
           { id: 'audit', label: 'Audit Log' },
           { id: 'inference', label: 'Name Inference' },
-          { id: 'sandbox', label: 'Sandbox' },
         ]
       : []),
   ];
@@ -161,15 +162,7 @@ export default function Admin() {
         {tabs.map((t) => (
           <button
             key={t.id}
-            onClick={() => {
-              if (t.id === 'sandbox') {
-                // Sandbox lives at /sandbox (full-screen, outside Layout) —
-                // clicking the tab navigates rather than rendering inline.
-                navigate('/sandbox');
-              } else {
-                setTab(t.id);
-              }
-            }}
+            onClick={() => setTab(t.id)}
             className={`relative pb-3 font-serif text-lg font-semibold transition ${
               tab === t.id
                 ? 'text-navy'
