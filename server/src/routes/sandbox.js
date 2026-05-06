@@ -202,10 +202,14 @@ function extractJson(raw) {
   }
 }
 
-// How many prior examples we inject into the RAG prompt. Plenty for the
-// 32K-token context on qwen2.5:7b once each example is truncated, and
-// small enough to keep the prediction fast.
-const RAG_TOP_K = 3;
+// How much of the prompt we'll spend on retrieved prior examples.
+// qwen2.5:7b has a 32K-token context; the rest of the prompt (new
+// essay up to 8000 chars, rubric up to 3000 chars, task instructions,
+// system message, and the JSON response we expect back) eats the
+// other ~12K chars + ~4K-token response budget. 80K characters here
+// leaves a comfortable margin and fits ~17 max-size truncated
+// examples — more than the typical per-teacher corpus we expect.
+const RAG_CHAR_BUDGET = 80_000;
 
 router.post('/grade-predictor/predict', async (req, res) => {
   const { essay, teacher, rubric } = req.body || {};
@@ -218,25 +222,42 @@ router.post('/grade-predictor/predict', async (req, res) => {
   const cleanTeacher = typeof teacher === 'string' ? teacher.trim() : '';
   const cleanRubric = typeof rubric === 'string' ? rubric.trim() : '';
 
-  // Retrieve prior examples for this teacher. Case-insensitive match so
-  // "Anna Grafton" and "anna grafton" share a corpus instead of starting
-  // separate ones. Most-recent-first is the simplest "relevance" we can
-  // serve before we have an embedding store; with a small N per teacher
-  // it's also a perfectly fine proxy for "what did this teacher value
-  // most recently".
-  let examples = [];
+  // Retrieve every prior example for this teacher, most-recent-first,
+  // case-insensitive ("Anna Grafton" and "anna grafton" share one
+  // corpus). The model gets to see the whole history rather than just
+  // the latest 3 — but we cap by char budget below so the prompt
+  // doesn't overflow the context window when a teacher's corpus grows
+  // large. Fully recent essays are loaded first so what gets dropped
+  // (when dropping is needed) is the oldest material.
+  let allExamples = [];
   let examplesAvailable = 0;
   if (cleanTeacher) {
     const where = { teacher: { equals: cleanTeacher, mode: 'insensitive' } };
     examplesAvailable = await prisma.gradePredictorExample.count({ where });
     if (examplesAvailable > 0) {
-      examples = await prisma.gradePredictorExample.findMany({
+      allExamples = await prisma.gradePredictorExample.findMany({
         where,
         orderBy: { createdAt: 'desc' },
-        take: RAG_TOP_K,
         select: { id: true, essay: true, feedback: true, grade: true },
       });
     }
+  }
+
+  // Walk most-recent-first, accumulating until we hit the char budget.
+  // The cost of each example is its truncated form (essay 2500, feedback
+  // 2000, grade + headers ~80 chars) — match what buildRagPrompt does
+  // so the budget reflects what actually lands in the prompt.
+  const examples = [];
+  let usedChars = 0;
+  for (const ex of allExamples) {
+    const cost =
+      Math.min(ex.essay?.length || 0, 2500) +
+      Math.min(ex.feedback?.length || 0, 2000) +
+      String(ex.grade || '').length +
+      80;
+    if (usedChars + cost > RAG_CHAR_BUDGET && examples.length > 0) break;
+    examples.push(ex);
+    usedChars += cost;
   }
 
   const prompt =

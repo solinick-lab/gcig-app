@@ -554,7 +554,7 @@ function EditorView({
                       ? known
                         ? <>
                             <FileText size={10} className="inline -mt-0.5 mr-0.5" />
-                            {known.examples} prior {known.examples === 1 ? 'essay' : 'essays'} — RAG will use the most recent 3
+                            {known.examples} prior {known.examples === 1 ? 'essay' : 'essays'} — RAG uses all of them (oldest dropped only if the prompt would overflow)
                           </>
                         : <span style={{ color: '#fbbf24' }}>Cold start — no prior examples for {teacher.trim()}</span>
                       : 'Leave empty for an untagged cold-start prediction'}
