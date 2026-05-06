@@ -58,6 +58,12 @@ _OPEC_COUNTRIES = ["saudi", "iran", "kuwait", "iraq", "uae", "qatar"]
 _HORMUZ_ZONE_LAT = (25.50, 27.00)
 _HORMUZ_ZONE_LON = (55.50, 57.00)
 
+# Tighter boxes for the SAR-derived counts. The strait box is the
+# actual chokepoint (the line of geopolitical interest); the Iran-
+# side box covers Bandar Abbas, Lavan, Sirri — the AIS-blind zone.
+_SAR_STRAIT_BBOX = (26.00, 26.80, 56.00, 56.80)
+_SAR_IRAN_BBOX   = (26.50, 27.30, 54.00, 57.20)
+
 
 def _signal_value(con: duckdb.DuckDBPyConnection, *, day: date, name: str) -> float | None:
     row = con.execute(
@@ -256,6 +262,78 @@ def chokepoint_pressure(
     }
 
 
+def _sar_zone_count(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    bbox: tuple[float, float, float, float],
+) -> dict[str, Any]:
+    """Count SAR detections (and tanker-class subset) in the bbox,
+    from the most recent scene that intersected it. Returns the
+    scene's acquisition timestamp so the UI can show "X hours ago"
+    freshness.
+
+    Different from the live-AIS chokepoint count because SAR is a
+    snapshot per pass, not continuous tracking — we report what
+    showed up in the imagery, not a 24 h transit total.
+    """
+    lat_min, lat_max, lon_min, lon_max = bbox
+    latest = con.execute(
+        """
+        SELECT scene_id, MAX(detected_at) AS latest
+        FROM sar_detections
+        WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?
+        GROUP BY scene_id
+        ORDER BY latest DESC
+        LIMIT 1
+        """,
+        [lat_min, lat_max, lon_min, lon_max],
+    ).fetchone()
+    if not latest:
+        return {
+            "value": None,
+            "tanker_count": 0,
+            "all_count": 0,
+            "scene_id": None,
+            "asOf": None,
+            "status": "warming_up",
+        }
+    scene_id, acquired_at = latest
+    counts = con.execute(
+        """
+        SELECT
+            SUM(CASE WHEN likely_tanker THEN 1 ELSE 0 END) AS tankers,
+            COUNT(*) AS total
+        FROM sar_detections
+        WHERE scene_id = ?
+          AND lat BETWEEN ? AND ?
+          AND lon BETWEEN ? AND ?
+        """,
+        [scene_id, lat_min, lat_max, lon_min, lon_max],
+    ).fetchone()
+    tankers = int(counts[0] or 0)
+    total = int(counts[1] or 0)
+    return {
+        "value": tankers,
+        "tanker_count": tankers,
+        "all_count": total,
+        "scene_id": scene_id,
+        "asOf": acquired_at.isoformat() + "Z" if acquired_at else None,
+        "status": "ok" if tankers > 0 else "no_detections",
+    }
+
+
+def sar_strait_vessels(con: duckdb.DuckDBPyConnection) -> dict[str, Any]:
+    """Tanker-class SAR detections in the Hormuz strait box at the
+    most recent pass over the strait."""
+    return _sar_zone_count(con, bbox=_SAR_STRAIT_BBOX)
+
+
+def sar_iran_activity(con: duckdb.DuckDBPyConnection) -> dict[str, Any]:
+    """Tanker-class SAR detections along the Iranian south coast
+    (Bandar Abbas + Lavan + Sirri) at the most recent pass."""
+    return _sar_zone_count(con, bbox=_SAR_IRAN_BBOX)
+
+
 def compute_all(con: duckdb.DuckDBPyConnection, *, day: date) -> dict[str, Any]:
     """Build the full derived-signals block for the snapshot payload.
 
@@ -270,4 +348,6 @@ def compute_all(con: duckdb.DuckDBPyConnection, *, day: date) -> dict[str, Any]:
         "iranExportShare":       iran_export_share(con, day=day),
         "opecCoordinationZ":     opec_coordination_z(con, day=day),
         "chokepointPressure":    chokepoint_pressure(con, day=day),
+        "sarStraitVessels":      sar_strait_vessels(con),
+        "sarIranActivity":       sar_iran_activity(con),
     }

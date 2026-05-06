@@ -11,6 +11,8 @@ export default function DerivedPanel({ derived }) {
   const t = derived.hormuzThroughputMbbl || {};
   const fh = derived.flowHealth || {};
   const cp = derived.chokepointPressure || {};
+  const sarStrait = derived.sarStraitVessels || {};
+  const sarIran = derived.sarIranActivity || {};
 
   // We deliberately don't render iranExportShare / opecCoordinationZ
   // here. Both depend on per-country terminal_departures counts for
@@ -19,8 +21,16 @@ export default function DerivedPanel({ derived }) {
   // silently-broken zeros. The backend still computes them so they're
   // ready to surface the day we add a satellite AIS provider.
 
+  function relTime(iso) {
+    if (!iso) return null;
+    const hrs = (Date.now() - new Date(iso).getTime()) / 3600000;
+    if (hrs < 1) return `${Math.round(hrs * 60)} min ago`;
+    if (hrs < 48) return `${Math.round(hrs)} h ago`;
+    return `${Math.round(hrs / 24)} d ago`;
+  }
+
   return (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-5">
       {/* Throughput */}
       <DerivedCard
         title="Hormuz Throughput"
@@ -62,6 +72,32 @@ export default function DerivedPanel({ derived }) {
         }
         footnote="Idle tankers near Hormuz divided by today's transits"
         status={cp.status || 'warming_up'}
+      />
+
+      {/* SAR Strait Vessels */}
+      <DerivedCard
+        title="SAR · Strait Vessels"
+        valueText={sarStrait.value === null || sarStrait.value === undefined ? '—' : `${sarStrait.value}`}
+        subtle={
+          sarStrait.asOf
+            ? `${sarStrait.all_count || 0} total radar returns · last pass ${relTime(sarStrait.asOf)}`
+            : 'No SAR scene processed yet'
+        }
+        footnote="Tanker-class hulls in the Hormuz chokepoint at the latest Sentinel-1 pass"
+        status={sarStrait.status === 'no_detections' ? 'warming_up' : (sarStrait.status || 'warming_up')}
+      />
+
+      {/* SAR Iran Activity */}
+      <DerivedCard
+        title="SAR · Iran Side"
+        valueText={sarIran.value === null || sarIran.value === undefined ? '—' : `${sarIran.value}`}
+        subtle={
+          sarIran.asOf
+            ? `${sarIran.all_count || 0} total radar returns · last pass ${relTime(sarIran.asOf)}`
+            : 'No SAR scene processed yet'
+        }
+        footnote="Tanker-class hulls along Iran's south coast — the AIS-blind zone"
+        status={sarIran.status === 'no_detections' ? 'warming_up' : (sarIran.status || 'warming_up')}
       />
     </div>
   );
