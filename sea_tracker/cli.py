@@ -402,6 +402,127 @@ def sar_detect_one(
             )
 
 
+@app.command("sar-daily")
+def sar_daily(
+    config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
+    out_dir: Path = typer.Option(
+        Path("C:/sea_tracker/sar"),
+        "--out-dir",
+        help="Where downloaded GRD products live.",
+    ),
+    bbox: str = typer.Option(
+        "25.0,27.5,55.5,57.5",
+        "--bbox", "-b",
+        help="Detection bbox: lat_min,lat_max,lon_min,lon_max. Default = Hormuz strait + approaches.",
+    ),
+    lookback_days: int = typer.Option(3, "--lookback", help="How many days of catalog to scan."),
+    max_scenes: int = typer.Option(
+        4, "--max-scenes",
+        help="Cap how many new scenes per run. First-time runs would otherwise pull 20+ × ~2 GB.",
+    ),
+    prune_days: int = typer.Option(
+        14, "--prune-days",
+        help="Delete GRD .SAFE.zip files older than this. Detections stay in DB.",
+    ),
+) -> None:
+    """Daily SAR pipeline: catalog → download new → detect → persist → prune.
+
+    Designed to run unattended from Task Scheduler after the rest of
+    the daily batch (so it benefits from the collector being stopped
+    and the DuckDB writer being free). Idempotent — already-processed
+    scenes are skipped, already-downloaded files are reused.
+    """
+    from sea_tracker.sar import (
+        _missing_credentials,
+        detect_ships_in_zip,
+        download_scene,
+        filter_tanker_class,
+        find_recent_scenes,
+        persist,
+    )
+
+    cfg = load_config(config)
+    _setup_logging(cfg.log_dir, "sar")
+
+    missing = _missing_credentials()
+    if missing:
+        console.print(f"[yellow]skipping sar-daily: {missing} not set[/yellow]")
+        return
+
+    parts = [float(x) for x in bbox.split(",")]
+    if len(parts) != 4:
+        console.print("[red]--bbox must be lat_min,lat_max,lon_min,lon_max[/red]")
+        raise typer.Exit(code=1)
+    active_bbox = (parts[0], parts[1], parts[2], parts[3])
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Catalog query
+    scenes = find_recent_scenes(active_bbox, days=lookback_days)
+    console.print(f"sar-daily: {len(scenes)} catalog scenes in last {lookback_days} d")
+
+    # 2. Filter to scenes not already in our DB
+    con = _open_db(cfg)
+    try:
+        new_scenes = []
+        for s in scenes:
+            already = con.execute(
+                "SELECT COUNT(*) FROM sar_detections WHERE scene_id = ?",
+                [s.id],
+            ).fetchone()[0]
+            if already > 0:
+                continue
+            new_scenes.append(s)
+            if len(new_scenes) >= max_scenes:
+                break
+        console.print(f"sar-daily: {len(new_scenes)} new scenes to process this run "
+                      f"(cap {max_scenes})")
+
+        # 3. Process each new scene
+        total_dets = 0
+        for s in new_scenes:
+            try:
+                zip_path = download_scene(s, out_dir)
+            except Exception as exc:
+                console.print(f"[yellow]sar-daily: download failed for {s.id}: {exc}[/yellow]")
+                continue
+            try:
+                raw = detect_ships_in_zip(zip_path, active_bbox,
+                                          scene_id=s.id, acquired_at=s.acquired_at)
+            except Exception as exc:
+                console.print(f"[yellow]sar-daily: detection failed for {s.id}: {exc}[/yellow]")
+                continue
+            marked = filter_tanker_class(raw)
+            persist(con, marked)
+            total_dets += len(marked)
+            console.print(f"  {s.id}  acquired={s.acquired_at:%Y-%m-%d %H:%M}  detections={len(marked)}")
+        console.print(f"sar-daily: persisted {total_dets} detections across "
+                      f"{len(new_scenes)} scenes")
+    finally:
+        con.close()
+
+    # 4. Prune old GRD products
+    cutoff = datetime.now(timezone.utc) - timedelta(days=prune_days)
+    pruned = 0
+    pruned_bytes = 0
+    for p in out_dir.glob("*.SAFE.zip"):
+        try:
+            mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+        except OSError:
+            continue
+        if mtime < cutoff:
+            sz = p.stat().st_size
+            try:
+                p.unlink()
+                pruned += 1
+                pruned_bytes += sz
+            except OSError as exc:
+                console.print(f"[yellow]sar-daily: prune failed {p}: {exc}[/yellow]")
+    if pruned:
+        console.print(f"sar-daily: pruned {pruned} GRD files "
+                      f"({pruned_bytes / 1024 / 1024 / 1024:.1f} GB)")
+
+
 @app.command("sar-detect")
 def sar_detect(
     config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
