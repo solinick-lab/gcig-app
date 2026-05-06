@@ -289,12 +289,117 @@ router.post('/grade-predictor/predict', async (req, res) => {
     });
   }
 
+  // Persist the prediction so it shows up in the user's recent-essays
+  // list. We do this best-effort — a failure here doesn't poison the
+  // response the user is waiting for; they just won't see this row in
+  // their history.
+  let analysisId = null;
+  try {
+    const numericGrade =
+      typeof parsed.numeric_grade === 'number' && Number.isFinite(parsed.numeric_grade)
+        ? Math.max(0, Math.min(100, Math.round(parsed.numeric_grade)))
+        : null;
+    const created = await prisma.gradePredictorAnalysis.create({
+      data: {
+        teacher: cleanTeacher || null,
+        essay,
+        rubric: cleanRubric || null,
+        result: parsed,
+        gradeLabel: typeof parsed.grade === 'string' ? parsed.grade.slice(0, 40) : null,
+        numericGrade,
+        confidence:
+          typeof parsed.confidence === 'string'
+            ? parsed.confidence.toLowerCase().slice(0, 16)
+            : null,
+        examplesUsed: examples.length,
+        examplesAvailable,
+        mode: examples.length > 0 ? 'rag' : 'cold-start',
+        createdById: req.user?.id ?? null,
+      },
+      select: { id: true },
+    });
+    analysisId = created.id;
+  } catch (err) {
+    console.warn('grade-predictor: failed to persist analysis:', err.message);
+  }
+
   res.json({
+    analysis_id: analysisId,
     result: parsed,
     examples_used: examples.length,
     examples_available: examplesAvailable,
     used_example_ids: usedExampleIds,
     mode: examples.length > 0 ? 'rag' : 'cold-start',
+  });
+});
+
+// List the current user's past predictions, most recent first. Light
+// payload — no full essay text or full result blob, just the fields the
+// recent-essays card needs to render. The detail route hands over the
+// full record on click.
+router.get('/grade-predictor/analyses', async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'auth required' });
+  const limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
+  const rows = await prisma.gradePredictorAnalysis.findMany({
+    where: { createdById: userId },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    select: {
+      id: true,
+      teacher: true,
+      gradeLabel: true,
+      numericGrade: true,
+      confidence: true,
+      examplesUsed: true,
+      examplesAvailable: true,
+      mode: true,
+      createdAt: true,
+      // First ~140 chars of the essay for the card preview. Pulling the
+      // whole essay just to slice it client-side would balloon the list
+      // payload on members with hundreds of analyses.
+      essay: true,
+    },
+  });
+  res.json(
+    rows.map((r) => ({
+      id: r.id,
+      teacher: r.teacher,
+      grade: r.gradeLabel,
+      numeric_grade: r.numericGrade,
+      confidence: r.confidence,
+      examples_used: r.examplesUsed,
+      examples_available: r.examplesAvailable,
+      mode: r.mode,
+      created_at: r.createdAt,
+      preview: (r.essay || '').replace(/\s+/g, ' ').trim().slice(0, 160),
+    })),
+  );
+});
+
+// Fetch one past prediction. Owner-only — even with the row id, a
+// student can't read another student's essay.
+router.get('/grade-predictor/analyses/:id', async (req, res) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: 'auth required' });
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'invalid id' });
+  }
+  const row = await prisma.gradePredictorAnalysis.findUnique({ where: { id } });
+  if (!row) return res.status(404).json({ error: 'not found' });
+  if (row.createdById !== userId) return res.status(404).json({ error: 'not found' });
+  res.json({
+    id: row.id,
+    teacher: row.teacher,
+    essay: row.essay,
+    rubric: row.rubric,
+    result: row.result,
+    examples_used: row.examplesUsed,
+    examples_available: row.examplesAvailable,
+    mode: row.mode,
+    essay_file_url: row.essayFileUrl,
+    created_at: row.createdAt,
   });
 });
 

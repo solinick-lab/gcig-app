@@ -20,11 +20,14 @@ import {
   Check,
   CheckCircle,
   ChevronDown,
+  ChevronRight,
+  Clock,
   FileText,
   Lightbulb,
   Loader2,
   MessageSquare,
   PenLine,
+  Plus,
   Send,
   Star,
   Target,
@@ -179,6 +182,9 @@ function Header({ health, onClose }) {
 }
 
 function PredictPanel({ teachers, onSaved }) {
+  // 'recent' (default landing) | 'editor' (compose new) | a result is
+  // shown when `result` is set regardless of view.
+  const [view, setView] = useState('recent');
   const [essay, setEssay] = useState('');
   const [rubric, setRubric] = useState('');
   const [teacher, setTeacher] = useState('');
@@ -186,6 +192,11 @@ function PredictPanel({ teachers, onSaved }) {
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
   const [meta, setMeta] = useState(null);
+
+  // Recent essays (own analyses) — landing view.
+  const [recent, setRecent] = useState(null); // null = not loaded yet
+  const [recentError, setRecentError] = useState(null);
+  const [openingId, setOpeningId] = useState(null);
 
   // Comments extracted from an uploaded .docx (Word review comments).
   // Surfaced as a chip on the upload bar and pre-fed into the
@@ -260,6 +271,56 @@ function PredictPanel({ teachers, onSaved }) {
     setDocFileRef(null);
     setDocFileUrl(null);
     setError(null);
+    setView('editor');
+  }
+
+  function backToRecent() {
+    setEssay('');
+    setRubric('');
+    setResult(null);
+    setMeta(null);
+    setDocComments([]);
+    setDocFileRef(null);
+    setDocFileUrl(null);
+    setError(null);
+    setView('recent');
+    refreshRecent();
+  }
+
+  const refreshRecent = useCallback(() => {
+    setRecentError(null);
+    api
+      .get('/sandbox/grade-predictor/analyses?limit=30')
+      .then((r) => setRecent(Array.isArray(r.data) ? r.data : []))
+      .catch((err) => {
+        setRecent([]);
+        setRecentError(err.response?.data?.error || err.message || String(err));
+      });
+  }, []);
+
+  useEffect(() => { refreshRecent(); }, [refreshRecent]);
+
+  async function openAnalysis(id) {
+    setOpeningId(id);
+    setError(null);
+    try {
+      const { data } = await api.get(`/sandbox/grade-predictor/analyses/${id}`);
+      setEssay(data.essay || '');
+      setRubric(data.rubric || '');
+      setTeacher(data.teacher || '');
+      setResult(data.result || null);
+      setMeta({
+        examples_used: data.examples_used,
+        examples_available: data.examples_available,
+      });
+      setDocFileUrl(data.essay_file_url || null);
+      setDocFileRef(null);
+      setDocComments([]);
+    } catch (e) {
+      setError(e.response?.data?.error || e.message || String(e));
+    } finally {
+      setOpeningId(null);
+    }
   }
 
   if (loading) {
@@ -278,7 +339,20 @@ function PredictPanel({ teachers, onSaved }) {
         docFileRef={docFileRef}
         docFileUrl={docFileUrl}
         onNew={startNew}
-        onSaved={onSaved}
+        onBack={backToRecent}
+        onSaved={() => { onSaved?.(); refreshRecent(); }}
+      />
+    );
+  }
+
+  if (view === 'recent') {
+    return (
+      <RecentEssaysView
+        recent={recent}
+        recentError={recentError}
+        openingId={openingId}
+        onOpen={openAnalysis}
+        onNew={() => setView('editor')}
       />
     );
   }
@@ -298,6 +372,7 @@ function PredictPanel({ teachers, onSaved }) {
       docComments={docComments}
       docFileUrl={docFileUrl}
       onSubmit={runPredict}
+      onBack={() => setView('recent')}
       error={error}
     />
   );
@@ -307,7 +382,7 @@ function PredictPanel({ teachers, onSaved }) {
 
 function EditorView({
   essay, setEssay, rubric, setRubric, teacher, setTeacher, teachers, known,
-  uploading, onUpload, docComments, docFileUrl, onSubmit, error,
+  uploading, onUpload, docComments, docFileUrl, onSubmit, onBack, error,
 }) {
   const [rubricExpanded, setRubricExpanded] = useState(false);
 
@@ -371,6 +446,17 @@ function EditorView({
           style={{ borderTop: `1px solid ${C.border}` }}
         >
           <div className="flex items-center gap-3 text-xs flex-wrap" style={{ color: C.textFaint }}>
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="flex items-center gap-1.5 transition-opacity hover:opacity-100"
+                style={{ color: C.textMute }}
+              >
+                <ArrowLeft size={12} /> Recent essays
+              </button>
+            )}
+            {onBack && <span style={{ color: 'rgba(255,255,255,0.15)' }}>·</span>}
             <span className="tabular-nums">
               {wordCount.toLocaleString()} {wordCount === 1 ? 'word' : 'words'}
             </span>
@@ -609,7 +695,7 @@ function SubmittingOverlay({ teacher, known }) {
 
 function ResultView({
   result, meta, teacher, rubric, essay, docComments, docFileRef, docFileUrl,
-  onNew, onSaved,
+  onNew, onBack, onSaved,
 }) {
   if (result?._parse_error) {
     return (
@@ -662,15 +748,27 @@ function ResultView({
   return (
     <div className="flex-1 overflow-auto">
       <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
-        {/* New-essay link */}
-        <button
-          type="button"
-          onClick={onNew}
-          className="text-xs flex items-center gap-1.5 transition-opacity hover:opacity-80"
-          style={{ color: C.textMute }}
-        >
-          <ArrowLeft size={12} /> New essay
-        </button>
+        {/* Back / new-essay links */}
+        <div className="flex items-center gap-4 text-xs">
+          <button
+            type="button"
+            onClick={onBack || onNew}
+            className="flex items-center gap-1.5 transition-opacity hover:opacity-80"
+            style={{ color: C.textMute }}
+          >
+            <ArrowLeft size={12} /> {onBack ? 'Recent essays' : 'Back'}
+          </button>
+          {onBack && (
+            <button
+              type="button"
+              onClick={onNew}
+              className="flex items-center gap-1.5 transition-opacity hover:opacity-80"
+              style={{ color: C.textMute }}
+            >
+              <Plus size={12} /> New essay
+            </button>
+          )}
+        </div>
 
         {/* Grade hero */}
         <div className="rounded-2xl p-7" style={{ background: C.surface, border: `1px solid ${C.border}` }}>
@@ -1113,6 +1211,153 @@ function confidenceStyle(conf) {
   if (conf === 'high') return { background: 'rgba(74,222,128,0.10)', color: '#4ade80' };
   if (conf === 'low') return { background: 'rgba(239,68,68,0.10)', color: '#f87171' };
   return { background: 'rgba(251,191,36,0.10)', color: '#fbbf24' };
+}
+
+// ─── Recent essays (landing) ──────────────────────────────────────────
+//
+// First thing a member sees on /sandbox: a list of their own past
+// predictions, most recent first. Click a card to re-open the result
+// panel populated from the persisted JSON; click "New essay" up top
+// to drop into the editor for a fresh prediction.
+
+function RecentEssaysView({ recent, recentError, openingId, onOpen, onNew }) {
+  return (
+    <div className="flex-1 overflow-auto px-6 py-12">
+      <div className="max-w-3xl mx-auto">
+        <div className="flex items-center justify-between mb-8 gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold" style={{ color: C.text }}>Your essays</h1>
+            <p className="text-sm mt-1" style={{ color: C.textMute }}>
+              Past grade predictions you&apos;ve run. Open one to revisit the
+              feedback, or start a new analysis.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onNew}
+            className="h-10 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 flex-shrink-0"
+            style={{ background: C.text, color: C.bg }}
+          >
+            <Plus size={14} /> New essay
+          </button>
+        </div>
+
+        {recent === null ? (
+          <div className="py-8 flex items-center gap-2 justify-center text-sm" style={{ color: C.textMute }}>
+            <Loader2 size={14} className="animate-spin" /> Loading…
+          </div>
+        ) : recentError ? (
+          <div
+            className="rounded-xl p-5 text-sm"
+            style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.20)', color: '#fca5a5' }}
+          >
+            <div className="font-semibold">Couldn&apos;t load past essays</div>
+            <div className="mt-1 text-xs">{recentError}</div>
+          </div>
+        ) : recent.length === 0 ? (
+          <div
+            className="rounded-xl p-8 text-sm text-center"
+            style={{ background: C.surface, border: `1px solid ${C.border}`, color: C.textMute }}
+          >
+            <FileText size={20} className="mx-auto mb-3" style={{ color: C.textFaint }} />
+            <div className="font-medium" style={{ color: C.text }}>No essays yet</div>
+            <p className="mt-1 text-xs" style={{ color: C.textFaint }}>
+              Start by clicking <span style={{ color: C.text }}>New essay</span> up top.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {recent.map((a) => (
+              <RecentCard
+                key={a.id}
+                a={a}
+                opening={openingId === a.id}
+                onClick={() => onOpen(a.id)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RecentCard({ a, opening, onClick }) {
+  const conf = (a.confidence || '').toLowerCase();
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={opening}
+      className="w-full text-left p-4 rounded-xl transition-all flex items-start gap-4 disabled:opacity-50"
+      style={{ background: C.surface, border: `1px solid ${C.border}` }}
+      onMouseEnter={(e) => !opening && (e.currentTarget.style.background = C.surfaceHover)}
+      onMouseLeave={(e) => (e.currentTarget.style.background = C.surface)}
+    >
+      <div
+        className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+        style={{ background: C.accentSoft }}
+      >
+        <span className="text-sm font-semibold" style={{ color: C.accent }}>
+          {a.grade || '—'}
+        </span>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium" style={{ color: C.text }}>
+            {a.teacher || <span style={{ color: C.textFaint }}>untagged</span>}
+          </span>
+          {conf && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded font-medium capitalize"
+              style={confidenceStyle(conf)}
+            >
+              {conf}
+            </span>
+          )}
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wider"
+            style={{
+              background: a.mode === 'rag' ? C.accentSoft : 'rgba(255,255,255,0.05)',
+              color: a.mode === 'rag' ? C.accent : C.textFaint,
+            }}
+          >
+            {a.mode === 'rag' ? `rag · ${a.examples_used}` : 'cold start'}
+          </span>
+        </div>
+        {a.preview && (
+          <p className="mt-1 text-xs leading-relaxed line-clamp-2" style={{ color: C.textMute }}>
+            {a.preview}
+            {a.preview.length >= 160 && '…'}
+          </p>
+        )}
+        <div className="mt-1.5 flex items-center gap-1 text-[11px]" style={{ color: C.textFaint }}>
+          <Clock size={10} />
+          {fmtAgo(a.created_at)}
+        </div>
+      </div>
+      {opening
+        ? <Loader2 size={14} className="animate-spin mt-1.5 flex-shrink-0" style={{ color: C.textFaint }} />
+        : <ChevronRight size={16} className="mt-1.5 flex-shrink-0" style={{ color: 'rgba(255,255,255,0.20)' }} />}
+    </button>
+  );
+}
+
+function fmtAgo(iso) {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return '';
+  const diffMs = Date.now() - t;
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 60) return 'just now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  const mo = Math.floor(day / 30);
+  return `${mo}mo ago`;
 }
 
 // Render a list of {author, date, text} comments pulled from a .docx

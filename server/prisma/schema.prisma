@@ -88,6 +88,7 @@ model User {
   pmDecisions       PitchRequest[]   @relation("PitchRequestPM")
   rosterOverrides   EventRosterOverride[]
   gradeExamples     GradePredictorExample[]
+  gradeAnalyses     GradePredictorAnalysis[]
 }
 
 // Chat channels are addressed by a simple string:
@@ -585,6 +586,45 @@ model GradePredictorExample {
 
   @@index([teacher])
   @@index([createdAt])
+}
+
+// Snapshot of every /predict call so members can come back to a past
+// essay without re-running the LLM. Mirrors the GradePredictorExample
+// table (essay + teacher + rubric) but additionally stores the LLM's
+// raw JSON response and the RAG metadata so the result panel can
+// render exactly what was shown the first time. Per-user — each row
+// is owned by its createdBy and only that user (or the super-admin
+// gate) can read it back.
+model GradePredictorAnalysis {
+  id          Int      @id @default(autoincrement())
+  teacher     String?  // free-text, may be empty for cold-start
+  essay       String   // the student's submission, verbatim
+  rubric      String?
+  // The LLM's parsed JSON object — line_by_line, overall_feedback,
+  // grade, severity/category per comment, strengths/weaknesses,
+  // next_steps, etc. Stored as Json so we can index into it later
+  // (e.g. distribution of predicted grades) without reparsing strings.
+  result      Json
+  // Denormalized hot fields, copied out of `result` at write time so
+  // the recent-essays list renders without parsing every JSON blob.
+  gradeLabel    String?
+  numericGrade  Int?
+  confidence    String?
+  // RAG metadata at the time of the prediction. Useful for both the
+  // result-panel "grounded in N of M" line and for later analysis of
+  // how cold-start vs RAG-grounded predictions compare in accuracy.
+  examplesUsed     Int      @default(0)
+  examplesAvailable Int     @default(0)
+  mode             String?   // 'rag' | 'cold-start'
+  // Optional .docx archival reference, mirroring GradePredictorExample.
+  essayFileRef String?
+  essayFileUrl String?
+  createdById Int?
+  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@index([createdById, createdAt])
+  @@index([teacher])
 }
 
 model ArticleRanking {
