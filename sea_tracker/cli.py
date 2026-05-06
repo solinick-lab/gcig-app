@@ -523,6 +523,140 @@ def sar_daily(
                       f"({pruned_bytes / 1024 / 1024 / 1024:.1f} GB)")
 
 
+@app.command("sar-backfill")
+def sar_backfill(
+    start: str = typer.Option(..., "--start", help="YYYY-MM-DD inclusive."),
+    end: str = typer.Option(..., "--end", help="YYYY-MM-DD inclusive."),
+    config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
+    out_dir: Path = typer.Option(
+        Path("C:/sea_tracker/sar"),
+        "--out-dir",
+        help="Where downloaded GRD products are temporarily cached.",
+    ),
+    bbox: str = typer.Option(
+        "25.0,27.5,55.5,57.2",
+        "--bbox", "-b",
+        help="Detection bbox.",
+    ),
+    max_scenes: int = typer.Option(
+        6, "--max-scenes",
+        help="How many scenes to process THIS run. Run again to continue backfilling.",
+    ),
+    keep_imagery: bool = typer.Option(
+        False, "--keep-imagery/--delete-imagery",
+        help="By default delete each .SAFE.zip after detection — backfill is detection-only.",
+    ),
+) -> None:
+    """Backfill SAR detections over a historical date range.
+
+    Use case: build a pre-event baseline so the strait/Iran cards
+    have something to compare against. Idempotent — already-processed
+    scenes are skipped, so multiple runs against the same window
+    safely continue where the previous one stopped.
+
+    Imagery is deleted after each scene by default (each GRD is ~2 GB
+    and we don't need to keep them for backfill — just the detections
+    in DuckDB).
+    """
+    from datetime import datetime as _dt
+    from sea_tracker.sar import (
+        _missing_credentials,
+        detect_ships_in_zip,
+        download_scene,
+        filter_tanker_class,
+        find_recent_scenes,
+        persist,
+    )
+
+    cfg = load_config(config)
+    _setup_logging(cfg.log_dir, "sar")
+    missing = _missing_credentials()
+    if missing:
+        console.print(f"[red]Missing env var: {missing}[/red]")
+        raise typer.Exit(code=1)
+
+    parts = [float(x) for x in bbox.split(",")]
+    if len(parts) != 4:
+        console.print("[red]--bbox must be lat_min,lat_max,lon_min,lon_max[/red]")
+        raise typer.Exit(code=1)
+    active_bbox = (parts[0], parts[1], parts[2], parts[3])
+
+    try:
+        start_dt = _dt.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        end_dt = _dt.strptime(end, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(days=1)
+    except ValueError as exc:
+        console.print(f"[red]Date format must be YYYY-MM-DD: {exc}[/red]")
+        raise typer.Exit(code=1)
+
+    # find_recent_scenes is implemented as `now - days .. now`. We
+    # parameterise it via `now` and a synthetic days span to query
+    # any historical window.
+    days = int((end_dt - start_dt).total_seconds() // 86400)
+    if days < 1:
+        console.print("[red]end must be on/after start[/red]")
+        raise typer.Exit(code=1)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    scenes = find_recent_scenes(active_bbox, days=days, now=end_dt)
+    console.print(f"sar-backfill: catalog returned {len(scenes)} scenes "
+                  f"between {start} and {end}")
+
+    con = _open_db(cfg)
+    try:
+        new_scenes = []
+        for s in scenes:
+            already = con.execute(
+                "SELECT COUNT(*) FROM sar_detections WHERE scene_id = ?",
+                [s.id],
+            ).fetchone()[0]
+            if already > 0:
+                continue
+            new_scenes.append(s)
+            if len(new_scenes) >= max_scenes:
+                break
+        console.print(f"sar-backfill: {len(new_scenes)} unprocessed scenes "
+                      f"this run (cap {max_scenes})")
+
+        total_dets = 0
+        for i, s in enumerate(new_scenes, 1):
+            console.print(f"  [{i}/{len(new_scenes)}] {s.acquired_at:%Y-%m-%d %H:%M}  "
+                          f"{s.id[:36]}")
+            try:
+                zip_path = download_scene(s, out_dir)
+            except Exception as exc:
+                console.print(f"    [yellow]download failed: {exc}[/yellow]")
+                continue
+            try:
+                raw = detect_ships_in_zip(
+                    zip_path, active_bbox,
+                    scene_id=s.id, acquired_at=s.acquired_at,
+                )
+            except Exception as exc:
+                console.print(f"    [yellow]detection failed: {exc}[/yellow]")
+                continue
+            marked = filter_tanker_class(raw)
+            persist(con, marked)
+            total_dets += len(marked)
+            tankers = sum(1 for d in marked if d.likely_tanker)
+            console.print(f"    -> {len(marked)} detections, {tankers} tanker-class")
+            if not keep_imagery:
+                try:
+                    zip_path.unlink()
+                except OSError as exc:
+                    console.print(f"    [yellow]could not delete imagery: {exc}[/yellow]")
+
+        console.print(f"sar-backfill: {total_dets} detections added across "
+                      f"{len(new_scenes)} scenes")
+        if len(new_scenes) >= max_scenes:
+            console.print(
+                "[yellow]hit per-run cap — re-run the same command to "
+                "continue backfilling.[/yellow]"
+            )
+    finally:
+        con.close()
+
+
 @app.command("sar-detect")
 def sar_detect(
     config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
