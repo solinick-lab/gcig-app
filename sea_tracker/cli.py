@@ -247,6 +247,76 @@ def publish_snapshot(
         con.close()
 
 
+@app.command("sar-find")
+def sar_find(
+    config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
+    days: int = typer.Option(14, "--days", "-d"),
+) -> None:
+    """List Sentinel-1 GRD scenes covering the bbox in the last N
+    days. No auth required, no download — pure catalog inspection."""
+    from sea_tracker.sar import find_recent_scenes
+
+    cfg = load_config(config)
+    scenes = find_recent_scenes(cfg.bbox, days=days)
+    if not scenes:
+        console.print(f"No Sentinel-1 GRD scenes for bbox in last {days} days.")
+        return
+    t = Table(title=f"Sentinel-1 GRD scenes (last {days} days)")
+    t.add_column("acquired (UTC)")
+    t.add_column("orbit")
+    t.add_column("pol")
+    t.add_column("id (truncated)")
+    for s in scenes:
+        t.add_row(
+            s.acquired_at.strftime("%Y-%m-%d %H:%M"),
+            s.orbit_pass[:4],
+            s.polarization[:5],
+            s.id[:36],
+        )
+    console.print(t)
+
+
+@app.command("sar-download")
+def sar_download(
+    scene_id: str = typer.Argument(..., help="Scene UUID from sar-find."),
+    config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
+    out_dir: Path = typer.Option(
+        Path("C:/sea_tracker/sar"),
+        "--out-dir",
+        help="Where to cache downloaded GRD products.",
+    ),
+) -> None:
+    """Download a single GRD scene by id. Useful for one-off testing
+    before wiring up the full daily pipeline."""
+    from sea_tracker.sar import (
+        SarScene,
+        _missing_credentials,
+        download_scene,
+        find_recent_scenes,
+    )
+
+    cfg = load_config(config)
+    _setup_logging(cfg.log_dir, "sar")
+    missing = _missing_credentials()
+    if missing:
+        console.print(f"[red]Missing env var: {missing}[/red]")
+        console.print(
+            "Register at https://dataspace.copernicus.eu/ and add CDSE_USERNAME "
+            "and CDSE_PASSWORD to C:/sea_tracker/.env"
+        )
+        raise typer.Exit(code=1)
+    # Re-fetch the full record so we have the right href + metadata.
+    candidates = find_recent_scenes(cfg.bbox, days=30)
+    match = next((s for s in candidates if s.id == scene_id), None)
+    if match is None:
+        console.print(f"[red]Scene id {scene_id} not in last 30 days of catalog.[/red]")
+        raise typer.Exit(code=1)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = download_scene(match, out_dir)
+    size_mb = path.stat().st_size / (1024 * 1024)
+    console.print(f"downloaded {path} ({size_mb:.1f} MB)")
+
+
 @app.command("sar-detect")
 def sar_detect(
     config: Path = typer.Option(Path("config.toml"), "--config", "-c"),
@@ -256,16 +326,13 @@ def sar_detect(
         help="Where to cache downloaded GRD products.",
     ),
 ) -> None:
-    """Run the Sentinel-1 SAR ship-detection pipeline once.
+    """Run the full Sentinel-1 SAR ship-detection pipeline once.
 
     Looks for new scenes covering the bbox in the last 14 days,
     downloads, detects ships, and persists to sar_detections.
     Designed to run daily from Task Scheduler — most invocations
-    find no new scene and return quickly. Requires CDSE_USERNAME /
-    CDSE_PASSWORD in the environment (Copernicus Data Space
-    credentials). Stage-1 scaffolding: every step beyond the
-    catalog query raises NotImplementedError until the full
-    pipeline is in.
+    find no new scene and return quickly. Stage-1+2 implemented;
+    detect_ships still raises NotImplementedError until Stage 3.
     """
     from sea_tracker.sar import run_once, _missing_credentials
 

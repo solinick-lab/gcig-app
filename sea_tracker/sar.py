@@ -30,13 +30,24 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
+import requests
+
 logger = logging.getLogger(__name__)
 
 
-# Copernicus Data Space catalog STAC root. Anonymous queries are
-# allowed; download requires auth.
-CDSE_STAC = "https://catalogue.dataspace.copernicus.eu/stac"
-CDSE_S1_COLLECTION = "SENTINEL-1"
+# Copernicus Data Space OData catalog. We use OData (not STAC) because
+# the OData catalog is the official documented interface for both
+# product search and download, and the URL structure is stable.
+CDSE_ODATA = "https://catalogue.dataspace.copernicus.eu/odata/v1"
+CDSE_DOWNLOAD = "https://download.dataspace.copernicus.eu/odata/v1"
+
+# OIDC token endpoint for the username/password grant. The cdse-public
+# client ID is the standard public client for end-user auth.
+CDSE_TOKEN_URL = (
+    "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/"
+    "protocol/openid-connect/token"
+)
+CDSE_CLIENT_ID = "cdse-public"
 
 
 @dataclass(frozen=True)
@@ -62,35 +73,149 @@ class SarDetection:
     likely_tanker: bool     # passes the size filter
 
 
-# ── Stage 1: Catalog query ───────────────────────────────────────────
+# ── Stage 2a: Catalog query ──────────────────────────────────────────
+
+def _bbox_to_polygon_wkt(
+    bbox: tuple[float, float, float, float],
+) -> str:
+    """OData expects a closed POLYGON in WKT, lon/lat order."""
+    lat_min, lat_max, lon_min, lon_max = bbox
+    return (
+        f"POLYGON(({lon_min} {lat_min},{lon_max} {lat_min},"
+        f"{lon_max} {lat_max},{lon_min} {lat_max},{lon_min} {lat_min}))"
+    )
+
 
 def find_recent_scenes(
     bbox: tuple[float, float, float, float],
     *,
     days: int = 14,
     now: datetime | None = None,
+    product_type: str = "GRD",
 ) -> list[SarScene]:
-    """Return Sentinel-1 GRD scenes covering `bbox` in the last `days`.
+    """Sentinel-1 scenes covering `bbox` in the last `days`.
 
-    Empty list if no scene's footprint intersects the bbox in the
-    window. STAC queries the Copernicus Data Space catalog with no
-    auth required — auth is only needed for the actual GRD download
-    in stage 2.
+    OData query — no auth required. We filter by:
+      - collection name (SENTINEL-1)
+      - product type (GRD)
+      - sensor mode (IW — the standard Persian Gulf coverage mode)
+      - acquisition time within the window
+      - footprint intersects bbox
+
+    Returns scenes sorted newest-first.
     """
-    raise NotImplementedError("Stage 2: STAC query — not built yet")
+    now = now or datetime.now(timezone.utc)
+    start = now - timedelta(days=days)
+    poly = _bbox_to_polygon_wkt(bbox)
+
+    # OData query string. Quoting matters — single quotes for string
+    # literals, double quotes inside the query are not allowed.
+    fmt = "%Y-%m-%dT%H:%M:%S.000Z"
+    filt = (
+        "Collection/Name eq 'SENTINEL-1' and "
+        f"OData.CSC.Intersects(area=geography'SRID=4326;{poly}') and "
+        f"ContentDate/Start gt {start.strftime(fmt)} and "
+        f"ContentDate/Start lt {now.strftime(fmt)} and "
+        "Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'productType' "
+        f"and att/OData.CSC.StringAttribute/Value eq '{product_type}') and "
+        "Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'operationalMode' "
+        "and att/OData.CSC.StringAttribute/Value eq 'IW')"
+    )
+    params = {
+        "$filter": filt,
+        "$orderby": "ContentDate/Start desc",
+        "$top": "20",
+    }
+    url = f"{CDSE_ODATA}/Products"
+    resp = requests.get(url, params=params, timeout=60)
+    if resp.status_code >= 400:
+        raise RuntimeError(
+            f"CDSE catalog query failed: {resp.status_code} {resp.text[:300]}"
+        )
+    data = resp.json()
+    out: list[SarScene] = []
+    for item in data.get("value", []):
+        # Attributes is a list of {Name, Value, ValueType}; we just
+        # care about a few.
+        attrs = {a["Name"]: a.get("Value") for a in (item.get("Attributes") or [])}
+        acquired = item.get("ContentDate", {}).get("Start") or item.get("OriginDate")
+        try:
+            acquired_dt = datetime.fromisoformat(acquired.replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            acquired_dt = now
+        out.append(SarScene(
+            id=item["Id"],
+            acquired_at=acquired_dt,
+            href=f"{CDSE_DOWNLOAD}/Products({item['Id']})/$value",
+            polarization=str(attrs.get("polarisationChannels") or ""),
+            orbit_pass=str(attrs.get("orbitDirection") or ""),
+        ))
+    return out
 
 
-# ── Stage 2: Download ────────────────────────────────────────────────
+# ── Stage 2b: Auth + download ────────────────────────────────────────
+
+def _get_access_token() -> str:
+    """Exchange CDSE_USERNAME/PASSWORD for an OIDC access token.
+
+    The token lifetime is short (10 min). We don't cache here — each
+    download fetches a fresh token, which costs one round-trip per
+    GRD pull and avoids stale-token edge cases on long downloads.
+    """
+    user = os.environ.get("CDSE_USERNAME")
+    pw = os.environ.get("CDSE_PASSWORD")
+    if not user or not pw:
+        raise RuntimeError("CDSE_USERNAME and CDSE_PASSWORD must be set in env")
+    resp = requests.post(
+        CDSE_TOKEN_URL,
+        data={
+            "client_id": CDSE_CLIENT_ID,
+            "username": user,
+            "password": pw,
+            "grant_type": "password",
+        },
+        timeout=30,
+    )
+    if resp.status_code >= 400:
+        raise RuntimeError(
+            f"CDSE auth failed: {resp.status_code} {resp.text[:300]}"
+        )
+    return resp.json()["access_token"]
+
 
 def download_scene(scene: SarScene, out_dir: Path) -> Path:
-    """Download the GRD product to `out_dir / scene.id.SAFE.zip` and
-    return the path. Resumable; idempotent (skips if already on disk).
+    """Download the GRD product. Idempotent: skips if the file
+    already exists on disk and is non-empty.
 
-    Authentication: Copernicus Data Space OIDC token flow. Reads
-    CDSE_USERNAME and CDSE_PASSWORD from the process environment —
-    the operator should set these once in `C:\\sea_tracker\\.env`.
+    Sentinel-1 GRD products are ~1 GB each. The CDSE download
+    endpoint returns a ZIP that contains the .SAFE folder.
     """
-    raise NotImplementedError("Stage 2: GRD download — not built yet")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{scene.id}.SAFE.zip"
+    if out_path.exists() and out_path.stat().st_size > 0:
+        logger.info("sar: scene %s already downloaded", scene.id)
+        return out_path
+
+    token = _get_access_token()
+    logger.info("sar: downloading %s -> %s", scene.id, out_path)
+    with requests.get(
+        scene.href,
+        headers={"Authorization": f"Bearer {token}"},
+        stream=True,
+        timeout=600,
+        allow_redirects=True,
+    ) as r:
+        if r.status_code >= 400:
+            raise RuntimeError(
+                f"CDSE download failed: {r.status_code} {r.text[:200]}"
+            )
+        tmp = out_path.with_suffix(".zip.part")
+        with tmp.open("wb") as f:
+            for chunk in r.iter_content(chunk_size=8 * 1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+        tmp.rename(out_path)
+    return out_path
 
 
 # ── Stage 3: CFAR ship detection ─────────────────────────────────────
