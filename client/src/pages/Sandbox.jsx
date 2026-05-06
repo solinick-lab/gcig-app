@@ -1,18 +1,53 @@
 // Grade Predictor — full-screen page rendered outside the Layout wrapper
-// so the predict + result panels get the whole viewport. Open to every
-// logged-in member of the club; the route is reachable from the sidebar.
+// so the editor + result panel get the whole viewport. Open to every
+// logged-in member of the club; reachable from the sidebar.
 //
-// Talks to the gcig-api at /api/sandbox/grade-predictor/*, which fans out
-// to the shared LLM client (qwen2.5:7b on the Cloudflare-tunneled local
-// Ollama, with OpenAI fallback). Per-teacher RAG over a corpus of saved
-// (essay, real teacher feedback, real grade) tuples; cold-start prompt
-// fallback for unknown teachers.
+// The chrome is a port of HenriFiszel1/ot-ai's Optimize-Teacher-AI design
+// language — dark #141414 surface, #6398FF accent, GPTZero-style split
+// editor with a context sidebar. The wire is unchanged: gcig-api at
+// /api/sandbox/grade-predictor/*, which fans out to the shared LLM client
+// (qwen2.5:7b on the Cloudflare-tunneled local Ollama, with OpenAI
+// fallback). Per-teacher RAG over (essay, real teacher feedback, real
+// grade) tuples stored in Postgres; .docx upload archives the original
+// to OneDrive and pre-extracts review comments into the training panel.
 
 import { Navigate, useNavigate } from 'react-router-dom';
-import { X, Upload, FileText, BookOpen, Loader2, AlertCircle, GraduationCap, Check } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowLeft,
+  Brain,
+  Check,
+  CheckCircle,
+  ChevronDown,
+  FileText,
+  Loader2,
+  PenLine,
+  Send,
+  Upload,
+  User,
+  X,
+} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import api from '../api/client.js';
+
+// Palette pulled from the ot-ai reference. Inline rather than threaded
+// into Tailwind config because this page is the only surface that wears
+// it — the rest of gcig stays navy/gold.
+const C = {
+  bg: '#141414',
+  surface: 'rgba(255,255,255,0.03)',
+  surfaceHover: 'rgba(255,255,255,0.05)',
+  border: 'rgba(255,255,255,0.08)',
+  borderStrong: 'rgba(255,255,255,0.18)',
+  text: '#F2F2FF',
+  textMute: 'rgba(255,255,255,0.55)',
+  textFaint: 'rgba(255,255,255,0.30)',
+  accent: '#6398FF',
+  accentSoft: 'rgba(99,152,255,0.10)',
+  accentBorder: 'rgba(99,152,255,0.30)',
+};
 
 export default function Sandbox() {
   const { user, loading } = useAuth();
@@ -22,60 +57,31 @@ export default function Sandbox() {
   if (!user) return <Navigate to="/login" replace />;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-white">
-      <header className="flex items-center justify-between border-b border-navy/10 px-6 py-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-semibold text-navy">Grade Predictor</h1>
-          <span className="rounded-md bg-gold/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-gold">
-            Beta
-          </span>
-        </div>
-        <button
-          type="button"
-          onClick={() => navigate('/dashboard')}
-          className="rounded-full p-2 text-navy/60 hover:bg-navy/5 hover:text-navy"
-          aria-label="Close"
-          title="Close"
-        >
-          <X size={20} />
-        </button>
-      </header>
-      <main className="flex-1 overflow-auto bg-navy/[0.02] px-6 py-8">
-        <GradePredictor />
-      </main>
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: C.bg, color: C.text }}>
+      <GradePredictor onClose={() => navigate('/dashboard')} />
     </div>
   );
 }
 
-// ─── Grade Predictor scaffold ──────────────────────────────────────────
+// ─── Top-level shell ──────────────────────────────────────────────────
+//
 // The shape of the project as Thomas described it:
 //
-//   1. Student submits an essay (paste text or upload .docx / .pdf)
-//      and optionally an assignment rubric.
+//   1. Student submits an essay (paste text or upload .docx) and
+//      optionally an assignment rubric.
 //   2. Once the teacher returns the essay graded, the student feeds
 //      the teacher's feedback + final grade back in. That tuple
 //      (essay, feedback, grade, teacher) is training data.
 //   3. As the corpus grows, the model learns each teacher's grading
 //      style and rubric weighting. A per-teacher profile builds up.
 //   4. For new essays, the model produces line-by-line comments in
-//      the style of the named teacher, plus a grade prediction. If
-//      a rubric is supplied up front, the prediction is broken out
-//      by criterion.
-//
-// This component lays out the entry surfaces. No backend wiring yet
-// — buttons are inert. The upstream pipeline lives at
-// `~/Desktop/gcig-app/sandbox/` (separate from gcig-app's React+API
-// stack so the model code, training data, and any heavy ML deps can
-// stay isolated).
+//      the style of the named teacher, plus a grade prediction.
 
-function GradePredictor() {
+function GradePredictor({ onClose }) {
   const [health, setHealth] = useState(null);
   const [healthError, setHealthError] = useState(null);
   const [teachers, setTeachers] = useState([]);
 
-  // Probe /health on mount so the panel can show which provider is
-  // active (local Ollama vs OpenAI fallback) and surface a friendly
-  // banner when neither is reachable.
   useEffect(() => {
     let alive = true;
     api
@@ -87,9 +93,6 @@ function GradePredictor() {
     return () => { alive = false; };
   }, []);
 
-  // Pull the per-teacher corpus counts so the predict panel can tell
-  // the user "Anna Grafton: 3 prior examples — RAG will use them" the
-  // moment they finish typing, before they even click Predict.
   const refreshTeachers = useCallback(() => {
     api
       .get('/sandbox/grade-predictor/teachers')
@@ -101,36 +104,73 @@ function GradePredictor() {
   const llmDown = health && !health.active;
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <>
+      <Header health={health} onClose={onClose} />
       {(healthError || llmDown) && (
-        <div className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-          <AlertCircle size={18} className="mt-0.5 shrink-0" />
-          <div>
-            <div className="font-semibold">LLM not reachable</div>
-            <div className="mt-1 text-xs">
-              {healthError
-                ? <>Health check failed — {healthError}.</>
-                : <>Both the local Ollama tunnel and the OpenAI fallback are unavailable.</>}
-            </div>
-          </div>
-        </div>
-      )}
-      {health?.active && (
-        <div className="rounded-xl border border-navy/10 bg-white p-3 text-xs text-navy/70">
-          <span className="font-semibold text-navy">Model:</span>{' '}
-          {health.active === 'local'
-            ? <>local Ollama · <code>{health.local?.model}</code> · {health.local?.latencyMs}ms</>
-            : <>OpenAI · <code>{health.openai?.model}</code> · {health.openai?.latencyMs}ms</>}
-        </div>
-      )}
-      {teachers.length > 0 && (
-        <div className="rounded-xl border border-navy/10 bg-white p-3 text-xs text-navy/70">
-          <span className="font-semibold text-navy">Corpus:</span>{' '}
-          {teachers.map((t) => `${t.name} (${t.examples})`).join(' · ')}
+        <div
+          className="px-6 py-2.5 text-xs flex items-center gap-2 flex-shrink-0"
+          style={{ background: 'rgba(239,68,68,0.08)', color: '#fca5a5', borderBottom: '1px solid rgba(239,68,68,0.15)' }}
+        >
+          <AlertCircle size={14} />
+          <span>
+            <span className="font-semibold">LLM unreachable.</span>{' '}
+            {healthError
+              ? <>Health check failed — {healthError}.</>
+              : <>Both the local Ollama tunnel and the OpenAI fallback are unavailable.</>}
+          </span>
         </div>
       )}
       <PredictPanel teachers={teachers} onSaved={refreshTeachers} />
-    </div>
+    </>
+  );
+}
+
+function Header({ health, onClose }) {
+  return (
+    <header
+      className="flex items-center justify-between px-6 h-14 flex-shrink-0"
+      style={{ borderBottom: `1px solid ${C.border}` }}
+    >
+      <div className="flex items-center gap-3">
+        <span
+          className="text-[10px] font-semibold uppercase tracking-widest px-2 py-0.5 rounded-md"
+          style={{ background: C.accentSoft, color: C.accent }}
+        >
+          Beta
+        </span>
+        <span className="text-sm font-semibold" style={{ color: C.text }}>
+          Grade Predictor
+        </span>
+      </div>
+
+      {health?.active && (
+        <div
+          className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs"
+          style={{ background: C.surface, border: `1px solid ${C.border}`, color: C.textMute }}
+        >
+          <span
+            className="w-1.5 h-1.5 rounded-full"
+            style={{ background: health.active === 'local' ? '#4ade80' : '#fbbf24' }}
+          />
+          {health.active === 'local'
+            ? <>local · <code style={{ color: C.text }}>{health.local?.model}</code> · {health.local?.latencyMs}ms</>
+            : <>openai · <code style={{ color: C.text }}>{health.openai?.model}</code> · {health.openai?.latencyMs}ms</>}
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={onClose}
+        className="rounded-full p-2 transition-colors"
+        style={{ color: C.textFaint }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = C.surfaceHover)}
+        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        aria-label="Close"
+        title="Close"
+      >
+        <X size={18} />
+      </button>
+    </header>
   );
 }
 
@@ -143,13 +183,8 @@ function PredictPanel({ teachers, onSaved }) {
   const [result, setResult] = useState(null);
   const [meta, setMeta] = useState(null);
 
-  // Match what the user typed against the corpus, case-insensitively,
-  // so "anna grafton" finds the row tagged "Anna Grafton".
-  const known = teachers?.find(
-    (t) => t.name.toLowerCase() === teacher.trim().toLowerCase()
-  );
   // Comments extracted from an uploaded .docx (Word review comments).
-  // Surfaced as a chip on the essay card and pre-fed into the
+  // Surfaced as a chip on the upload bar and pre-fed into the
   // SaveActualFeedback panel once the prediction renders.
   const [docComments, setDocComments] = useState([]);
   const [uploading, setUploading] = useState(false);
@@ -158,6 +193,10 @@ function PredictPanel({ teachers, onSaved }) {
   // the original file.
   const [docFileRef, setDocFileRef] = useState(null);
   const [docFileUrl, setDocFileUrl] = useState(null);
+
+  const known = teachers?.find(
+    (t) => t.name.toLowerCase() === teacher.trim().toLowerCase()
+  );
 
   async function handleDocxUpload(e) {
     const file = e.target.files?.[0];
@@ -208,120 +247,541 @@ function PredictPanel({ teachers, onSaved }) {
     }
   }
 
+  function startNew() {
+    setEssay('');
+    setRubric('');
+    setResult(null);
+    setMeta(null);
+    setDocComments([]);
+    setDocFileRef(null);
+    setDocFileUrl(null);
+    setError(null);
+  }
+
+  if (loading) {
+    return <SubmittingOverlay teacher={teacher} known={known} />;
+  }
+
+  if (result) {
+    return (
+      <ResultView
+        result={result}
+        meta={meta}
+        teacher={teacher}
+        rubric={rubric}
+        essay={essay}
+        docComments={docComments}
+        docFileRef={docFileRef}
+        docFileUrl={docFileUrl}
+        onNew={startNew}
+        onSaved={onSaved}
+      />
+    );
+  }
+
   return (
-    <>
-      <div className="grid gap-6 md:grid-cols-2">
-        <section className="space-y-4 rounded-2xl border border-navy/10 bg-white p-6 shadow-sm">
-          <header className="flex items-start gap-3">
-            <FileText className="mt-1 shrink-0 text-gold" size={20} />
-            <div>
-              <h2 className="text-base font-semibold text-navy">Essay</h2>
-              <p className="text-xs text-navy/60">Paste the full essay text. File upload coming.</p>
+    <EditorView
+      essay={essay}
+      setEssay={setEssay}
+      rubric={rubric}
+      setRubric={setRubric}
+      teacher={teacher}
+      setTeacher={setTeacher}
+      teachers={teachers}
+      known={known}
+      uploading={uploading}
+      onUpload={handleDocxUpload}
+      docComments={docComments}
+      docFileUrl={docFileUrl}
+      onSubmit={runPredict}
+      error={error}
+    />
+  );
+}
+
+// ─── Editor view (split panel) ────────────────────────────────────────
+
+function EditorView({
+  essay, setEssay, rubric, setRubric, teacher, setTeacher, teachers, known,
+  uploading, onUpload, docComments, docFileUrl, onSubmit, error,
+}) {
+  const [rubricExpanded, setRubricExpanded] = useState(false);
+
+  const wordCount = useMemo(() => (essay.trim() ? essay.trim().split(/\s+/).length : 0), [essay]);
+  const canSubmit = essay.trim().length > 50;
+
+  return (
+    <div className="flex flex-1 overflow-hidden">
+      {/* ── Left: editor ─────────────────────────────────────────── */}
+      <div
+        className="flex flex-col flex-1 min-w-0"
+        style={{ borderRight: `1px solid ${C.border}` }}
+      >
+        {error && (
+          <div
+            className="px-6 py-2.5 text-sm flex-shrink-0"
+            style={{ background: 'rgba(239,68,68,0.08)', color: '#f87171' }}
+          >
+            {error}
+          </div>
+        )}
+
+        {/* Rubric collapsible */}
+        <div style={{ borderBottom: `1px solid ${C.border}` }}>
+          <CollapseHeader
+            label="Assignment rubric"
+            preview={rubric && !rubricExpanded ? rubric.slice(0, 80) + (rubric.length > 80 ? '…' : '') : null}
+            badge={!rubric ? { text: 'optional', tone: 'mute' } : null}
+            expanded={rubricExpanded}
+            onToggle={() => setRubricExpanded(!rubricExpanded)}
+          />
+          {rubricExpanded && (
+            <div className="px-5 pb-4">
+              <textarea
+                value={rubric}
+                onChange={(e) => setRubric(e.target.value)}
+                placeholder="Paste the rubric so the prediction can break out by criterion. Optional."
+                className="w-full p-3 rounded-lg text-sm bg-transparent focus:outline-none resize-none transition-colors"
+                style={{ border: `1px solid ${C.border}`, color: C.text, minHeight: 80 }}
+                onFocus={(e) => (e.target.style.borderColor = C.borderStrong)}
+                onBlur={(e) => (e.target.style.borderColor = C.border)}
+              />
             </div>
-          </header>
+          )}
+        </div>
+
+        {/* Essay textarea fills the rest */}
+        <div className="flex-1 overflow-hidden">
           <textarea
             value={essay}
             onChange={(e) => setEssay(e.target.value)}
-            placeholder="Paste the essay here, or upload a .docx →"
-            className="h-64 w-full resize-none rounded-lg border border-navy/15 px-3 py-2 text-sm leading-relaxed focus:border-gold focus:outline-none"
+            placeholder="Paste the essay here, or upload a .docx in the bottom bar →"
+            className="w-full h-full p-6 bg-transparent text-sm leading-7 focus:outline-none resize-none"
+            style={{ color: '#E8E8F0' }}
           />
-          <div className="flex items-center justify-between text-xs text-navy/50">
-            <span>{essay.length.toLocaleString()} chars · {countWords(essay).toLocaleString()} words</span>
-            <label className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-dashed border-navy/30 px-2 py-1 text-navy/70 hover:border-gold hover:text-navy">
+        </div>
+
+        {/* Bottom action bar */}
+        <div
+          className="px-6 py-3 flex items-center justify-between flex-shrink-0 gap-4"
+          style={{ borderTop: `1px solid ${C.border}` }}
+        >
+          <div className="flex items-center gap-3 text-xs flex-wrap" style={{ color: C.textFaint }}>
+            <span className="tabular-nums">
+              {wordCount.toLocaleString()} {wordCount === 1 ? 'word' : 'words'}
+            </span>
+            {wordCount > 0 && wordCount < 100 && (
+              <span style={{ color: '#fbbf24' }}>· short essays may be less accurate</span>
+            )}
+            {docComments.length > 0 && (
+              <span style={{ color: '#4ade80' }}>
+                · {docComments.length} comment{docComments.length === 1 ? '' : 's'} extracted
+              </span>
+            )}
+            {docFileUrl && (
+              <a
+                href={docFileUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="underline transition-opacity hover:opacity-80"
+                style={{ color: C.textMute }}
+              >
+                · view original on OneDrive
+              </a>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label
+              className="h-9 px-3 rounded-lg text-xs font-medium flex items-center gap-1.5 cursor-pointer transition-colors"
+              style={{ background: C.surface, color: C.textMute, border: `1px solid ${C.border}` }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = C.surfaceHover)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = C.surface)}
+            >
               {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
               {uploading ? 'Parsing…' : 'Upload .docx'}
               <input
                 type="file"
                 accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                onChange={handleDocxUpload}
+                onChange={onUpload}
                 className="hidden"
               />
             </label>
+            <button
+              type="button"
+              disabled={!canSubmit}
+              onClick={onSubmit}
+              className="h-9 px-5 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+              style={{ background: C.text, color: C.bg }}
+            >
+              <Send size={13} /> Analyze
+            </button>
           </div>
-          {docComments.length > 0 && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-[11px] text-emerald-900">
-              Extracted {docComments.length} teacher comment{docComments.length === 1 ? '' : 's'} from the .docx.
-              They'll be pre-filled in the training-data panel below the prediction.
-            </div>
-          )}
-          {docFileUrl && (
-            <div className="text-[11px] text-navy/50">
-              Saved to OneDrive ·{' '}
-              <a href={docFileUrl} target="_blank" rel="noreferrer" className="underline hover:text-navy">
-                view original
-              </a>
-            </div>
-          )}
-        </section>
+        </div>
+      </div>
 
-        <section className="space-y-4 rounded-2xl border border-navy/10 bg-white p-6 shadow-sm">
-          <header className="flex items-start gap-3">
-            <BookOpen className="mt-1 shrink-0 text-gold" size={20} />
-            <div>
-              <h2 className="text-base font-semibold text-navy">Context (optional)</h2>
-              <p className="text-xs text-navy/60">A rubric and the grading teacher both improve the prediction.</p>
+      {/* ── Right: context sidebar ─────────────────────────────── */}
+      <aside className="w-[320px] flex-shrink-0 overflow-y-auto" style={{ background: 'rgba(255,255,255,0.012)' }}>
+        <div className="p-6 space-y-6">
+          <SidebarSection label="Grading Model">
+            <div
+              className="p-4 rounded-xl space-y-3"
+              style={{ background: C.surface, border: `1px solid ${C.border}` }}
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ background: C.accentSoft }}
+                >
+                  <User size={14} style={{ color: C.accent }} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <input
+                    value={teacher}
+                    onChange={(e) => setTeacher(e.target.value)}
+                    placeholder="Teacher name (optional)"
+                    list="known-teachers"
+                    className="w-full bg-transparent text-sm font-medium focus:outline-none"
+                    style={{ color: C.text }}
+                  />
+                  <datalist id="known-teachers">
+                    {teachers?.map((t) => <option key={t.name} value={t.name} />)}
+                  </datalist>
+                  <div className="text-[11px] mt-0.5" style={{ color: C.textFaint }}>
+                    {teacher.trim()
+                      ? known
+                        ? <>
+                            <FileText size={10} className="inline -mt-0.5 mr-0.5" />
+                            {known.examples} prior {known.examples === 1 ? 'essay' : 'essays'} — RAG will use the most recent 3
+                          </>
+                        : <span style={{ color: '#fbbf24' }}>Cold start — no prior examples for {teacher.trim()}</span>
+                      : 'Leave empty for an untagged cold-start prediction'}
+                  </div>
+                </div>
+              </div>
             </div>
-          </header>
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wider text-navy/60">Teacher (optional)</label>
-            <input
-              value={teacher}
-              onChange={(e) => setTeacher(e.target.value)}
-              placeholder="e.g. Dr. Hsu"
-              list="known-teachers"
-              className="mt-1 w-full rounded-lg border border-navy/15 px-3 py-2 text-sm focus:border-gold focus:outline-none"
-            />
-            <datalist id="known-teachers">
-              {teachers?.map((t) => <option key={t.name} value={t.name} />)}
-            </datalist>
-            {teacher.trim() && (
-              <p className="mt-1 text-[11px] text-navy/50">
-                {known
-                  ? `${known.examples} prior example${known.examples === 1 ? '' : 's'} from this teacher — RAG will use the most recent 3.`
-                  : 'No prior examples for this teacher yet — cold-start prediction.'}
-              </p>
+            {teachers.length > 0 && (
+              <div className="mt-3 text-[11px]" style={{ color: C.textFaint }}>
+                <span className="font-semibold" style={{ color: C.textMute }}>Corpus:</span>{' '}
+                {teachers.map((t) => `${t.name} (${t.examples})`).join(' · ')}
+              </div>
+            )}
+          </SidebarSection>
+
+          <SidebarSection label="Ready to analyze">
+            <div
+              className="p-4 rounded-xl space-y-2.5"
+              style={{ background: C.surface, border: `1px solid ${C.border}` }}
+            >
+              <ChecklistRow ok={essay.trim().length > 50} label="Essay text pasted" />
+              <ChecklistRow ok={!!teacher.trim() && !!known} label={`Teacher matched in corpus`} optional />
+              <ChecklistRow ok={!!rubric.trim()} label="Rubric added" optional />
+            </div>
+          </SidebarSection>
+
+          <SidebarSection label="What you'll get">
+            <div className="space-y-2.5 text-xs" style={{ color: C.textMute }}>
+              <BulletRow color="#4ade80" label="Predicted grade" />
+              <BulletRow color={C.accent} label="Line-by-line comments throughout the essay" />
+              <BulletRow color="#fbbf24" label="End comment in the teacher's voice" />
+              {rubric && <BulletRow color="rgba(255,255,255,0.4)" label="Rubric breakdown by criterion" />}
+            </div>
+          </SidebarSection>
+
+          <p className="text-[11px] leading-relaxed" style={{ color: C.textFaint }}>
+            After the prediction renders, paste the real grade + feedback when
+            your teacher returns the paper. That tuple becomes training data
+            and tightens the next prediction for this teacher.
+          </p>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function CollapseHeader({ label, badge, preview, expanded, onToggle }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="w-full px-5 py-3 flex items-center justify-between transition-colors"
+      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.015)')}
+      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+    >
+      <span className="flex items-center gap-2.5">
+        <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: C.textMute }}>
+          {label}
+        </span>
+        {badge && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+            style={{
+              background: badge.tone === 'warn' ? 'rgba(251,191,36,0.10)' : 'rgba(255,255,255,0.06)',
+              color: badge.tone === 'warn' ? 'rgba(251,191,36,0.7)' : C.textFaint,
+            }}
+          >
+            {badge.text}
+          </span>
+        )}
+        {preview && (
+          <span className="text-xs truncate max-w-[360px]" style={{ color: C.textFaint }}>
+            {preview}
+          </span>
+        )}
+      </span>
+      <ChevronDown
+        size={13}
+        style={{
+          color: C.textFaint,
+          transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+          transition: 'transform 0.2s',
+        }}
+      />
+    </button>
+  );
+}
+
+function SidebarSection({ label, children }) {
+  return (
+    <div>
+      <p className="text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: C.textFaint }}>
+        {label}
+      </p>
+      {children}
+    </div>
+  );
+}
+
+function ChecklistRow({ ok, label, optional }) {
+  return (
+    <div className="flex items-center gap-2.5 text-xs">
+      <span
+        className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+        style={{ background: ok ? '#4ade80' : 'rgba(255,255,255,0.15)' }}
+      />
+      <span style={{ color: ok ? C.textMute : C.textFaint }}>
+        {label}{optional && <span style={{ color: C.textFaint }}> · optional</span>}
+      </span>
+    </div>
+  );
+}
+
+function BulletRow({ color, label }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: color }} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function SubmittingOverlay({ teacher, known }) {
+  return (
+    <div className="flex-1 flex items-center justify-center px-6">
+      <div className="max-w-md w-full text-center space-y-5">
+        <div
+          className="w-12 h-12 mx-auto rounded-full flex items-center justify-center animate-pulse"
+          style={{ background: 'rgba(255,255,255,0.06)' }}
+        >
+          <Brain size={22} style={{ color: 'rgba(255,255,255,0.6)' }} />
+        </div>
+        <div>
+          <div className="text-base font-medium" style={{ color: C.text }}>
+            Analyzing essay…
+          </div>
+          <p className="mt-2 text-xs" style={{ color: C.textMute }}>
+            {teacher.trim() && known
+              ? <>Building feedback in {teacher.trim()}&apos;s style. </>
+              : 'Cold-start prediction — no prior examples for this teacher. '}
+            Calls the shared local LLM (with OpenAI fallback). Usually 10–60s.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Result view ──────────────────────────────────────────────────────
+
+function ResultView({
+  result, meta, teacher, rubric, essay, docComments, docFileRef, docFileUrl,
+  onNew, onSaved,
+}) {
+  if (result?._parse_error) {
+    return (
+      <div className="flex-1 overflow-auto px-6 py-10">
+        <div className="max-w-3xl mx-auto">
+          <div
+            className="rounded-xl p-5"
+            style={{ background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.20)' }}
+          >
+            <div className="font-semibold text-sm" style={{ color: '#fbbf24' }}>
+              Couldn&apos;t parse the model&apos;s response as JSON
+            </div>
+            <div className="mt-1 text-xs" style={{ color: 'rgba(251,191,36,0.7)' }}>
+              {result._parse_error}
+            </div>
+            <pre
+              className="mt-3 max-h-[400px] overflow-auto rounded p-3 text-xs"
+              style={{ background: 'rgba(0,0,0,0.3)', color: C.textMute }}
+            >{result._raw}</pre>
+            <button
+              type="button"
+              onClick={onNew}
+              className="mt-4 h-9 px-4 rounded-lg text-xs font-semibold"
+              style={{ background: C.text, color: C.bg }}
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const lineByLine = Array.isArray(result?.line_by_line) ? result.line_by_line : [];
+  const wordCount = essay.trim() ? essay.trim().split(/\s+/).length : 0;
+  const paragraphs = essay.split('\n\n').filter((p) => p.trim());
+
+  return (
+    <div className="flex-1 overflow-auto">
+      <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+        {/* New-essay link */}
+        <button
+          type="button"
+          onClick={onNew}
+          className="text-xs flex items-center gap-1.5 transition-opacity hover:opacity-80"
+          style={{ color: C.textMute }}
+        >
+          <ArrowLeft size={12} /> New essay
+        </button>
+
+        {/* Grade hero */}
+        <div className="rounded-2xl p-7" style={{ background: C.surface, border: `1px solid ${C.border}` }}>
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+            <div className="flex items-center gap-6">
+              <div className="text-center">
+                <div className="text-5xl font-semibold tracking-tight" style={{ color: C.text }}>
+                  {result?.grade || '—'}
+                </div>
+              </div>
+              <div className="w-px h-14 hidden lg:block" style={{ background: C.border }} />
+              <div>
+                <div className="text-sm" style={{ color: C.textMute }}>
+                  Predicted grade{teacher.trim() && <> — in <span className="font-medium" style={{ color: C.text }}>{teacher.trim()}</span>&apos;s style</>}
+                </div>
+                {meta && (
+                  <div className="mt-2 text-[11px]" style={{ color: C.textFaint }}>
+                    {meta.examples_used > 0
+                      ? <>RAG · grounded in {meta.examples_used} of {meta.examples_available} prior {meta.examples_available === 1 ? 'example' : 'examples'}</>
+                      : 'Cold-start prediction — no prior examples for this teacher'}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          {/* Essay */}
+          <div className="lg:col-span-3">
+            <div className="rounded-2xl" style={{ background: C.surface, border: `1px solid ${C.border}` }}>
+              <div
+                className="px-6 py-4 flex items-center justify-between"
+                style={{ borderBottom: `1px solid ${C.border}` }}
+              >
+                <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: C.text }}>
+                  <FileText size={14} style={{ color: C.textFaint }} /> Your essay
+                </h2>
+                <span className="text-xs" style={{ color: C.textFaint }}>
+                  {wordCount.toLocaleString()} words
+                </span>
+              </div>
+              <div className="p-6">
+                {paragraphs.length > 0 ? paragraphs.map((p, i) => (
+                  <p key={i} className="mb-4 text-sm leading-[1.8]" style={{ color: 'rgba(255,255,255,0.75)' }}>
+                    {p}
+                  </p>
+                )) : (
+                  <p className="text-sm" style={{ color: C.textFaint }}>(empty)</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Sidebar: end comment + comments + rubric */}
+          <div className="lg:col-span-2 space-y-4">
+            {result?.overall_feedback && (
+              <div className="rounded-xl p-5" style={{ background: C.surface, border: `1px solid ${C.border}` }}>
+                <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: C.textFaint }}>
+                  End comment
+                </h3>
+                {String(result.overall_feedback).split('\n\n').map((p, i) => (
+                  <p key={i} className="text-xs leading-relaxed mb-2" style={{ color: 'rgba(255,255,255,0.70)' }}>
+                    {p}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {lineByLine.length > 0 && (
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: C.textFaint }}>
+                  Line-by-line comments
+                </h3>
+                <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
+                  {lineByLine.map((c, i) => (
+                    <div
+                      key={i}
+                      className="rounded-xl p-3.5"
+                      style={{ background: C.surface, border: `1px solid ${C.border}` }}
+                    >
+                      {c.quote && (
+                        <p className="text-[11px] italic mb-1" style={{ color: C.textFaint }}>
+                          &ldquo;{c.quote}&rdquo;
+                        </p>
+                      )}
+                      <p className="text-xs leading-relaxed" style={{ color: 'rgba(255,255,255,0.75)' }}>
+                        {c.comment}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {result?.rubric_breakdown && typeof result.rubric_breakdown === 'object' && (
+              <div className="rounded-xl p-5" style={{ background: C.surface, border: `1px solid ${C.border}` }}>
+                <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: C.text }}>
+                  Rubric breakdown
+                </h3>
+                <div className="space-y-2">
+                  {Object.entries(result.rubric_breakdown).map(([k, v]) => (
+                    <div key={k} className="rounded-lg p-3" style={{ background: 'rgba(0,0,0,0.20)' }}>
+                      <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: C.textFaint }}>{k}</div>
+                      <div className="mt-0.5 text-xs" style={{ color: C.textMute }}>{String(v)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wider text-navy/60">Assignment rubric</label>
-            <textarea
-              value={rubric}
-              onChange={(e) => setRubric(e.target.value)}
-              placeholder="Paste the rubric, or leave blank for an open-ended grade prediction…"
-              className="mt-1 h-32 w-full resize-none rounded-lg border border-navy/15 px-3 py-2 text-sm leading-relaxed focus:border-gold focus:outline-none"
-            />
-          </div>
-          <button
-            type="button"
-            disabled={!essay || loading}
-            onClick={runPredict}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-navy py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-navy/90 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {loading && <Loader2 size={14} className="animate-spin" />}
-            {loading ? 'Generating…' : 'Predict grade & generate line-by-line comments'}
-          </button>
-          {error && (
-            <p className="text-[11px] text-red-700">{error}</p>
-          )}
-        </section>
-      </div>
-      {(loading || result) && (
-        <ResultPanel loading={loading} result={result} meta={meta} essay={essay} />
-      )}
-      {result && !result._parse_error && (
+        </div>
+
+        {/* Save-actual feedback panel */}
         <SaveActualFeedback
           essay={essay}
           rubric={rubric}
           teacher={teacher}
-          predictedGrade={result.grade || ''}
-          predictedFeedback={result.overall_feedback || ''}
+          predictedGrade={result?.grade || ''}
+          predictedFeedback={result?.overall_feedback || ''}
           initialFeedback={formatExtractedComments(docComments)}
           fileRef={docFileRef}
           fileUrl={docFileUrl}
           onSaved={onSaved}
         />
-      )}
-    </>
+      </div>
+    </div>
   );
 }
 
@@ -330,6 +790,7 @@ function PredictPanel({ teachers, onSaved }) {
 // + comments, and have it land in the training corpus alongside the
 // prediction the model originally made. Reuses the essay + teacher +
 // rubric the student typed in above so they don't have to retype them.
+
 function SaveActualFeedback({
   essay,
   rubric,
@@ -381,9 +842,6 @@ function SaveActualFeedback({
       setSavedFileUrl(data.essayFileUrl || null);
       setFeedback('');
       setGrade('');
-      // Bump the corpus count visible in the parent so the next
-      // prediction's "N prior examples" hint is accurate without a
-      // page reload.
       onSaved?.();
     } catch (e) {
       setError(e.response?.data?.error || e.message || String(e));
@@ -394,17 +852,26 @@ function SaveActualFeedback({
 
   if (savedId !== null) {
     return (
-      <section className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-sm text-emerald-900">
+      <section
+        className="flex items-start gap-3 rounded-2xl p-6 text-sm"
+        style={{
+          background: 'rgba(74,222,128,0.06)',
+          border: '1px solid rgba(74,222,128,0.20)',
+          color: 'rgba(74,222,128,0.85)',
+        }}
+      >
         <Check size={18} className="mt-0.5 shrink-0" />
         <div>
-          <div className="font-semibold">Saved to the training corpus</div>
-          <div className="mt-1 text-xs">
+          <div className="font-semibold" style={{ color: '#4ade80' }}>
+            Saved to the training corpus
+          </div>
+          <div className="mt-1 text-xs" style={{ color: 'rgba(255,255,255,0.55)' }}>
             Example #{savedId}. The next iteration of the predictor will use
             this {teacher ? `as ${teacher}'s grading style` : 'as cold-start training data'}.
             {savedFileUrl && (
               <>
                 {' '}Original essay archived to{' '}
-                <a href={savedFileUrl} target="_blank" rel="noreferrer" className="underline">
+                <a href={savedFileUrl} target="_blank" rel="noreferrer" className="underline" style={{ color: C.accent }}>
                   OneDrive
                 </a>.
               </>
@@ -416,14 +883,17 @@ function SaveActualFeedback({
   }
 
   return (
-    <section className="space-y-4 rounded-2xl border border-navy/10 bg-white p-6 shadow-sm">
+    <section
+      className="space-y-4 rounded-2xl p-6"
+      style={{ background: C.surface, border: `1px solid ${C.border}` }}
+    >
       <header className="flex items-start gap-3">
-        <GraduationCap className="mt-1 shrink-0 text-gold" size={20} />
+        <PenLine size={18} className="mt-0.5 flex-shrink-0" style={{ color: C.accent }} />
         <div>
-          <h2 className="text-base font-semibold text-navy">
+          <h2 className="text-sm font-semibold" style={{ color: C.text }}>
             Got the paper back? Save the actual feedback
           </h2>
-          <p className="text-xs text-navy/60">
+          <p className="text-xs mt-0.5" style={{ color: C.textMute }}>
             Optional, but it builds the per-teacher training corpus the next
             iteration of the predictor will use.
           </p>
@@ -431,122 +901,52 @@ function SaveActualFeedback({
       </header>
       <div className="grid gap-3 md:grid-cols-2">
         <div>
-          <label className="text-xs font-medium uppercase tracking-wider text-navy/60">Final grade</label>
+          <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: C.textFaint }}>
+            Final grade
+          </label>
           <input
             value={grade}
             onChange={(e) => setGrade(e.target.value)}
             placeholder="e.g. A-, 92, 4/5"
-            className="mt-1 w-full rounded-lg border border-navy/15 px-3 py-2 text-sm focus:border-gold focus:outline-none"
+            className="mt-1 w-full rounded-lg px-3 py-2 text-sm bg-transparent focus:outline-none transition-colors"
+            style={{ border: `1px solid ${C.border}`, color: C.text }}
+            onFocus={(e) => (e.target.style.borderColor = C.borderStrong)}
+            onBlur={(e) => (e.target.style.borderColor = C.border)}
           />
         </div>
-        <div className="flex items-end text-[11px] text-navy/50">
-          {teacher ? <>Saving under <code className="ml-1">{teacher}</code></> : 'No teacher set — saved as untagged'}
+        <div className="flex items-end text-[11px]" style={{ color: C.textFaint }}>
+          {teacher
+            ? <>Saving under <code className="ml-1" style={{ color: C.textMute }}>{teacher}</code></>
+            : 'No teacher set — saved as untagged'}
         </div>
       </div>
       <div>
-        <label className="text-xs font-medium uppercase tracking-wider text-navy/60">Teacher's comments</label>
+        <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: C.textFaint }}>
+          Teacher&apos;s comments
+        </label>
         <textarea
           value={feedback}
           onChange={(e) => setFeedback(e.target.value)}
           placeholder="Paste every margin note, end-comment, rubric scoring…"
-          className="mt-1 h-40 w-full resize-none rounded-lg border border-navy/15 px-3 py-2 text-sm leading-relaxed focus:border-gold focus:outline-none"
+          className="mt-1 h-40 w-full rounded-lg px-3 py-2 text-sm leading-relaxed bg-transparent focus:outline-none resize-none transition-colors"
+          style={{ border: `1px solid ${C.border}`, color: C.text }}
+          onFocus={(e) => (e.target.style.borderColor = C.borderStrong)}
+          onBlur={(e) => (e.target.style.borderColor = C.border)}
         />
       </div>
       <button
         type="button"
         disabled={!feedback || !grade || saving}
         onClick={save}
-        className="flex w-full items-center justify-center gap-2 rounded-lg bg-navy py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-navy/90 disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+        style={{ background: C.text, color: C.bg }}
       >
         {saving && <Loader2 size={14} className="animate-spin" />}
         {saving ? 'Saving…' : 'Save as training example'}
       </button>
-      {error && <p className="text-[11px] text-red-700">{error}</p>}
+      {error && <p className="text-[11px]" style={{ color: '#f87171' }}>{error}</p>}
     </section>
   );
-}
-
-function ResultPanel({ loading, result, meta, essay }) {
-  if (loading) {
-    return (
-      <section className="rounded-2xl border border-navy/10 bg-white p-8 shadow-sm">
-        <div className="flex items-center gap-3 text-navy">
-          <Loader2 className="animate-spin" size={20} />
-          <span className="font-medium">qwen2.5:14b is thinking…</span>
-        </div>
-        <p className="mt-2 text-xs text-navy/50">
-          Calls the shared local LLM (with OpenAI fallback). Usually 10–60s on
-          this model size.
-        </p>
-      </section>
-    );
-  }
-  if (!result) return null;
-  if (result._parse_error) {
-    return (
-      <section className="rounded-2xl border border-amber-200 bg-amber-50 p-6">
-        <div className="font-semibold text-amber-900">Couldn't parse the model's response as JSON</div>
-        <div className="mt-1 text-xs text-amber-800">{result._parse_error}</div>
-        <pre className="mt-3 max-h-96 overflow-auto rounded bg-white/60 p-3 text-xs text-amber-900">{result._raw}</pre>
-      </section>
-    );
-  }
-  return (
-    <section className="space-y-5 rounded-2xl border border-navy/10 bg-white p-6 shadow-sm">
-      <header className="flex items-baseline justify-between gap-4 border-b border-navy/10 pb-4">
-        <div>
-          <div className="text-[11px] uppercase tracking-wider text-navy/50">Predicted grade</div>
-          <div className="mt-1 text-3xl font-semibold text-navy">{result.grade || '—'}</div>
-        </div>
-        {meta && (
-          <div className="text-right text-[11px] text-navy/50">
-            {meta.examples_used > 0
-              ? <>RAG · grounded in {meta.examples_used} of {meta.examples_available} prior example{meta.examples_available === 1 ? '' : 's'}</>
-              : 'Cold-start prediction'}
-          </div>
-        )}
-      </header>
-
-      {result.overall_feedback && (
-        <div>
-          <div className="text-xs font-medium uppercase tracking-wider text-navy/60">Overall feedback</div>
-          <p className="mt-1 text-sm leading-relaxed text-navy">{result.overall_feedback}</p>
-        </div>
-      )}
-
-      {Array.isArray(result.line_by_line) && result.line_by_line.length > 0 && (
-        <div>
-          <div className="text-xs font-medium uppercase tracking-wider text-navy/60">Line-by-line comments</div>
-          <div className="mt-2 space-y-3">
-            {result.line_by_line.map((c, i) => (
-              <div key={i} className="rounded-lg border border-navy/10 bg-navy/[0.02] p-3">
-                <div className="text-xs italic text-navy/70">"{c.quote}"</div>
-                <div className="mt-1 text-sm text-navy">{c.comment}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {result.rubric_breakdown && typeof result.rubric_breakdown === 'object' && (
-        <div>
-          <div className="text-xs font-medium uppercase tracking-wider text-navy/60">Rubric breakdown</div>
-          <div className="mt-2 space-y-2">
-            {Object.entries(result.rubric_breakdown).map(([k, v]) => (
-              <div key={k} className="rounded-lg border border-navy/10 bg-white p-3">
-                <div className="text-xs font-semibold uppercase tracking-wider text-navy/60">{k}</div>
-                <div className="mt-0.5 text-sm text-navy">{String(v)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function countWords(s) {
-  return s.trim() ? s.trim().split(/\s+/).length : 0;
 }
 
 // Render a list of {author, date, text} comments pulled from a .docx
