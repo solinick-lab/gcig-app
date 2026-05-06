@@ -13,3 +13,10 @@ sea_tracker/logs/
 sea_tracker/.venv/
 sea_tracker/*.egg-info/
 sea_tracker/**/__pycache__/
+
+# sandbox / grade_predictor — student essays must NEVER be committed
+sandbox/data/
+sandbox/.venv/
+sandbox/.env
+sandbox/*.egg-info/
+sandbox/**/__pycache__/

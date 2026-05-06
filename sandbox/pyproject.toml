@@ -1,0 +1,19 @@
+[project]
+name = "grade_predictor"
+version = "0.1.0"
+description = "Per-teacher grade prediction over a local Ollama-served LLM."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "ollama>=0.4",
+    "pydantic>=2.0",
+    "numpy>=1.26",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["grade_predictor"]
