@@ -105,7 +105,7 @@ export default function Tankers() {
 
       {snapshot && (
         <>
-          <SarStatusCard />
+          <SarStatusCard sarDetections={snapshot.sarDetections} />
           <DerivedPanel derived={snapshot.derived} />
           <SignalPanel signals={snapshot.signals} />
           <VesselMap snapshot={snapshot} onVesselClick={setSelectedVessel} />

@@ -1,84 +1,45 @@
-import { useEffect, useState } from 'react';
 import { Satellite } from 'lucide-react';
-import { getSarDetections } from '../../api/sea';
 
-// Surfaces the Global Fishing Watch SAR vessel-detection feed status
-// — covers waters our terrestrial AIS can't see (Iran, Saudi, Kuwait,
-// Iraq) at a 5-day lag. Free non-commercial API; needs the operator
-// to register and drop a token into GFW_API_TOKEN on Render.
+// Status banner above the map describing the Sentinel-1 SAR
+// detection layer. Pulls from the snapshot's sarDetections array
+// — those red dots on the map come from radar imagery our own
+// pipeline pulls from the Copernicus Data Space, processes via
+// median+MAD threshold + connected-component clustering, and
+// geocodes through the GRD annotation GCPs. Honest framing: 5-day
+// satellite revisit, lots of false positives without land masking,
+// real data nonetheless.
 
-export default function SarStatusCard() {
-  const [state, setState] = useState({ loading: true });
-
-  useEffect(() => {
-    let alive = true;
-    getSarDetections(7)
-      .then((data) => { if (alive) setState({ loading: false, data }); })
-      .catch((err) => {
-        if (alive) setState({ loading: false, error: err?.response?.data?.error || err.message });
-      });
-    return () => { alive = false; };
-  }, []);
-
-  if (state.loading) return null;
-
-  const enabled = state.data?.enabled === true;
-  const noToken = state.data?.enabled === false;
-
-  if (noToken) {
+export default function SarStatusCard({ sarDetections }) {
+  const list = sarDetections || [];
+  if (list.length === 0) {
     return (
       <div className="rounded-lg border border-navy/10 bg-navy/[0.02] p-3 text-xs text-navy/70">
         <div className="flex items-start gap-2">
           <Satellite size={14} className="mt-0.5 shrink-0 text-navy/50" />
           <div>
-            <span className="font-medium text-navy">Satellite SAR detections (off)</span>{' '}
-            — Global Fishing Watch publishes free Sentinel-1 ship detections that cover
-            the entire Persian Gulf (including Iran, Saudi, Kuwait waters our AIS can't
-            see) at a 5-day lag. To enable: register at{' '}
-            <a
-              href="https://globalfishingwatch.org/our-apis/tokens/request"
-              target="_blank"
-              rel="noreferrer"
-              className="font-medium underline"
-            >
-              globalfishingwatch.org
-            </a>{' '}
-            (free, non-commercial), then set <code>GFW_API_TOKEN</code> on Render.
+            <span className="font-medium text-navy">Satellite SAR detections (idle)</span>{' '}
+            — no Sentinel-1 detections in the database yet. Run{' '}
+            <code>sea_tracker sar-detect-one &lt;scene-id&gt;</code> on the collector box
+            to populate, or schedule the daily <code>sar-detect</code> task.
           </div>
         </div>
       </div>
     );
   }
-
-  if (state.error) {
-    return (
-      <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-        <div className="flex items-start gap-2">
-          <Satellite size={14} className="mt-0.5 shrink-0" />
-          <div>
-            <span className="font-medium">Satellite SAR detections</span> — error fetching:{' '}
-            {state.error}
-          </div>
+  const tankers = list.filter((d) => d.likelyTanker).length;
+  return (
+    <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-900">
+      <div className="flex items-start gap-2">
+        <Satellite size={14} className="mt-0.5 shrink-0" />
+        <div>
+          <span className="font-medium">Satellite SAR detections</span> — red dots on the
+          map are <span className="font-semibold">{list.length}</span> hulls picked up by
+          Sentinel-1 radar imagery in the last 14 days
+          {tankers > 0 && <> (<span className="font-semibold">{tankers}</span> tanker-class)</>}.
+          Covers waters AIS can't reach (Iran, Saudi, Kuwait, Iraq) but lags real-time
+          by 5 days and includes some land/oil-rig false positives until we add a coastline mask.
         </div>
       </div>
-    );
-  }
-
-  if (enabled) {
-    const range = state.data.dateRange;
-    return (
-      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
-        <div className="flex items-start gap-2">
-          <Satellite size={14} className="mt-0.5 shrink-0" />
-          <div>
-            <span className="font-medium">Satellite SAR detections</span> — Global Fishing
-            Watch data loaded for {range?.start} to {range?.end}. Map overlay landing in
-            a follow-up release once the response shape is wired up.
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return null;
+    </div>
+  );
 }

@@ -350,6 +350,17 @@ def sar_detect_one(
     console.print(f"total detections in bbox: {len(marked)}")
     console.print(f"  tanker-class (>=180 m): {len(tankers)}")
     console.print(f"  smaller hulls:          {len(marked) - len(tankers)}")
+
+    # Persist into sar_detections so the snapshot pipeline can fold
+    # them into the React map. Idempotent on (scene_id, lat, lon).
+    from sea_tracker.sar import persist
+    con = _open_db(cfg)
+    try:
+        n = persist(con, marked)
+        console.print(f"persisted {n} detections to sar_detections")
+    finally:
+        con.close()
+
     if marked:
         console.print("\nfirst 8 detections:")
         for d in marked[:8]:

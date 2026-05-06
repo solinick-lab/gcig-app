@@ -176,6 +176,12 @@ def build_snapshot(
     # when really we've cumulatively recorded hundreds of vessels.
     coverage = _coverage_stats(con, now=now)
 
+    # SAR detections from Sentinel-1 — fills in the western Gulf
+    # waters AIS doesn't cover. Default cap at 1500 detections per
+    # snapshot (the largest hulls first) so the React payload stays
+    # bounded; the underlying table can hold thousands.
+    sar_detections = _sar_detections_for_snapshot(con, now=now, max_age_days=14)
+
     return {
         "bbox": [bbox[0], bbox[1], bbox[2], bbox[3]],
         "vessels": vessels,
@@ -183,7 +189,47 @@ def build_snapshot(
         "signals": _latest_signal_values(con),
         "derived": derived,
         "coverage": coverage,
+        "sarDetections": sar_detections,
     }
+
+
+def _sar_detections_for_snapshot(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    now: datetime,
+    max_age_days: int = 14,
+    limit: int = 1500,
+) -> list[dict[str, Any]]:
+    """Recent SAR detections, biggest first, capped at `limit` rows.
+
+    The table can hold tens of thousands per scene; we surface only
+    the largest hulls so the React page stays responsive. Any
+    deeper drilldown can come from a /sar-detections endpoint
+    later.
+    """
+    cutoff = now - timedelta(days=max_age_days)
+    rows = con.execute(
+        """
+        SELECT scene_id, detected_at, lat, lon, length_m, width_m, likely_tanker
+        FROM sar_detections
+        WHERE detected_at >= ?
+        ORDER BY length_m DESC
+        LIMIT ?
+        """,
+        [cutoff, limit],
+    ).fetchall()
+    out = []
+    for scene_id, detected_at, lat, lon, length_m, width_m, likely_tanker in rows:
+        out.append({
+            "sceneId": scene_id,
+            "detectedAt": detected_at.isoformat() + "Z",
+            "lat": float(lat),
+            "lon": float(lon),
+            "lengthM": float(length_m) if length_m is not None else None,
+            "widthM": float(width_m) if width_m is not None else None,
+            "likelyTanker": bool(likely_tanker),
+        })
+    return out
 
 
 def _coverage_stats(con: duckdb.DuckDBPyConnection, *, now: datetime) -> dict[str, Any]:

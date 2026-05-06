@@ -187,6 +187,31 @@ export default function VesselMap({ snapshot, onVesselClick }) {
         },
       });
 
+      // Sentinel-1 SAR detections — hulls we picked up from satellite
+      // radar imagery, often in waters AIS can't reach. Rendered as
+      // small red diamonds beneath the live AIS dots so they fill in
+      // the coverage gap rather than competing visually.
+      map.addSource('sar', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+      map.addLayer({
+        id: 'sar-dot',
+        type: 'circle',
+        source: 'sar',
+        paint: {
+          'circle-radius': [
+            'case', ['get', 'tanker'], 4, 2.5,
+          ],
+          'circle-color': '#DC2626',
+          'circle-opacity': 0.55,
+          'circle-stroke-color': '#7F1D1D',
+          'circle-stroke-width': [
+            'case', ['get', 'tanker'], 1, 0,
+          ],
+        },
+      }, 'vessels-dot'); // place below live AIS so AIS dots stay primary
+
       // Click a cluster → zoom in until the cluster expands.
       map.on('click', 'vessel-clusters', (e) => {
         const feat = e.features && e.features[0];
@@ -246,12 +271,23 @@ export default function VesselMap({ snapshot, onVesselClick }) {
         properties: { name: t.name, country: t.country },
       }));
 
+      const sarFeatures = (snapshot.sarDetections || []).map((d) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [d.lon, d.lat] },
+        properties: {
+          tanker: !!d.likelyTanker,
+          length_m: d.lengthM,
+        },
+      }));
+
       const v = map.getSource('vessels');
       const tr = map.getSource('trails');
       const te = map.getSource('terminals');
+      const sa = map.getSource('sar');
       if (v) v.setData({ type: 'FeatureCollection', features: vesselFeatures });
       if (tr) tr.setData({ type: 'FeatureCollection', features: trailFeatures });
       if (te) te.setData({ type: 'FeatureCollection', features: terminalFeatures });
+      if (sa) sa.setData({ type: 'FeatureCollection', features: sarFeatures });
     };
 
     if (map.isStyleLoaded()) apply();
