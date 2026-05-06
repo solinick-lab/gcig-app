@@ -170,10 +170,44 @@ def build_snapshot(
 
     derived = _compute_derived(con, day=datetime.now(timezone.utc).date())
 
+    # Coverage tallies — give the page something to surface beyond the
+    # "live in the last 6 h" count. We're working with thin terrestrial
+    # AIS, so a snapshot of "76 visible right now" can read as broken
+    # when really we've cumulatively recorded hundreds of vessels.
+    coverage = _coverage_stats(con, now=now)
+
     return {
         "bbox": [bbox[0], bbox[1], bbox[2], bbox[3]],
         "vessels": vessels,
         "terminals": terminals,
         "signals": _latest_signal_values(con),
         "derived": derived,
+        "coverage": coverage,
+    }
+
+
+def _coverage_stats(con: duckdb.DuckDBPyConnection, *, now: datetime) -> dict[str, Any]:
+    """Cumulative vessel counts so the UI can show "X visible / Y this
+    week / Z all-time" rather than only the live snapshot count."""
+    one_hour = now - timedelta(hours=1)
+    six_hours = now - timedelta(hours=6)
+    twenty_four = now - timedelta(hours=24)
+    seven_days = now - timedelta(days=7)
+
+    def distinct_since(ts) -> int:
+        row = con.execute(
+            "SELECT COUNT(DISTINCT mmsi) FROM ais_messages WHERE ts >= ?",
+            [ts],
+        ).fetchone()
+        return int(row[0] if row else 0)
+
+    total_row = con.execute(
+        "SELECT COUNT(DISTINCT mmsi) FROM ais_messages"
+    ).fetchone()
+    return {
+        "vessels_last_hour":  distinct_since(one_hour),
+        "vessels_last_6h":    distinct_since(six_hours),
+        "vessels_last_24h":   distinct_since(twenty_four),
+        "vessels_last_7d":    distinct_since(seven_days),
+        "vessels_all_time":   int(total_row[0] if total_row else 0),
     }

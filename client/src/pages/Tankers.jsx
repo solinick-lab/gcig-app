@@ -61,6 +61,17 @@ export default function Tankers() {
             Saudi, Qatar, Bahrain, most of Oman); paid satellite AIS would
             close it, and we don't subscribe.
           </p>
+          {snapshot?.coverage && (
+            <div className="mt-2 flex flex-wrap gap-3 text-xs text-navy/60">
+              <span><span className="font-semibold text-navy">{snapshot.coverage.vessels_last_6h}</span> visible now</span>
+              <span className="text-navy/30">·</span>
+              <span><span className="font-semibold text-navy">{snapshot.coverage.vessels_last_24h}</span> seen in 24h</span>
+              <span className="text-navy/30">·</span>
+              <span><span className="font-semibold text-navy">{snapshot.coverage.vessels_last_7d}</span> this week</span>
+              <span className="text-navy/30">·</span>
+              <span><span className="font-semibold text-navy">{snapshot.coverage.vessels_all_time}</span> total tracked</span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3 text-sm text-navy/60">
           <span>Last update: {relativeTime(snapshot?.snapshotAt)}</span>
