@@ -87,6 +87,7 @@ model User {
   presidentDecisions PitchRequest[]  @relation("PitchRequestPresident")
   pmDecisions       PitchRequest[]   @relation("PitchRequestPM")
   rosterOverrides   EventRosterOverride[]
+  gradeExamples     GradePredictorExample[]
 }
 
 // Chat channels are addressed by a simple string:
@@ -553,6 +554,32 @@ model SeaSnapshot {
 // publish, so the classification is stable. One row per unique URL. `model`
 // records which local model generated the tag; useful for invalidation later
 // (e.g. clear rows where model = '3b' after upgrading to 14b).
+// Grade predictor training corpus. One row per (essay, real teacher
+// feedback, real grade) tuple captured after the LLM made a cold-start
+// prediction. The next iteration of the predictor will retrieve the
+// top-K most similar prior examples for the same teacher (RAG) and
+// inject them into the prompt to mimic that teacher's voice. Stored
+// in Postgres rather than the original sandbox/data/ SQLite so the
+// data survives Render redeploys and is available wherever the API is.
+model GradePredictorExample {
+  id          Int      @id @default(autoincrement())
+  teacher     String?  // free-text; per-teacher RAG groups by this
+  essay       String   // the student's submission
+  rubric      String?  // optional, copied from the prediction request
+  feedback    String   // teacher's actual margin notes / end-comment
+  grade       String   // teacher's actual final grade ("A-", "92", "4/5")
+  // Predicted-vs-actual snapshot, stored verbatim so we can later
+  // backtest how close the cold-start prediction came to the truth.
+  predictedGrade    String?
+  predictedFeedback String?
+  createdById Int?
+  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@index([teacher])
+  @@index([createdAt])
+}
+
 model ArticleRanking {
   id        Int      @id @default(autoincrement())
   url       String   @unique

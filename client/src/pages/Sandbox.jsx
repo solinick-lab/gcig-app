@@ -11,8 +11,8 @@
 // this is the cold-start prediction path only.
 
 import { Navigate, useNavigate } from 'react-router-dom';
-import { X, Upload, FileText, BookOpen, Loader2, AlertCircle } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { X, Upload, FileText, BookOpen, Loader2, AlertCircle, GraduationCap, Check } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import api from '../api/client.js';
 
@@ -127,6 +127,38 @@ function PredictPanel() {
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
   const [meta, setMeta] = useState(null);
+  // Comments extracted from an uploaded .docx (Word review comments).
+  // Surfaced as a chip on the essay card and pre-fed into the
+  // SaveActualFeedback panel once the prediction renders.
+  const [docComments, setDocComments] = useState([]);
+  const [uploading, setUploading] = useState(false);
+
+  async function handleDocxUpload(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same filename
+    if (!file) return;
+    if (!/\.docx$/i.test(file.name)) {
+      setError('Only .docx files are supported.');
+      return;
+    }
+    setUploading(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const { data } = await api.post(
+        '/sandbox/grade-predictor/parse-docx',
+        form,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      );
+      if (data.text) setEssay(data.text);
+      setDocComments(Array.isArray(data.comments) ? data.comments : []);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Failed to parse .docx');
+    } finally {
+      setUploading(false);
+    }
+  }
 
   async function runPredict() {
     setLoading(true); setError(null); setResult(null); setMeta(null);
@@ -162,15 +194,28 @@ function PredictPanel() {
           <textarea
             value={essay}
             onChange={(e) => setEssay(e.target.value)}
-            placeholder="Paste the essay here…"
+            placeholder="Paste the essay here, or upload a .docx →"
             className="h-64 w-full resize-none rounded-lg border border-navy/15 px-3 py-2 text-sm leading-relaxed focus:border-gold focus:outline-none"
           />
           <div className="flex items-center justify-between text-xs text-navy/50">
             <span>{essay.length.toLocaleString()} chars · {countWords(essay).toLocaleString()} words</span>
-            <button type="button" disabled className="inline-flex items-center gap-1 rounded-md border border-dashed border-navy/20 px-2 py-1 text-navy/40">
-              <Upload size={12} /> Upload .docx / .pdf
-            </button>
+            <label className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-dashed border-navy/30 px-2 py-1 text-navy/70 hover:border-gold hover:text-navy">
+              {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+              {uploading ? 'Parsing…' : 'Upload .docx'}
+              <input
+                type="file"
+                accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={handleDocxUpload}
+                className="hidden"
+              />
+            </label>
           </div>
+          {docComments.length > 0 && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-[11px] text-emerald-900">
+              Extracted {docComments.length} teacher comment{docComments.length === 1 ? '' : 's'} from the .docx.
+              They'll be pre-filled in the training-data panel below the prediction.
+            </div>
+          )}
         </section>
 
         <section className="space-y-4 rounded-2xl border border-navy/10 bg-white p-6 shadow-sm">
@@ -219,7 +264,132 @@ function PredictPanel() {
       {(loading || result) && (
         <ResultPanel loading={loading} result={result} meta={meta} essay={essay} />
       )}
+      {result && !result._parse_error && (
+        <SaveActualFeedback
+          essay={essay}
+          rubric={rubric}
+          teacher={teacher}
+          predictedGrade={result.grade || ''}
+          predictedFeedback={result.overall_feedback || ''}
+          initialFeedback={formatExtractedComments(docComments)}
+        />
+      )}
     </>
+  );
+}
+
+// Data-collection panel. Shown below the prediction so the student can
+// come back when their teacher returns the paper, paste the real grade
+// + comments, and have it land in the training corpus alongside the
+// prediction the model originally made. Reuses the essay + teacher +
+// rubric the student typed in above so they don't have to retype them.
+function SaveActualFeedback({ essay, rubric, teacher, predictedGrade, predictedFeedback, initialFeedback }) {
+  const [feedback, setFeedback] = useState(initialFeedback || '');
+  const [grade, setGrade] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [savedId, setSavedId] = useState(null);
+
+  // If the user uploads a .docx after the prediction is already on
+  // screen, refresh the feedback field with the freshly-extracted
+  // comments — but only while it's empty or unchanged from the last
+  // auto-fill, so we don't clobber typing they've done in the meantime.
+  const lastInitialRef = useRef(initialFeedback || '');
+  useEffect(() => {
+    if (!initialFeedback) return;
+    if (feedback === '' || feedback === lastInitialRef.current) {
+      setFeedback(initialFeedback);
+      lastInitialRef.current = initialFeedback;
+    }
+  }, [initialFeedback]);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    setSavedId(null);
+    try {
+      const { data } = await api.post('/sandbox/grade-predictor/train', {
+        essay,
+        teacher: teacher.trim() || null,
+        rubric: rubric.trim() || null,
+        feedback,
+        grade: grade.trim(),
+        predictedGrade,
+        predictedFeedback,
+      });
+      setSavedId(data.id);
+      setFeedback('');
+      setGrade('');
+    } catch (e) {
+      setError(e.response?.data?.error || e.message || String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (savedId !== null) {
+    return (
+      <section className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-6 text-sm text-emerald-900">
+        <Check size={18} className="mt-0.5 shrink-0" />
+        <div>
+          <div className="font-semibold">Saved to the training corpus</div>
+          <div className="mt-1 text-xs">
+            Example #{savedId}. The next iteration of the predictor will use
+            this {teacher ? `as ${teacher}'s grading style` : 'as cold-start training data'}.
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="space-y-4 rounded-2xl border border-navy/10 bg-white p-6 shadow-sm">
+      <header className="flex items-start gap-3">
+        <GraduationCap className="mt-1 shrink-0 text-gold" size={20} />
+        <div>
+          <h2 className="text-base font-semibold text-navy">
+            Got the paper back? Save the actual feedback
+          </h2>
+          <p className="text-xs text-navy/60">
+            Optional, but it builds the per-teacher training corpus the next
+            iteration of the predictor will use.
+          </p>
+        </div>
+      </header>
+      <div className="grid gap-3 md:grid-cols-2">
+        <div>
+          <label className="text-xs font-medium uppercase tracking-wider text-navy/60">Final grade</label>
+          <input
+            value={grade}
+            onChange={(e) => setGrade(e.target.value)}
+            placeholder="e.g. A-, 92, 4/5"
+            className="mt-1 w-full rounded-lg border border-navy/15 px-3 py-2 text-sm focus:border-gold focus:outline-none"
+          />
+        </div>
+        <div className="flex items-end text-[11px] text-navy/50">
+          {teacher ? <>Saving under <code className="ml-1">{teacher}</code></> : 'No teacher set — saved as untagged'}
+        </div>
+      </div>
+      <div>
+        <label className="text-xs font-medium uppercase tracking-wider text-navy/60">Teacher's comments</label>
+        <textarea
+          value={feedback}
+          onChange={(e) => setFeedback(e.target.value)}
+          placeholder="Paste every margin note, end-comment, rubric scoring…"
+          className="mt-1 h-40 w-full resize-none rounded-lg border border-navy/15 px-3 py-2 text-sm leading-relaxed focus:border-gold focus:outline-none"
+        />
+      </div>
+      <button
+        type="button"
+        disabled={!feedback || !grade || saving}
+        onClick={save}
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-navy py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-navy/90 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {saving && <Loader2 size={14} className="animate-spin" />}
+        {saving ? 'Saving…' : 'Save as training example'}
+      </button>
+      {error && <p className="text-[11px] text-red-700">{error}</p>}
+    </section>
   );
 }
 
@@ -297,4 +467,18 @@ function ResultPanel({ loading, result, meta, essay }) {
 
 function countWords(s) {
   return s.trim() ? s.trim().split(/\s+/).length : 0;
+}
+
+// Render a list of {author, date, text} comments pulled from a .docx
+// into a single string the user can sanity-check before saving as
+// training data. Author tags up front so the corpus doesn't lose
+// "who said what" if the same paper went through multiple readers.
+function formatExtractedComments(comments) {
+  if (!Array.isArray(comments) || comments.length === 0) return '';
+  return comments
+    .map((c) => {
+      const tag = c.author ? `[${c.author}]` : '[comment]';
+      return `${tag} ${c.text}`.trim();
+    })
+    .join('\n\n');
 }

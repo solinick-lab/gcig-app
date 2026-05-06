@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import multer from 'multer';
+import JSZip from 'jszip';
+import prisma from '../db.js';
 import { verifyJwt, requireSuperAdmin } from '../middleware/auth.js';
 import { llmChat, probeProviders } from '../services/llm.js';
 
@@ -130,6 +133,164 @@ router.post('/grade-predictor/predict', async (req, res) => {
     examples_used: 0,
     examples_available: 0,
   });
+});
+
+// Save a (essay, teacher feedback, real grade) tuple for the training
+// corpus. Posted from the data-collection panel that appears below a
+// prediction once the student has the actual returned paper in hand.
+// We also store the cold-start prediction the model made on the same
+// essay so a later evaluation pass can backtest predicted-vs-actual.
+router.post('/grade-predictor/train', async (req, res) => {
+  const {
+    essay,
+    teacher,
+    rubric,
+    feedback,
+    grade,
+    predictedGrade,
+    predictedFeedback,
+  } = req.body || {};
+
+  if (!essay || typeof essay !== 'string' || essay.trim().length < 20) {
+    return res.status(400).json({ error: 'essay is required' });
+  }
+  if (!feedback || typeof feedback !== 'string' || feedback.trim().length < 1) {
+    return res.status(400).json({ error: 'feedback is required' });
+  }
+  if (!grade || typeof grade !== 'string' || grade.trim().length < 1) {
+    return res.status(400).json({ error: 'grade is required' });
+  }
+
+  const row = await prisma.gradePredictorExample.create({
+    data: {
+      essay,
+      teacher: typeof teacher === 'string' && teacher.trim() ? teacher.trim() : null,
+      rubric: typeof rubric === 'string' && rubric.trim() ? rubric.trim() : null,
+      feedback: feedback.trim(),
+      grade: grade.trim(),
+      predictedGrade:
+        typeof predictedGrade === 'string' && predictedGrade.trim()
+          ? predictedGrade.trim()
+          : null,
+      predictedFeedback:
+        typeof predictedFeedback === 'string' && predictedFeedback.trim()
+          ? predictedFeedback.trim()
+          : null,
+      createdById: req.user.id,
+    },
+    select: { id: true, teacher: true, createdAt: true },
+  });
+
+  res.json({ id: row.id, teacher: row.teacher, createdAt: row.createdAt });
+});
+
+// Parse a .docx upload into { text, comments }. text is the body of the
+// document (paragraph-joined); comments is every Word review comment
+// inside the file, with author + date + the comment text. The point is
+// to let students upload the graded .docx their teacher returned and
+// have the body fill the essay field while the teacher's actual margin
+// notes flow into the training-data feedback field. .docx is just a
+// zip, so we read it with the jszip we already use elsewhere — no new
+// runtime dep.
+const docxUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 },
+});
+
+function unescapeXml(s) {
+  return String(s)
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+// Pulls visible text out of a Word XML fragment. Splits on paragraph
+// boundaries so we get newlines between paragraphs (otherwise the body
+// reads as one giant blob), then walks each paragraph's <w:t> runs.
+function extractTextFromWordXml(xml) {
+  if (!xml) return '';
+  const paragraphs = xml.split(/<w:p[\s>]/);
+  const out = [];
+  for (const p of paragraphs) {
+    const runs = [...p.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g)];
+    if (runs.length === 0) continue;
+    const text = runs.map((m) => unescapeXml(m[1])).join('');
+    if (text.trim()) out.push(text);
+  }
+  return out.join('\n');
+}
+
+async function parseDocx(buffer) {
+  const zip = await JSZip.loadAsync(buffer);
+  const docFile = zip.file('word/document.xml');
+  if (!docFile) {
+    throw new Error('Not a valid .docx (missing word/document.xml)');
+  }
+  const docXml = await docFile.async('string');
+  const text = extractTextFromWordXml(docXml);
+
+  const comments = [];
+  const commentsFile = zip.file('word/comments.xml');
+  if (commentsFile) {
+    const commentsXml = await commentsFile.async('string');
+    const matches = [...commentsXml.matchAll(/<w:comment\s([^>]*?)>([\s\S]*?)<\/w:comment>/g)];
+    for (const m of matches) {
+      const attrs = m[1];
+      const body = m[2];
+      const author = (attrs.match(/w:author="([^"]*)"/) || [])[1] || '';
+      const date = (attrs.match(/w:date="([^"]*)"/) || [])[1] || '';
+      const commentText = extractTextFromWordXml(body);
+      if (commentText.trim()) {
+        comments.push({ author, date, text: commentText });
+      }
+    }
+  }
+  return { text, comments };
+}
+
+router.post(
+  '/grade-predictor/parse-docx',
+  docxUpload.single('file'),
+  async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const name = (req.file.originalname || '').toLowerCase();
+    const isDocx =
+      req.file.mimetype ===
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      name.endsWith('.docx');
+    if (!isDocx) {
+      return res.status(400).json({ error: 'Only .docx files are supported' });
+    }
+    try {
+      const { text, comments } = await parseDocx(req.file.buffer);
+      res.json({ text, comments });
+    } catch (e) {
+      console.warn('parse-docx failed:', e.message);
+      res
+        .status(400)
+        .json({ error: e.message || 'Failed to parse .docx' });
+    }
+  }
+);
+
+// Per-teacher counts. Drives the "Corpus" hint in the UI so the user
+// can see at a glance how much grading data each teacher has built up.
+router.get('/grade-predictor/teachers', async (_req, res) => {
+  const rows = await prisma.gradePredictorExample.groupBy({
+    by: ['teacher'],
+    _count: { _all: true },
+  });
+  // Untagged examples (teacher = null) get bucketed under "(unknown)"
+  // so the UI can still show them rather than silently dropping them.
+  const teachers = rows
+    .map((r) => ({
+      name: r.teacher || '(unknown)',
+      examples: r._count._all,
+    }))
+    .sort((a, b) => b.examples - a.examples);
+  res.json(teachers);
 });
 
 export default router;
