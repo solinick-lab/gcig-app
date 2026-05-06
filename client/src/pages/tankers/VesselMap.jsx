@@ -69,7 +69,19 @@ export default function VesselMap({ snapshot, onVesselClick }) {
     mapRef.current = map;
 
     map.on('load', () => {
-      map.addSource('vessels', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+      // Cluster vessels so the Dubai-area pile-up — where 30+ vessels
+      // sit within a few hundred metres of each other — reads as one
+      // numbered circle instead of overlapping single dots that look
+      // like the map only has 5 ships. Clustering disengages above
+      // clusterMaxZoom so panned-in detail still shows individual
+      // hulls.
+      map.addSource('vessels', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+        cluster: true,
+        clusterMaxZoom: 11,
+        clusterRadius: 35,
+      });
       map.addSource('trails', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
       map.addSource('terminals', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
       map.addSource('coverage-gap', {
@@ -114,10 +126,47 @@ export default function VesselMap({ snapshot, onVesselClick }) {
         },
       });
 
+      // Cluster bubble — sized by how many vessels it represents.
+      map.addLayer({
+        id: 'vessel-clusters',
+        type: 'circle',
+        source: 'vessels',
+        filter: ['has', 'point_count'],
+        paint: {
+          'circle-color': '#1B2A4A',
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+          'circle-radius': [
+            'step', ['get', 'point_count'],
+            14,           // <  10 vessels
+            10, 18,       // 10-24
+            25, 22,       // 25-49
+            50, 26,       // 50+
+          ],
+        },
+      });
+
+      // Number inside the cluster bubble.
+      map.addLayer({
+        id: 'vessel-cluster-count',
+        type: 'symbol',
+        source: 'vessels',
+        filter: ['has', 'point_count'],
+        layout: {
+          'text-field': ['get', 'point_count_abbreviated'],
+          'text-font': ['Noto Sans Bold'],
+          'text-size': 13,
+          'text-allow-overlap': true,
+        },
+        paint: { 'text-color': '#ffffff' },
+      });
+
+      // Individual unclustered vessel dot.
       map.addLayer({
         id: 'vessels-dot',
         type: 'circle',
         source: 'vessels',
+        filter: ['!', ['has', 'point_count']],
         paint: {
           'circle-radius': 5,
           'circle-color': ['coalesce', ['get', 'color'], '#9CA3AF'],
@@ -137,6 +186,20 @@ export default function VesselMap({ snapshot, onVesselClick }) {
           'circle-stroke-width': 2,
         },
       });
+
+      // Click a cluster → zoom in until the cluster expands.
+      map.on('click', 'vessel-clusters', (e) => {
+        const feat = e.features && e.features[0];
+        if (!feat) return;
+        const clusterId = feat.properties.cluster_id;
+        const src = map.getSource('vessels');
+        if (!src) return;
+        src.getClusterExpansionZoom(clusterId).then((zoom) => {
+          map.easeTo({ center: feat.geometry.coordinates, zoom });
+        });
+      });
+      map.on('mouseenter', 'vessel-clusters', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'vessel-clusters', () => { map.getCanvas().style.cursor = ''; });
 
       map.on('click', 'vessels-dot', (e) => {
         const feat = e.features && e.features[0];
