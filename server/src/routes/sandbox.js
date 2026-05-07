@@ -98,14 +98,60 @@ function truncate(text, maxChars) {
 // enough context to ground the comments).
 function buildRagPrompt({ essay, teacher, rubric, examples }) {
   const parts = [];
+  const stats = summarizeGrades(examples);
+  const wordCount = (String(essay || '').trim().match(/\S+/g) || []).length;
+
   parts.push(
     `You are predicting how the teacher named ${teacher} would grade a ` +
       `student essay. You have ${examples.length} prior example` +
-      `${examples.length === 1 ? '' : 's'} of how this teacher grades. ` +
-      `Match their style, comment density, vocabulary, and grade ` +
-      `distribution — your job is to mimic this specific teacher, not ` +
-      `to give your own opinion.`
+      `${examples.length === 1 ? '' : 's'} of this teacher's actual grading. ` +
+      `Your job is to mimic this specific teacher honestly, not to give the ` +
+      `student an encouraging score. Match their style, comment density, ` +
+      `vocabulary, and grade distribution exactly.`
   );
+
+  // Anti-inflation block. The single most common failure mode of a 7B
+  // model on this task is generosity — it hands out 90s by default
+  // because that "feels" supportive. The explicit calibration band +
+  // the rules below pull predictions back toward the actual teacher's
+  // distribution. The completeness rule catches the worst miss: an
+  // unfinished draft scoring in the high 90s.
+  if (stats.summary) {
+    parts.push(
+      `\n--- CALIBRATION ANCHOR ---\n` +
+        `In the prior examples this teacher gave: ${stats.summary}.\n` +
+        (stats.average != null
+          ? `Average: ~${stats.average}. Do NOT predict above that average ` +
+            `unless the new essay is clearly stronger than the strongest ` +
+            `prior example in EVERY dimension (thesis, evidence, analysis, ` +
+            `structure, style, mechanics).\n`
+          : '') +
+        `Predict a grade in the same format and within the same range ` +
+        `as the examples. Outliers above the highest prior grade require ` +
+        `genuine excellence; outliers below the lowest require genuine failure.`
+    );
+  }
+
+  parts.push(
+    `\n--- GRADING RULES (non-negotiable) ---\n` +
+      `1. Top marks (A / A- / 90+) are RARE. They require excellence in ` +
+      `every dimension — strong original thesis, sustained analysis, well-` +
+      `integrated specific evidence, polished prose, complete arc.\n` +
+      `2. An unfinished essay (no conclusion, missing sections, abrupt ` +
+      `cutoff, "TBD"/"[…]"/placeholder text) cannot earn an A. ` +
+      `Cap at the equivalent of a C+/B- and call out the missing pieces ` +
+      `explicitly in the end comment. The new essay below is ${wordCount} ` +
+      `words — judge whether that's a complete piece.\n` +
+      `3. Competent-but-average essays earn average grades. Do not round ` +
+      `up to be encouraging — the student needs honest feedback to improve.\n` +
+      `4. Underdeveloped arguments, repetitive phrasing, weak/missing ` +
+      `evidence, and surface-level analysis pull the grade DOWN even when ` +
+      `the prose is clean.\n` +
+      `5. Do not invent strengths the essay doesn't have. If the strengths ` +
+      `array is short or thin, that's a signal — let it be reflected in ` +
+      `the grade.`
+  );
+
   parts.push(`\n--- PRIOR EXAMPLES OF ${teacher.toUpperCase()}'S GRADING ---`);
   examples.forEach((ex, i) => {
     parts.push(
@@ -118,49 +164,119 @@ function buildRagPrompt({ essay, teacher, rubric, examples }) {
   if (rubric) {
     parts.push(`\n--- RUBRIC FOR THE NEW ESSAY ---\n${truncate(rubric, 3000)}`);
   }
-  parts.push(`\n--- NEW ESSAY TO GRADE ---\n${truncate(essay, 8000)}`);
+  parts.push(`\n--- NEW ESSAY TO GRADE (${wordCount} words) ---\n${truncate(essay, 8000)}`);
   parts.push(
     '\n--- TASK ---\n' +
-      "Produce a grade prediction for the new essay in this teacher's style. " +
+      "Produce an honest grade prediction for the new essay in this teacher's style. " +
       'Output ONLY a JSON object with these keys (no prose before or after):\n' +
       '  "line_by_line": array of {"quote": "<short verbatim phrase from the essay>",' +
       ' "comment": "<margin note in this teacher\'s voice>",' +
       ' "severity": "praise" | "suggestion" | "concern",' +
       ' "category": "<thesis | evidence | analysis | structure | style | mechanics | strength>"}\n' +
-      '  "overall_feedback": string — 2-4 sentences in the teacher\'s voice (the "end comment")\n' +
+      '  "overall_feedback": string — 2-4 sentences in the teacher\'s voice (the "end comment"). ' +
+      'If the essay is unfinished or thin, name that explicitly.\n' +
       '  "grade": string — match the format the teacher used in the examples (letter grade, percent, X/Y, etc.)\n' +
       '  "letter_grade": string — single letter (A, A-, B+, …) inferred from "grade", omit if uncertain\n' +
       '  "numeric_grade": integer 0-100 inferred from "grade", omit if uncertain\n' +
       '  "confidence": "high" | "medium" | "low" — how sure you are given the corpus depth and prompt fit\n' +
-      '  "reasoning": array of 2-4 short strings — why this grade, in this teacher\'s frame\n' +
-      '  "strengths": array of 2-4 short strings — what the essay does well\n' +
-      '  "weaknesses": array of 2-4 short strings — what holds it back\n' +
+      '  "reasoning": array of 2-4 short strings — why this grade, in this teacher\'s frame, ' +
+      'with explicit reference to where the essay falls vs the prior examples\n' +
+      '  "strengths": array of 2-4 short strings — what the essay actually does well (be honest, don\'t pad)\n' +
+      '  "weaknesses": array of 2-4 short strings — what holds it back (the more concrete, the better)\n' +
       '  "next_steps": array of 2-4 short strings — concrete revision priorities, ordered\n' +
       '  "rubric_breakdown": object mapping rubric criterion → score + one-sentence reason, or null if no rubric was given\n' +
       'Aim for 6-15 line_by_line entries depending on essay length. ' +
-      'Mix praise, suggestions, and concerns. Quote phrases that actually appear ' +
-      'in the essay verbatim. Do not invent passages.'
+      'Mix praise, suggestions, and concerns — and lean toward suggestions/concerns for ' +
+      'middling work. Quote phrases that actually appear in the essay verbatim. Do not invent passages.'
   );
   return parts.join('\n');
 }
 
+// Distill the grade column of the retrieved examples into a single line
+// the prompt can quote as a calibration anchor. Returns { summary, average }
+// where summary is a human-readable count like "A- (2), B+ (1), B (1)" and
+// average is the arithmetic mean of the parsed numerics (null if none parse).
+function summarizeGrades(examples) {
+  if (!examples?.length) return { summary: '', average: null };
+  const counts = new Map();
+  const numerics = [];
+  for (const ex of examples) {
+    const g = String(ex.grade || '').trim();
+    if (!g) continue;
+    counts.set(g, (counts.get(g) || 0) + 1);
+    const n = parseGradeToNumeric(g);
+    if (n != null) numerics.push(n);
+  }
+  const summary = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([g, n]) => `${g} (${n})`)
+    .join(', ');
+  const average = numerics.length
+    ? Math.round(numerics.reduce((s, n) => s + n, 0) / numerics.length)
+    : null;
+  return { summary, average };
+}
+
+// Best-effort parse of a heterogeneous grade string into a 0-100 number,
+// for averaging only — the original string is what the prompt shows.
+// Letter grades use the standard US scale midpoints. Composite strings
+// like "B+/85/91/91" parse from the first numeric token.
+function parseGradeToNumeric(s) {
+  const str = String(s || '').trim();
+  if (!str) return null;
+  const num = str.match(/(\d{1,3})/);
+  if (num) {
+    const n = parseInt(num[1], 10);
+    if (n >= 0 && n <= 100) return n;
+    if (n > 100 && n <= 1000) return Math.round(n / 10); // tolerate "920" → 92
+  }
+  const letter = str.match(/^([A-F])([+\-]?)/i);
+  if (letter) {
+    const base = { A: 95, B: 85, C: 75, D: 65, F: 55 }[letter[1].toUpperCase()];
+    if (base == null) return null;
+    if (letter[2] === '+') return base + 2;
+    if (letter[2] === '-') return base - 3;
+    return base;
+  }
+  return null;
+}
+
 function buildColdStartPrompt({ essay, teacher, rubric }) {
   const parts = [];
+  const wordCount = (String(essay || '').trim().match(/\S+/g) || []).length;
   if (teacher) {
     parts.push(
       `You are grading a student essay. The teacher's name is ${teacher}, ` +
         `but you don't yet have prior examples of their grading style — ` +
-        `fall back to standard high-school / college English grading. ` +
-        `Be specific and constructive.`
+        `fall back to standard rigorous high-school / college English ` +
+        `grading. Be specific and honest, not encouraging.`
     );
   } else {
     parts.push(
-      'You are grading a student essay using standard high-school / ' +
-        'college English grading. Be specific and constructive.'
+      'You are grading a student essay using standard rigorous high-school / ' +
+        'college English grading. Be specific and honest, not encouraging.'
     );
   }
+  parts.push(
+    `\n--- GRADING RULES (non-negotiable) ---\n` +
+      `1. Top marks (A / A- / 90+) are RARE. They require excellence in ` +
+      `every dimension — strong original thesis, sustained analysis, well-` +
+      `integrated specific evidence, polished prose, complete arc.\n` +
+      `2. An unfinished essay (no conclusion, missing sections, abrupt ` +
+      `cutoff, "TBD"/"[…]"/placeholder text) cannot earn an A. ` +
+      `Cap at the equivalent of a C+/B- and call out the missing pieces ` +
+      `explicitly. The new essay below is ${wordCount} words — judge ` +
+      `whether that's a complete piece.\n` +
+      `3. Competent-but-average essays earn average grades (C+/B). Do not ` +
+      `round up to be encouraging.\n` +
+      `4. Underdeveloped arguments, repetitive phrasing, weak/missing ` +
+      `evidence, and surface-level analysis pull the grade DOWN even when ` +
+      `the prose is clean.\n` +
+      `5. Default expectation for a typical first draft from a high-school ` +
+      `student is a B-/B/B+. A grade above that has to be earned.`
+  );
   if (rubric) parts.push(`\n--- RUBRIC ---\n${truncate(rubric, 3000)}`);
-  parts.push(`\n--- ESSAY ---\n${truncate(essay, 8000)}`);
+  parts.push(`\n--- ESSAY (${wordCount} words) ---\n${truncate(essay, 8000)}`);
   parts.push(
     '\n--- TASK ---\n' +
       'Output ONLY a JSON object:\n' +
@@ -279,12 +395,21 @@ router.post('/grade-predictor/predict', async (req, res) => {
       {
         role: 'system',
         content:
-          'You are an experienced English teacher producing structured grade predictions. ' +
-          'Always respond with a single JSON object — no prose, no code fences.',
+          'You are a rigorous, honest English teacher producing structured ' +
+          'grade predictions. Top marks (90+ / A- and above) are RARE and ' +
+          'reserved for essays that excel in every dimension — thesis, ' +
+          'evidence, analysis, structure, style, mechanics, completeness. ' +
+          'Average essays earn average grades. Unfinished or underdeveloped ' +
+          'work is not rounded up. Do not flatter the student — they need ' +
+          'honest feedback to improve. Always respond with a single JSON ' +
+          'object — no prose, no code fences.',
       },
       { role: 'user', content: prompt },
     ],
-    temperature: 0.4,
+    // Lower than the prior 0.4: grading is the kind of task where
+    // determinism matters more than creativity, and cooler sampling
+    // also pulls the model away from its "be generous" default.
+    temperature: 0.2,
     jsonMode: true,
     // Generating line-by-line JSON over a multi-page essay is intrinsically
     // slow on a 7B local model; the global 25s default in llmChat is for
