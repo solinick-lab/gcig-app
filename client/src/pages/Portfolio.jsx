@@ -191,16 +191,19 @@ export default function Portfolio() {
     return count > 0 ? sum / count : null;
   }, [history]);
 
-  // Adjusted return: take the equity sleeve's actual return and apply it to
-  // a book weighted by the cash level we've historically run, with the cash
-  // sleeve itself treated as flat. Answers "what would the blended number
-  // look like at our typical cash drag?" — without the fiction of a target
-  // we don't actually hold to.
+  // Adjusted return: the real return with the cash drag added back. The
+  // assumption is that the idle cash sleeve, had it actually been deployed,
+  // would have earned at the equity sleeve's rate — so we credit
+  // avgCashRatio × equityReturn on top of what the book actually did.
+  // Answers "what would the headline look like if we hadn't been sitting
+  // on cash all year?" — and by construction it lands above the real
+  // return whenever the equity sleeve is up.
   const adjustedReturn = useMemo(() => {
-    if (!equityReturn || avgCashRatio == null) return null;
-    const pct = (1 - avgCashRatio) * equityReturn.pct;
+    if (!equityReturn || avgCashRatio == null || lifetimeGainLossPct == null)
+      return null;
+    const pct = lifetimeGainLossPct + avgCashRatio * equityReturn.pct;
     return { pct, cashRatio: avgCashRatio };
-  }, [equityReturn, avgCashRatio]);
+  }, [equityReturn, avgCashRatio, lifetimeGainLossPct]);
 
   // Filter by selected range.
   const chartData = useMemo(() => {
@@ -448,8 +451,8 @@ export default function Portfolio() {
           sub={equityReturn ? `${fmtPct(equityReturn.pct)} equity-only` : null}
           footnote={
             adjustedReturn
-              ? `At ${(adjustedReturn.cashRatio * 100).toFixed(1)}% avg cash · normalizes for weekly-meeting cash drag`
-              : 'Normalizes for weekly-meeting cash drag'
+              ? `Adds back ${(adjustedReturn.cashRatio * 100).toFixed(1)}% avg cash drag at the equity rate`
+              : 'Adds back avg cash drag at the equity rate'
           }
           tone={
             adjustedReturn == null
