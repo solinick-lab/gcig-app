@@ -294,16 +294,18 @@ export default function Portfolio() {
     return null;
   }, [data, fullHistory]);
 
-  // Annualized Sharpe — computed twice off the same daily Δ-total series,
-  // changing only the denominator:
-  //   - sharpeReal: Δ / total_yesterday — risk-adjusted return on the
-  //     whole book, cash drag included. The "actual" experience.
-  //   - sharpeAdjusted: Δ / equity_yesterday — strips the cash sleeve
-  //     out of the denominator so the ratio reflects the deployed
-  //     capital alone. The "what your picks did, ignoring the pile of
-  //     cash they were sitting next to" view.
-  // Cash flows (infusions / withdrawals) are subtracted from the daily
-  // Δ either way so they don't masquerade as performance.
+  // Annualized Sharpe — paired real / adjusted off the same daily Δ-total
+  // series:
+  //   - sharpeReal: standard mean-of-daily-return × 252, with daily return
+  //     measured against total_yesterday so cash drag sits in the
+  //     denominator. The "actual experience" ratio.
+  //   - sharpeAdjusted: numerator swapped to use the Adjusted Return tile's
+  //     lifetime % (annualized by trading days in the sample). Volatility is
+  //     measured against equity_yesterday — the drag-free sleeve. So the
+  //     two Sharpes share the "Adjusted Return × Real Return" relationship
+  //     in the numerator and only differ in the denominator's basis.
+  // Cash flows (infusions / withdrawals) are subtracted from the daily Δ
+  // either way so they don't masquerade as performance.
   const sharpePair = useMemo(() => {
     if (fullHistory.length < 20) return { real: null, adjusted: null };
     const realReturns = [];
@@ -320,22 +322,40 @@ export default function Portfolio() {
       if (prev.value > 0) realReturns.push(dollarChange / prev.value);
       if (prev.equity > 0) adjustedReturns.push(dollarChange / prev.equity);
     }
-    const annualize = (returns) => {
-      if (returns.length < 10) return null;
-      const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+
+    // Real: standard mean-of-daily annualized.
+    let real = null;
+    if (realReturns.length >= 10) {
+      const mean = realReturns.reduce((a, b) => a + b, 0) / realReturns.length;
       const variance =
-        returns.reduce((s, r) => s + (r - mean) ** 2, 0) / returns.length;
+        realReturns.reduce((s, r) => s + (r - mean) ** 2, 0) /
+        realReturns.length;
       const std = Math.sqrt(variance);
-      if (std === 0) return null;
-      const annualReturn = mean * 252;
-      const annualStd = std * Math.sqrt(252);
-      return (annualReturn - RISK_FREE_RATE) / annualStd;
-    };
-    return {
-      real: annualize(realReturns),
-      adjusted: annualize(adjustedReturns),
-    };
-  }, [fullHistory]);
+      if (std > 0) {
+        real = (mean * 252 - RISK_FREE_RATE) / (std * Math.sqrt(252));
+      }
+    }
+
+    // Adjusted: numerator from the Adjusted Return tile's lifetime %, scaled
+    // to annual by trading days in the sample. Denominator uses the equity-
+    // base daily returns so vol reflects the deployed sleeve.
+    let adjusted = null;
+    if (adjustedReturns.length >= 10 && adjustedReturn) {
+      const mean =
+        adjustedReturns.reduce((a, b) => a + b, 0) / adjustedReturns.length;
+      const variance =
+        adjustedReturns.reduce((s, r) => s + (r - mean) ** 2, 0) /
+        adjustedReturns.length;
+      const std = Math.sqrt(variance);
+      if (std > 0) {
+        const annualReturn =
+          (adjustedReturn.pct / 100) * (252 / adjustedReturns.length);
+        adjusted = (annualReturn - RISK_FREE_RATE) / (std * Math.sqrt(252));
+      }
+    }
+
+    return { real, adjusted };
+  }, [fullHistory, adjustedReturn]);
   const sharpeReal = sharpePair.real;
   const sharpeAdjusted = sharpePair.adjusted;
 
