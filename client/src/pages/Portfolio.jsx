@@ -294,15 +294,20 @@ export default function Portfolio() {
     return null;
   }, [data, fullHistory]);
 
-  // Annualized Sharpe on equity returns.
-  // Daily equity return = (Δ total − cash flow) / equity_yesterday
-  //   - Δ total captures market movement of the equity holdings (cash is flat).
-  //   - Dividing by equity isolates invested-capital performance.
-  //   - Cash flows (infusions / withdrawals) are subtracted so they don't
-  //     look like gains.
-  const sharpe = useMemo(() => {
-    if (fullHistory.length < 20) return null;
-    const returns = [];
+  // Annualized Sharpe — computed twice off the same daily Δ-total series,
+  // changing only the denominator:
+  //   - sharpeReal: Δ / total_yesterday — risk-adjusted return on the
+  //     whole book, cash drag included. The "actual" experience.
+  //   - sharpeAdjusted: Δ / equity_yesterday — strips the cash sleeve
+  //     out of the denominator so the ratio reflects the deployed
+  //     capital alone. The "what your picks did, ignoring the pile of
+  //     cash they were sitting next to" view.
+  // Cash flows (infusions / withdrawals) are subtracted from the daily
+  // Δ either way so they don't masquerade as performance.
+  const sharpePair = useMemo(() => {
+    if (fullHistory.length < 20) return { real: null, adjusted: null };
+    const realReturns = [];
+    const adjustedReturns = [];
     for (let i = 1; i < fullHistory.length; i++) {
       const prev = fullHistory[i - 1];
       const curr = fullHistory[i];
@@ -312,20 +317,27 @@ export default function Portfolio() {
         (cf) => cf.date.toISOString().slice(0, 10) === curr.date.toISOString().slice(0, 10)
       ).reduce((s, cf) => s + cf.amount, 0);
       const dollarChange = curr.value - cfOnDay - prev.value;
-      const base = prev.equity;
-      if (base <= 0) continue;
-      returns.push(dollarChange / base);
+      if (prev.value > 0) realReturns.push(dollarChange / prev.value);
+      if (prev.equity > 0) adjustedReturns.push(dollarChange / prev.equity);
     }
-    if (returns.length < 10) return null;
-    const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
-    const variance =
-      returns.reduce((s, r) => s + (r - mean) ** 2, 0) / returns.length;
-    const std = Math.sqrt(variance);
-    if (std === 0) return null;
-    const annualReturn = mean * 252;
-    const annualStd = std * Math.sqrt(252);
-    return (annualReturn - RISK_FREE_RATE) / annualStd;
+    const annualize = (returns) => {
+      if (returns.length < 10) return null;
+      const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+      const variance =
+        returns.reduce((s, r) => s + (r - mean) ** 2, 0) / returns.length;
+      const std = Math.sqrt(variance);
+      if (std === 0) return null;
+      const annualReturn = mean * 252;
+      const annualStd = std * Math.sqrt(252);
+      return (annualReturn - RISK_FREE_RATE) / annualStd;
+    };
+    return {
+      real: annualize(realReturns),
+      adjusted: annualize(adjustedReturns),
+    };
   }, [fullHistory]);
+  const sharpeReal = sharpePair.real;
+  const sharpeAdjusted = sharpePair.adjusted;
 
   // Change between first and last point in the visible range, on equity base.
   // Dollar change = total change minus any capital infusions in range.
@@ -408,8 +420,8 @@ export default function Portfolio() {
         history={fullHistory}
       />
 
-      {/* Five supporting metrics below the hero. */}
-      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      {/* Six supporting metrics below the hero, paired real/adjusted. */}
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <SummaryTile
           kicker="Daily Change"
           value={dailyChange ? fmtMoney(dailyChange.diff) : '—'}
@@ -471,13 +483,31 @@ export default function Portfolio() {
         />
         <SummaryTile
           kicker="Sharpe Ratio"
-          value={sharpe != null ? sharpe.toFixed(2) : '—'}
+          value={sharpeReal != null ? sharpeReal.toFixed(2) : '—'}
           footnote={
-            sharpe != null
-              ? `Equity only · Rf = ${(RISK_FREE_RATE * 100).toFixed(2)}%`
+            sharpeReal != null
+              ? `Whole book · Rf = ${(RISK_FREE_RATE * 100).toFixed(2)}%`
               : null
           }
-          tone={sharpe == null ? 'neutral' : sharpe >= 1 ? 'good' : sharpe >= 0 ? 'neutral' : 'bad'}
+          tone={sharpeReal == null ? 'neutral' : sharpeReal >= 1 ? 'good' : sharpeReal >= 0 ? 'neutral' : 'bad'}
+        />
+        <SummaryTile
+          kicker="Adjusted Sharpe"
+          value={sharpeAdjusted != null ? sharpeAdjusted.toFixed(2) : '—'}
+          footnote={
+            sharpeAdjusted != null
+              ? `Equity sleeve only · Rf = ${(RISK_FREE_RATE * 100).toFixed(2)}%`
+              : null
+          }
+          tone={
+            sharpeAdjusted == null
+              ? 'neutral'
+              : sharpeAdjusted >= 1
+                ? 'good'
+                : sharpeAdjusted >= 0
+                  ? 'neutral'
+                  : 'bad'
+          }
         />
       </div>
 
