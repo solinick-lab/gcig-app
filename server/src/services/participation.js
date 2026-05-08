@@ -15,8 +15,8 @@
 import { ROLE_RANK } from '../middleware/auth.js';
 
 const WEIGHT_ATTENDANCE = 50;
-const WEIGHT_PITCHES = 30;
-const WEIGHT_ROLE = 20;
+const WEIGHT_PITCHES = 35;
+const WEIGHT_ROLE = 15;
 const PITCH_CAP = 5; // pitches beyond this don't add more to the score
 // Excludes Advisory/Faculty (rank 1) and Chief of Communication (rank 2) —
 // the first are observers, the second isn't tracked for attendance and
