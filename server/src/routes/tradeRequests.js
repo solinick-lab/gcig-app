@@ -66,7 +66,8 @@ function normalizeEnvelopeStatus(raw) {
 // Maximum line items per envelope. The PDF template needs anchor rows for
 // each — see CLAUDE.md for how to grow this. The server caps at 8 so a
 // caller can't accidentally build an envelope whose lines silently get
-// dropped by the PDF.
+// dropped by the PDF. (The template's row 9 anchors are present but
+// reserved — we don't expose them.)
 const MAX_ITEMS = 8;
 
 // ── Routes ──────────────────────────────────────────────────────────

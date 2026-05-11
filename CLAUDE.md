@@ -171,9 +171,9 @@ same DocuSign template:
    envelope. State lives on the new `TradeRequest` row + items. The
    composer ties each Buy line back to its `VotingSession` so a
    session can't be claimed twice. Sell lines have no
-   `votingSessionId`. Cap is 8 lines per envelope (extend by adding
-   more row anchor blocks to the PDF + raising `MAX_ITEMS` in
-   `routes/tradeRequests.js`).
+   `votingSessionId`. Cap is 8 lines per envelope (the PDF carries a
+   9th row of anchors but it's reserved; raise `MAX_ITEMS` in
+   `routes/tradeRequests.js` if you want to expose it).
 
 Both flows hit `POST /api/docusign/webhook` on completion. The
 webhook tries `VotingSession` first, then `TradeRequest`, then acks
@@ -218,37 +218,24 @@ binding by label. The PDF embedded in the template must contain these
 literal strings (rendered in ~2pt white text so signers don't see
 them).
 
-*Legacy single-line anchors* (still used by the per-VotingSession
-"Send trade confirmation" button on the Votes page):
+Both flows share a single indexed anchor scheme. The single-session
+"Send trade confirmation" flow just fills row 1; the bundled flow
+fills rows 1..N. The PDF table runs 9 rows of anchors but `MAX_ITEMS`
+caps the bundled flow at 8 — the 9th row is reserved.
 
 | Anchor | Filled with |
 |--------|-------------|
-| `\\ticker\\` | Ticker (e.g. `AIT`) |
-| `\\shares\\` | Whole-share count |
-| `\\decisiondate\\` | ISO date of the send |
-| `\\buysell\\` | `Buy` (always — that flow never sends Sell) |
-| `\\price\\` | Per-share price at send time (`$12.34`) |
-| `\\total\\` | Shares × price (`$1,234.56`) |
-
-*Multi-line anchors* (used by the bundled `TradeRequest` flow at
-`/trade-requests`). Each row N is independent; we cap at 8 rows per
-envelope server-side. Add as many row blocks to the PDF as you want
-to support — DocuSign drops unfilled anchors silently:
-
-| Anchor | Filled with |
-|--------|-------------|
-| `\\decisiondate\\` | ISO date of the send |
-| `\\grandtotal\\` | Net cash flow, signed: `+$3,210.00` (Sells outweigh Buys) or `-$8,250.00` (Buys outweigh Sells) |
+| `\\decisiondate\\` | ISO date of the send. Place in every row's Date cell — DocuSign stamps one value at each occurrence. |
+| `\\grandtotal\\` | (Bundled only) Net cash flow, signed: `+$3,210.00` (Sells outweigh Buys) or `-$8,250.00` (Buys outweigh Sells) |
 | `\\ticker{N}\\` | Row N's ticker (`AIT`, `SPY`, …) |
 | `\\buysell{N}\\` | Row N's action — `Buy` or `Sell` |
 | `\\shares{N}\\` | Whole-share count |
 | `\\price{N}\\` | Per-share price |
 | `\\total{N}\\` | Row's dollar total |
 
-N is 1-based. The first selected line lands in row 1, second in row 2,
-and so on. The Sell-to-cover line (SPY by default) is always one of
-the rows — there's no separate "sell" anchor block. The PDF template
-should have N row-blocks if you want to support N concurrent lines.
+N is 1-based. The first selected line lands in row 1, second in row
+2, and so on. The Sell-to-cover line (SPY by default) is always one
+of the rows — there's no separate "sell" anchor block.
 
 DocuSign ignores anchors it can't find in the PDF, so leaving any
 out is safe — they just don't get filled.

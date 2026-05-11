@@ -131,14 +131,19 @@ router.post(
       // Anchor strings the template's PDF must contain (invisible text, see
       // CLAUDE.md). DocuSign drops any anchor it can't find, so over-sending
       // is fine — they're harmless if the PDF only uses a subset.
+      //
+      // Single-session sends land in row 1 of the same table the bundled
+      // flow uses, so we use the indexed anchors (\\ticker1\\, \\shares1\\,
+      // …) — the unindexed legacy anchors were retired from the PDF when
+      // the table grew to support multi-row bundles.
       const decisionDate = new Date().toISOString().slice(0, 10);
       const anchorTabs = {
-        '\\ticker\\': session.ticker,
-        '\\shares\\': shares.toString(),
+        '\\ticker1\\': session.ticker,
+        '\\shares1\\': shares.toString(),
         '\\decisiondate\\': decisionDate,
-        '\\buysell\\': 'Buy',
-        '\\price\\': `$${price.toFixed(2)}`,
-        '\\total\\': `$${totalCost.toFixed(2)}`,
+        '\\buysell1\\': 'Buy',
+        '\\price1\\': `$${price.toFixed(2)}`,
+        '\\total1\\': `$${totalCost.toFixed(2)}`,
       };
 
       const envelope = await sendTradeConfirmationEnvelope({
