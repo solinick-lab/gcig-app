@@ -29,6 +29,7 @@ import cpiRoutes from './routes/cpi.js';
 import seaRoutes from './routes/sea.js';
 import sandboxRoutes from './routes/sandbox.js';
 import docusignRoutes from './routes/docusign.js';
+import tradeRequestRoutes from './routes/tradeRequests.js';
 import { ensureRecurringMeetings } from './services/recurringMeetings.js';
 import cron from 'node-cron';
 import { regenerate as regenerateDayInReview } from './services/dayInReview.js';
@@ -116,6 +117,7 @@ app.use('/api/cpi', cpiRoutes);
 app.use('/api/sea', seaRoutes);
 app.use('/api/sandbox', sandboxRoutes);
 app.use('/api/docusign', docusignRoutes);
+app.use('/api/trade-requests', tradeRequestRoutes);
 
 // Generic error handler. Logs the full error server-side for debugging but
 // never leaks internal details (stack traces, Prisma error bodies, etc.) to

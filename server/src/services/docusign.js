@@ -325,6 +325,132 @@ export async function sendTradeConfirmationEnvelope({
   return resp.json();
 }
 
+// Public: create + send a BUNDLED trade-confirmation envelope spanning one
+// or more line items (each line = a ticker + action + share count + price).
+//
+// `items` is an array of:
+//   { kind: "Buy" | "Sell", ticker, shares, pricePerShare, totalCost }
+//
+// We expand each item into indexed anchor strings on the PDF:
+//   \ticker1\, \shares1\, \buysell1\, \price1\, \total1\
+//   \ticker2\, \shares2\, \buysell2\, ...
+//
+// Plus envelope-level anchors:
+//   \decisiondate\   ISO date of send
+//   \grandtotal\     Net cash flow (Buy totals minus Sell totals). Negative
+//                    means the club is spending cash; positive means freeing
+//                    cash. Formatted with sign so the signer sees direction.
+//
+// DocuSign silently drops anchors it can't find in the PDF, so a template
+// supporting up to N rows works whether the request has 1 row or N rows.
+// Lines beyond what the PDF supports just won't render — see CLAUDE.md
+// "DocuSign integration" for the row limit + how to add more rows.
+export async function sendBundledTradeEnvelope({
+  items,
+  decisionDate,
+  emailSubject,
+  emailBlurb,
+}) {
+  if (!isConfigured()) {
+    throw Object.assign(new Error('DocuSign not configured'), { status: 503 });
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    throw Object.assign(new Error('At least one trade line is required'), {
+      status: 400,
+    });
+  }
+
+  const anchorTabs = {
+    '\\decisiondate\\': decisionDate || new Date().toISOString().slice(0, 10),
+  };
+
+  let netCash = 0;
+  items.forEach((item, idx) => {
+    const n = idx + 1;
+    const sign = item.kind === 'Sell' ? 1 : -1;
+    netCash += sign * Number(item.totalCost || 0);
+    anchorTabs[`\\ticker${n}\\`] = String(item.ticker || '');
+    anchorTabs[`\\shares${n}\\`] = String(item.shares ?? '');
+    anchorTabs[`\\buysell${n}\\`] = item.kind || '';
+    anchorTabs[`\\price${n}\\`] = formatMoney(item.pricePerShare);
+    anchorTabs[`\\total${n}\\`] = formatMoney(item.totalCost);
+  });
+
+  // Grand total displays signed cash flow. Positive = cash freed up (Sell
+  // proceeds exceed Buy cost), negative = cash spent. Matches what the
+  // signer expects to see at the bottom of a trade ticket.
+  const grandSign = netCash >= 0 ? '+' : '-';
+  anchorTabs['\\grandtotal\\'] = `${grandSign}${formatMoney(Math.abs(netCash))}`;
+
+  const accessToken = await getAccessToken();
+  const textTabs = Object.entries(anchorTabs).map(([anchor, value]) => ({
+    anchorString: anchor,
+    anchorMatchWholeWord: 'true',
+    anchorUnits: 'pixels',
+    anchorXOffset: '0',
+    anchorYOffset: '2',
+    value: value == null ? '' : String(value),
+    locked: 'true',
+    font: 'Helvetica',
+    fontSize: 'Size10',
+    width: 90,
+    height: 12,
+  }));
+
+  const body = {
+    status: 'sent',
+    emailSubject: emailSubject || 'Trade confirmation',
+    emailBlurb: emailBlurb || undefined,
+    compositeTemplates: [
+      {
+        serverTemplates: [{ sequence: '1', templateId: TEMPLATE_ID }],
+        inlineTemplates: [
+          {
+            sequence: '2',
+            recipients: {
+              signers: [
+                {
+                  roleName: SIGNER_ROLE_NAME,
+                  recipientId: '1',
+                  tabs: { textTabs },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+  };
+
+  const resp = await fetch(
+    `${API_BASE}/v2.1/accounts/${ACCOUNT_ID}/envelopes`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    }
+  );
+
+  if (!resp.ok) {
+    const errBody = await resp.text().catch(() => '');
+    throw new Error(`DocuSign envelope create failed (${resp.status}): ${errBody}`);
+  }
+
+  return resp.json();
+}
+
+function formatMoney(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '';
+  return `$${v.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
 // Bank successful API calls toward DocuSign's go-live threshold. Hits a
 // cheap account-info endpoint `count` times. Returns a result for each
 // call so the caller can show progress. Admin-only — the route guards it.

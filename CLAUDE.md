@@ -140,29 +140,49 @@ If something feels weird with auth on Safari, check that order in
   `server/prisma/migrations/`.
 - `server/src/services/docusign.js` + `server/src/routes/docusign.js` —
   trade-confirmation envelope flow. JWT-grant auth, single-template
-  envelopes, Connect webhook for status reconciliation. Triggered by an
-  exec clicking "Send trade confirmation" on a closed Buy session.
+  envelopes, Connect webhook for status reconciliation. The
+  `sendTradeConfirmationEnvelope` helper backs the legacy per-session
+  Send button; `sendBundledTradeEnvelope` backs the multi-line
+  `TradeRequest` flow.
+- `server/src/routes/tradeRequests.js` + `client/src/pages/TradeRequests.jsx` —
+  bundled trade-confirmation envelopes. Composer at
+  `/trade-requests` (executive-only) picks N closed Buy sessions and
+  optionally adds a Sell line (default SPY, sized by shares or cover
+  amount) → one envelope. Sessions claimed by a `TradeRequestItem` are
+  filtered out of the picker.
 
 ---
 
 ## DocuSign integration
 
-We send a trade-confirmation envelope (built from a stored template)
-when an exec closes a Buy vote. Flow:
+Two flows that both produce a trade-confirmation envelope from the
+same DocuSign template:
 
-1. Exec opens the closed Buy session and clicks **Send trade
-   confirmation** in the Final Decision card.
-2. Server recomputes the tally → derives shares from `Math.round(
-   avg_buy_amount / live_quote)` → resolves the signer (env override or
-   first CIO) → posts the envelope to DocuSign with the trade context
-   baked into named template tabs.
-3. The envelope's status is mirrored to `VotingSession.docusignStatus`,
-   first as `sent`, then via the Connect webhook on
-   `POST /api/docusign/webhook` (HMAC-SHA256 signed) it walks through
-   `delivered` → `completed` / `declined` / `voided`.
-4. A frozen snapshot of what we sent (ticker, shares, price, total)
-   lives on `VotingSession.docusignTradeContext` so audits don't drift
-   with later quote changes.
+**A. Single-session flow** (legacy, still wired on the Votes page).
+   Exec clicks "Send trade confirmation" on a closed Buy session →
+   server recomputes the tally, derives shares from
+   `Math.round(avg_buy_amount / live_quote)`, posts an envelope with
+   the legacy anchors filled. State is mirrored on
+   `VotingSession.docusign*`.
+
+**B. Bundled `TradeRequest` flow** (`/trade-requests`). Exec picks
+   N closed Buy sessions in the composer, optionally adds a Sell
+   line (typically SPY to free up cash), previews totals, sends one
+   envelope. State lives on the new `TradeRequest` row + items. The
+   composer ties each Buy line back to its `VotingSession` so a
+   session can't be claimed twice. Sell lines have no
+   `votingSessionId`. Cap is 8 lines per envelope (extend by adding
+   more row anchor blocks to the PDF + raising `MAX_ITEMS` in
+   `routes/tradeRequests.js`).
+
+Both flows hit `POST /api/docusign/webhook` on completion. The
+webhook tries `VotingSession` first, then `TradeRequest`, then acks
+silently if neither matches. Envelope status walks
+`sent` → `delivered` → `completed` / `declined` / `voided`. A frozen
+snapshot of what was sent lives on
+`VotingSession.docusignTradeContext` (legacy) or
+`TradeRequest.tradeContext` (bundled) so audits don't drift with
+later quote changes.
 
 **Auth shape:** JWT Grant. The integration key + impersonated user
 must have one-time consent granted in a browser before the server can
@@ -196,21 +216,42 @@ expose the "Data Label" field on text tabs, so we attach text tabs
 to invisible anchor strings already present on the PDF instead of
 binding by label. The PDF embedded in the template must contain these
 literal strings (rendered in ~2pt white text so signers don't see
-them):
+them).
+
+*Legacy single-line anchors* (still used by the per-VotingSession
+"Send trade confirmation" button on the Votes page):
 
 | Anchor | Filled with |
 |--------|-------------|
 | `\\ticker\\` | Ticker (e.g. `AIT`) |
 | `\\shares\\` | Whole-share count |
 | `\\decisiondate\\` | ISO date of the send |
-| `\\buysell\\` | `Buy` (always — we don't send Sell envelopes today) |
+| `\\buysell\\` | `Buy` (always — that flow never sends Sell) |
 | `\\price\\` | Per-share price at send time (`$12.34`) |
 | `\\total\\` | Shares × price (`$1,234.56`) |
 
+*Multi-line anchors* (used by the bundled `TradeRequest` flow at
+`/trade-requests`). Each row N is independent; we cap at 8 rows per
+envelope server-side. Add as many row blocks to the PDF as you want
+to support — DocuSign drops unfilled anchors silently:
+
+| Anchor | Filled with |
+|--------|-------------|
+| `\\decisiondate\\` | ISO date of the send |
+| `\\grandtotal\\` | Net cash flow, signed: `+$3,210.00` (Sells outweigh Buys) or `-$8,250.00` (Buys outweigh Sells) |
+| `\\ticker{N}\\` | Row N's ticker (`AIT`, `SPY`, …) |
+| `\\buysell{N}\\` | Row N's action — `Buy` or `Sell` |
+| `\\shares{N}\\` | Whole-share count |
+| `\\price{N}\\` | Per-share price |
+| `\\total{N}\\` | Row's dollar total |
+
+N is 1-based. The first selected line lands in row 1, second in row 2,
+and so on. The Sell-to-cover line (SPY by default) is always one of
+the rows — there's no separate "sell" anchor block. The PDF template
+should have N row-blocks if you want to support N concurrent lines.
+
 DocuSign ignores anchors it can't find in the PDF, so leaving any
-out is safe — they just don't get filled. The first four go in the
-four table cells; `\\price\\` and `\\total\\` are optional and only
-needed if the PDF surface has space for them.
+out is safe — they just don't get filled.
 
 **Adding anchors to the PDF (Word / Pages workflow):**
 1. Open the source doc (not the PDF — re-export afterward).

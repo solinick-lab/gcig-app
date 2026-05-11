@@ -236,24 +236,43 @@ router.post('/webhook', async (req, res, next) => {
     }
     const normalized = normalizeEnvelopeStatus(status);
 
+    // Envelope id could belong to either the legacy single-session flow
+    // (VotingSession.docusign*) or the bundled TradeRequest flow. Try both
+    // — they're disjoint by construction.
     const session = await prisma.votingSession.findFirst({
       where: { docusignEnvelopeId: envelopeId },
     });
-    if (!session) {
+    const tradeRequest = session
+      ? null
+      : await prisma.tradeRequest.findFirst({
+          where: { docusignEnvelopeId: envelopeId },
+        });
+    if (!session && !tradeRequest) {
       // Not ours, but ack so DocuSign doesn't keep retrying.
       return res.json({ ok: true, matched: false });
     }
 
-    const completedAt =
-      normalized === 'completed' ? new Date() : session.docusignCompletedAt;
-
-    await prisma.votingSession.update({
-      where: { id: session.id },
-      data: {
-        docusignStatus: normalized || session.docusignStatus,
-        docusignCompletedAt: completedAt,
-      },
-    });
+    if (session) {
+      const completedAt =
+        normalized === 'completed' ? new Date() : session.docusignCompletedAt;
+      await prisma.votingSession.update({
+        where: { id: session.id },
+        data: {
+          docusignStatus: normalized || session.docusignStatus,
+          docusignCompletedAt: completedAt,
+        },
+      });
+    } else {
+      const completedAt =
+        normalized === 'completed' ? new Date() : tradeRequest.docusignCompletedAt;
+      await prisma.tradeRequest.update({
+        where: { id: tradeRequest.id },
+        data: {
+          docusignStatus: normalized || tradeRequest.docusignStatus,
+          docusignCompletedAt: completedAt,
+        },
+      });
+    }
 
     res.json({ ok: true });
   } catch (err) {

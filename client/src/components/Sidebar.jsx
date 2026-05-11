@@ -19,6 +19,7 @@ import {
   Activity,
   Ship,
   GraduationCap,
+  FileText,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import RoleBadge from './RoleBadge.jsx';
@@ -46,6 +47,7 @@ const NAV_SECTIONS = [
       { to: '/portfolio', label: 'Portfolio', icon: LineChart },
       { to: '/outcomes', label: 'Coverage Outcomes', icon: Trophy },
       { to: '/votes', label: 'Voting', icon: Vote },
+      { to: '/trade-requests', label: 'Trade Requests', icon: FileText, executiveOnly: true },
       { to: '/industries', label: 'Industries', icon: Building2 },
       { to: '/cpi', label: 'CPI Forecast', icon: Activity },
       { to: '/tankers', label: 'Tanker Tracker', icon: Ship },

@@ -89,6 +89,7 @@ model User {
   rosterOverrides   EventRosterOverride[]
   gradeExamples     GradePredictorExample[]
   gradeAnalyses     GradePredictorAnalysis[]
+  tradeRequests     TradeRequest[]   @relation("TradeRequestCreator")
 }
 
 // Chat channels are addressed by a simple string:
@@ -274,7 +275,60 @@ model VotingSession {
   docusignCompletedAt  DateTime?
   docusignTradeContext Json?
 
+  // Trade requests that bundle this session into a multi-ticker envelope.
+  // A Buy session is "claimed" once it appears as a non-Sell item on a
+  // TradeRequest — the eligible-buys picker excludes claimed sessions.
+  tradeRequestItems    TradeRequestItem[]
+
   @@index([createdAt])
+}
+
+// A bundled trade-confirmation envelope. Aggregates one or more Buy lines
+// (each tied back to a closed Buy VotingSession) plus optional Sell lines
+// (typically SPY, used to free up cash to fund the buys). One TradeRequest
+// = one DocuSign envelope, regardless of how many tickers it carries.
+//
+// The single-session flow on VotingSession.docusign* still works for
+// legacy single-ticker sends; this model is the path going forward.
+model TradeRequest {
+  id                   Int      @id @default(autoincrement())
+  createdAt            DateTime @default(now())
+  createdBy            Int
+  creator              User     @relation("TradeRequestCreator", fields: [createdBy], references: [id])
+  // Free-text exec note attached to the envelope (becomes part of the
+  // email body). Optional.
+  note                 String?
+  // Frozen snapshot of what we sent — line items + per-line price +
+  // grand total — so audits don't drift with later quote changes. Mirrors
+  // VotingSession.docusignTradeContext.
+  tradeContext         Json?
+  docusignEnvelopeId   String?
+  docusignStatus       String?
+  docusignSentAt       DateTime?
+  docusignCompletedAt  DateTime?
+  items                TradeRequestItem[]
+
+  @@index([createdAt])
+}
+
+// One line on a TradeRequest. `kind` is "Buy" or "Sell". Sell lines have
+// no votingSessionId — they're standalone (typically Sell SPY to cover the
+// cash demand of the Buy lines).
+model TradeRequestItem {
+  id              Int           @id @default(autoincrement())
+  tradeRequestId  Int
+  tradeRequest    TradeRequest  @relation(fields: [tradeRequestId], references: [id], onDelete: Cascade)
+  kind            String        // "Buy" | "Sell"
+  ticker          String
+  shares          Int
+  pricePerShare   Float
+  totalCost       Float
+  votingSessionId Int?
+  votingSession   VotingSession? @relation(fields: [votingSessionId], references: [id], onDelete: SetNull)
+  createdAt       DateTime      @default(now())
+
+  @@index([tradeRequestId])
+  @@index([votingSessionId])
 }
 
 model Ballot {

@@ -18,6 +18,7 @@ import Attendance from './pages/Attendance.jsx';
 import Members from './pages/Members.jsx';
 import Profile from './pages/Profile.jsx';
 import Votes from './pages/Votes.jsx';
+import TradeRequests from './pages/TradeRequests.jsx';
 import Industries from './pages/Industries.jsx';
 import Library from './pages/Library.jsx';
 import Admin from './pages/Admin.jsx';
@@ -75,6 +76,7 @@ export default function App() {
         <Route path="/audit" element={<Admin />} />
         <Route path="/portfolio" element={<Portfolio />} />
         <Route path="/votes" element={<Votes />} />
+        <Route path="/trade-requests" element={<TradeRequests />} />
         <Route path="/industries" element={<Industries />} />
         <Route path="/cpi" element={<CPI />} />
         <Route path="/tankers" element={<Tankers />} />
