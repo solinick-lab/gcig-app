@@ -150,6 +150,16 @@ If something feels weird with auth on Safari, check that order in
   optionally adds a Sell line (default SPY, sized by shares or cover
   amount) → one envelope. Sessions claimed by a `TradeRequestItem` are
   filtered out of the picker.
+- `server/src/routes/presidentReview.js` + `client/src/pages/PresidentReview.jsx` —
+  end-of-year president performance review. Members rate each
+  President 1-5 on 9 statements (Strongly Disagree → Strongly Agree)
+  with an optional free-form comment. One row per reviewer × president
+  × cycle (academic year e.g. `2025-2026`); resubmits upsert. Question
+  list lives in the route file as `QUESTIONS` and is shipped to the
+  client via `GET /api/president-review/config`. `GET /results` is
+  super-admin only and returns aggregated averages + distributions per
+  president + anonymized comments — reviewer identity never appears in
+  the aggregate. Self-review is blocked.
 
 ---
 

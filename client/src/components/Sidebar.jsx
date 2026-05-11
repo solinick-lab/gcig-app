@@ -19,6 +19,7 @@ import {
   Activity,
   Ship,
   GraduationCap,
+  ClipboardList,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import RoleBadge from './RoleBadge.jsx';
@@ -38,6 +39,7 @@ const NAV_SECTIONS = [
       { to: '/chat', label: 'Chat', icon: MessageSquare },
       { to: '/broadcast', label: 'Broadcast', icon: Megaphone, executiveOnly: true },
       { to: '/attendance', label: 'Attendance', icon: ClipboardCheck, hideForAdvisory: true },
+      { to: '/president-review', label: 'President Review', icon: ClipboardList },
     ],
   },
   {

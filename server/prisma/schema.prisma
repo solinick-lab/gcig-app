@@ -90,6 +90,8 @@ model User {
   gradeExamples     GradePredictorExample[]
   gradeAnalyses     GradePredictorAnalysis[]
   tradeRequests     TradeRequest[]   @relation("TradeRequestCreator")
+  presidentReviewsGiven    PresidentReview[] @relation("PresidentReviewReviewer")
+  presidentReviewsReceived PresidentReview[] @relation("PresidentReviewPresident")
 }
 
 // Chat channels are addressed by a simple string:
@@ -690,6 +692,30 @@ model GradePredictorAnalysis {
 
   @@index([createdById, createdAt])
   @@index([teacher])
+}
+
+// End-of-year performance review submitted by a member about a President.
+// Nine statements on a 1-5 Likert scale (stored as a JSON map keyed by
+// q1..q9) plus an optional free-form comment. One row per reviewer x
+// president x cycle; resubmitting upserts. Results are visible to the
+// super-admin only — reviewer identity is never exposed in aggregates,
+// only used to enforce one-per-member.
+model PresidentReview {
+  id           Int      @id @default(autoincrement())
+  reviewerId   Int
+  reviewer     User     @relation("PresidentReviewReviewer", fields: [reviewerId], references: [id], onDelete: Cascade)
+  presidentId  Int
+  president    User     @relation("PresidentReviewPresident", fields: [presidentId], references: [id], onDelete: Cascade)
+  // Academic-year string, e.g. "2025-2026". Computed server-side from
+  // the submission date so members don't have to think about it.
+  cycle        String
+  ratings      Json
+  comment      String?
+  submittedAt  DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([reviewerId, presidentId, cycle])
+  @@index([presidentId, cycle])
 }
 
 model ArticleRanking {
