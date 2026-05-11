@@ -421,7 +421,7 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Tally */}
         <Card title="Weighted Tally">
-          <TallyDisplay tally={tally} isOpen={isOpen} />
+          <TallyDisplay tally={tally} isOpen={isOpen} ticker={session.ticker} />
         </Card>
 
         {/* Cast ballot (if open) */}
@@ -587,7 +587,38 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
 
 // ── Tally display ────────────────────────────────────────────────────
 
-function TallyDisplay({ tally, isOpen }) {
+function TallyDisplay({ tally, isOpen, ticker }) {
+  // Live quote for the share-count math in the Proposed Buy block. We
+  // keep this hook unconditional so it runs in stable order; the body
+  // bails out if there's no ticker or no Buy ballots to size.
+  const [quote, setQuote] = useState({ status: 'idle', price: null });
+  useEffect(() => {
+    const t = (ticker || '').trim().toUpperCase();
+    if (!t || !tally?.buyAmountStats) {
+      setQuote({ status: 'idle', price: null });
+      return;
+    }
+    let cancelled = false;
+    setQuote({ status: 'loading', price: null });
+    api
+      .get(`/holdings/info/${encodeURIComponent(t)}`)
+      .then((res) => {
+        if (cancelled) return;
+        const p = Number(res.data?.price);
+        setQuote(
+          Number.isFinite(p) && p > 0
+            ? { status: 'ok', price: p }
+            : { status: 'error', price: null }
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setQuote({ status: 'error', price: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ticker, tally?.buyAmountStats]);
+
   if (!tally) return null;
   const {
     memberCounts,
@@ -702,7 +733,8 @@ function TallyDisplay({ tally, isOpen }) {
         )}
       </div>
 
-      {/* Proposed Buy allocation — average / range from Buy ballots */}
+      {/* Proposed Buy allocation — average / range from Buy ballots,
+          plus a live share-count sizing against the current quote. */}
       {buyAmountStats && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-3">
           <div className="text-xs font-semibold uppercase text-emerald-800">
@@ -719,6 +751,51 @@ function TallyDisplay({ tally, isOpen }) {
           </div>
           <div className="mt-1 text-xs text-navy-400">
             Range: ${buyAmountStats.min.toLocaleString()} – ${buyAmountStats.max.toLocaleString()}
+          </div>
+
+          {/* Share sizing — rounds to the nearest whole share at the
+              live quote and shows the resulting dollar cost so any
+              over/underrun vs. the proposed buy is visible. */}
+          <div className="mt-3 border-t border-emerald-200 pt-3">
+            {quote.status === 'loading' && (
+              <div className="text-xs text-navy-400">
+                Pulling {ticker} quote…
+              </div>
+            )}
+            {quote.status === 'error' && (
+              <div className="text-xs text-navy-400">
+                Couldn't pull a live quote for {ticker}.
+              </div>
+            )}
+            {quote.status === 'ok' && (() => {
+              const shares = Math.round(buyAmountStats.avg / quote.price);
+              const cost = shares * quote.price;
+              const delta = cost - buyAmountStats.avg;
+              return (
+                <>
+                  <div className="flex items-baseline gap-3">
+                    <div className="text-lg font-bold tabular-nums text-emerald-800">
+                      {shares.toLocaleString()} share{shares === 1 ? '' : 's'}
+                    </div>
+                    <div className="text-xs text-navy-400">
+                      at ${quote.price.toFixed(2)} / share
+                    </div>
+                  </div>
+                  <div className="mt-1 text-xs text-navy-400">
+                    ≈ ${cost.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}{' '}
+                    ({delta >= 0 ? '+' : '−'}$
+                    {Math.abs(delta).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}{' '}
+                    vs. proposed)
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
