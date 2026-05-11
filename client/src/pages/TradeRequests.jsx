@@ -256,6 +256,11 @@ function RequestRow({ tr, refreshing, onRefresh }) {
 // ── Composer ──────────────────────────────────────────────────────────
 
 const DEFAULT_SELL_TICKER = 'SPY';
+// Cushion added to the default cover amount. Trades aren't instant — by the
+// time the broker fills, both the Buy legs and the SPY sell can drift on
+// us, so we ask for a bit more than the bare buy total. $1,000 has been
+// enough headroom historically.
+const COVER_BUFFER = 1000;
 
 function Composer({ open, onClose, onCreated }) {
   const [eligible, setEligible] = useState([]);
@@ -365,9 +370,12 @@ function Composer({ open, onClose, onCreated }) {
         const n = Math.round(Number(sellShares));
         if (Number.isFinite(n) && n > 0) shares = n;
       } else if (sellMode === 'cover') {
-        // If the user typed a cover amount, use it; otherwise default to the
-        // current buy total so the preview shows a sensible Sell.
-        const amt = Number(sellCoverAmount) || buyTotal;
+        // If the user typed a cover amount, use it; otherwise default to
+        // the buy total + a small buffer so a price drift between sending
+        // the envelope and the broker filling doesn't leave us short on
+        // cash.
+        const amt =
+          Number(sellCoverAmount) || (buyTotal > 0 ? buyTotal + COVER_BUFFER : 0);
         if (amt > 0 && quote?.status === 'ok') {
           shares = Math.ceil(amt / quote.price);
         }
@@ -436,7 +444,8 @@ function Composer({ open, onClose, onCreated }) {
         if (sellMode === 'shares') {
           sellItem.shares = Math.round(Number(sellShares));
         } else {
-          sellItem.coverAmount = Number(sellCoverAmount) || buyTotal;
+          sellItem.coverAmount =
+            Number(sellCoverAmount) || buyTotal + COVER_BUFFER;
         }
         items.push(sellItem);
       }
@@ -613,11 +622,14 @@ function Composer({ open, onClose, onCreated }) {
                       onChange={(e) => setSellCoverAmount(e.target.value)}
                       placeholder={
                         buyTotal > 0
-                          ? Math.ceil(buyTotal).toLocaleString()
+                          ? Math.ceil(buyTotal + COVER_BUFFER).toLocaleString()
                           : '—'
                       }
                       className="mt-1 w-32 rounded border border-navy-100 px-2 py-1 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
                     />
+                    <p className="mt-1 text-[10px] text-navy-400">
+                      Default = buys + ${COVER_BUFFER.toLocaleString()} buffer for price drift
+                    </p>
                   </div>
                 )}
               </div>
