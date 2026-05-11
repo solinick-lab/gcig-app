@@ -566,6 +566,7 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
                 sending={sendingDocusign}
                 error={docusignError}
                 onSend={sendDocusign}
+                onRefresh={onRefresh}
               />
             )}
           </Card>
@@ -621,11 +622,12 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
 // states: no envelope (admin sees a Send button, others see nothing yet),
 // envelope sent (everyone sees a status pill + frozen trade context), or
 // envelope completed (signed pill + completion date).
-function DocusignPanel({ session, canSend, sending, error, onSend }) {
+function DocusignPanel({ session, canSend, sending, error, onSend, onRefresh }) {
   const status = session.docusignStatus;
   const ctx = session.docusignTradeContext;
   const [diag, setDiag] = useState(null);
   const [diagLoading, setDiagLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   async function runDiagnose() {
     setDiagLoading(true);
@@ -636,6 +638,19 @@ function DocusignPanel({ session, canSend, sending, error, onSend }) {
       setDiag({ error: err.response?.data?.error || err.message });
     } finally {
       setDiagLoading(false);
+    }
+  }
+
+  async function refreshEnvelopeStatus() {
+    setRefreshing(true);
+    try {
+      await api.get(`/docusign/sessions/${session.id}/refresh`);
+      onRefresh?.();
+    } catch (err) {
+      // Swallow — server-side error already logged; UI just doesn't update.
+      console.warn('docusign refresh failed:', err.message);
+    } finally {
+      setRefreshing(false);
     }
   }
 
@@ -692,15 +707,27 @@ function DocusignPanel({ session, canSend, sending, error, onSend }) {
 
   return (
     <div className="mt-3 rounded-lg border border-navy-100 bg-white p-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <div className="text-[10px] font-bold uppercase tracking-wider text-navy-400">
           Trade confirmation
         </div>
-        <span
-          className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${pillTone}`}
-        >
-          {pillLabel}
-        </span>
+        <div className="flex items-center gap-2">
+          {canSend && (
+            <button
+              type="button"
+              onClick={refreshEnvelopeStatus}
+              disabled={refreshing}
+              className="text-[10px] font-semibold text-navy-400 underline hover:text-navy"
+            >
+              {refreshing ? 'Refreshing…' : 'Refresh status'}
+            </button>
+          )}
+          <span
+            className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${pillTone}`}
+          >
+            {pillLabel}
+          </span>
+        </div>
       </div>
       {ctx && (
         <div className="mt-2 text-xs text-navy-400">
