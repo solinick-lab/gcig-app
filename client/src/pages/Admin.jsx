@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import Members from './Members.jsx';
 import AuditLog from './AuditLog.jsx';
 import Participation from './Participation.jsx';
+import TradeRequests from './TradeRequests.jsx';
 
 function ProviderRow({ label, data }) {
   const dot = !data?.configured
@@ -131,6 +132,9 @@ export default function Admin() {
   const tabs = [
     { id: 'members', label: 'Members' },
     ...(isAdmin ? [{ id: 'participation', label: 'Participation' }] : []),
+    // Trade Approval is exec-tier: bundled DocuSign envelopes spanning
+    // multiple closed Buy votes (and an optional Sell-to-cover line).
+    { id: 'trade-requests', label: 'Trade Approval' },
     ...(isSuperAdmin
       ? [
           { id: 'audit', label: 'Audit Log' },
@@ -182,6 +186,8 @@ export default function Admin() {
         <NameInferenceTable />
       ) : tab === 'participation' && isAdmin ? (
         <Participation embedded />
+      ) : tab === 'trade-requests' ? (
+        <TradeRequests embedded />
       ) : (
         <Members embedded />
       )}

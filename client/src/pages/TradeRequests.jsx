@@ -19,7 +19,7 @@ import Button from '../components/Button.jsx';
 import Modal from '../components/Modal.jsx';
 import AdminOnly from '../components/AdminOnly.jsx';
 
-export default function TradeRequests() {
+export default function TradeRequests({ embedded = false } = {}) {
   const { isExecutive } = useAuth();
   const [requests, setRequests] = useState([]);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -47,11 +47,13 @@ export default function TradeRequests() {
   if (!isExecutive) {
     return (
       <>
-        <PageHeader
-          kicker="Trading"
-          title="Trade Requests"
-          subtitle="Bundled DocuSign envelopes for executed votes."
-        />
+        {!embedded && (
+          <PageHeader
+            kicker="Trading"
+            title="Trade Approval"
+            subtitle="Bundled DocuSign envelopes for executed votes."
+          />
+        )}
         <Card>
           <div className="py-8 text-center text-navy-400">
             Visible to executive officers only.
@@ -63,26 +65,42 @@ export default function TradeRequests() {
 
   return (
     <>
-      <PageHeader
-        kicker="Trading"
-        title="Trade Requests"
-        subtitle="Bundle multiple closed Buy votes (and an optional Sell-to-cover) into a single DocuSign envelope."
-        actions={
+      {!embedded && (
+        <PageHeader
+          kicker="Trading"
+          title="Trade Approval"
+          subtitle="Bundle multiple closed Buy votes (and an optional Sell-to-cover) into a single DocuSign envelope."
+          actions={
+            <AdminOnly>
+              <Button onClick={() => setComposerOpen(true)} variant="gold">
+                <Plus className="h-4 w-4" />
+                New Trade Approval
+              </Button>
+            </AdminOnly>
+          }
+        />
+      )}
+      {embedded && (
+        <div className="mb-4 flex items-center justify-between">
+          <p className="text-sm text-navy-400">
+            Bundle multiple closed Buy votes (and an optional Sell-to-cover)
+            into a single DocuSign envelope.
+          </p>
           <AdminOnly>
             <Button onClick={() => setComposerOpen(true)} variant="gold">
               <Plus className="h-4 w-4" />
-              New Trade Request
+              New Trade Approval
             </Button>
           </AdminOnly>
-        }
-      />
+        </div>
+      )}
 
-      <div className="mt-6 space-y-3">
+      <div className={embedded ? 'space-y-3' : 'mt-6 space-y-3'}>
         {requests.length === 0 ? (
           <Card>
             <div className="py-8 text-center text-navy-400">
-              No trade requests yet. Click "New Trade Request" to bundle some
-              closed Buy votes into an envelope.
+              No trade approvals yet. Click "New Trade Approval" to bundle
+              some closed Buy votes into an envelope.
             </div>
           </Card>
         ) : (
@@ -146,7 +164,7 @@ function RequestRow({ tr, refreshing, onRefresh }) {
           <div className="flex flex-wrap items-center gap-2">
             <FileText className="h-4 w-4 text-navy-400" />
             <span className="font-semibold text-navy">
-              Request #{tr.id}
+              Approval #{tr.id}
             </span>
             <span
               className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${tone}`}
@@ -432,7 +450,7 @@ function Composer({ open, onClose, onCreated }) {
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="New Trade Request" size="xl">
+    <Modal open={open} onClose={onClose} title="New Trade Approval" size="xl">
       <div className="space-y-5">
         {/* ── Eligible Buy sessions ── */}
         <div>
