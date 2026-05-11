@@ -624,6 +624,20 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
 function DocusignPanel({ session, canSend, sending, error, onSend }) {
   const status = session.docusignStatus;
   const ctx = session.docusignTradeContext;
+  const [diag, setDiag] = useState(null);
+  const [diagLoading, setDiagLoading] = useState(false);
+
+  async function runDiagnose() {
+    setDiagLoading(true);
+    try {
+      const { data } = await api.get('/docusign/diagnose');
+      setDiag(data);
+    } catch (err) {
+      setDiag({ error: err.response?.data?.error || err.message });
+    } finally {
+      setDiagLoading(false);
+    }
+  }
 
   if (!session.docusignEnvelopeId) {
     if (!canSend) return null;
@@ -636,11 +650,26 @@ function DocusignPanel({ session, canSend, sending, error, onSend }) {
           Sends a DocuSign envelope to the configured signer with the
           ticker, share count, and live quote pre-filled.
         </p>
-        <Button onClick={onSend} disabled={sending}>
-          {sending ? 'Sending…' : 'Send trade confirmation'}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={onSend} disabled={sending}>
+            {sending ? 'Sending…' : 'Send trade confirmation'}
+          </Button>
+          <button
+            type="button"
+            onClick={runDiagnose}
+            disabled={diagLoading}
+            className="text-xs font-semibold text-navy-400 underline hover:text-navy"
+          >
+            {diagLoading ? 'Checking…' : 'Run diagnose'}
+          </button>
+        </div>
         {error && (
           <div className="mt-2 text-xs font-semibold text-red-700">{error}</div>
+        )}
+        {diag && (
+          <pre className="mt-3 max-h-80 overflow-auto rounded-md bg-navy-50 p-2 text-[11px] leading-snug text-navy">
+            {JSON.stringify(diag, null, 2)}
+          </pre>
         )}
       </div>
     );
