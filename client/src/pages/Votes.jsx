@@ -304,8 +304,25 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
   const [ballotError, setBallotError] = useState('');
   const [casting, setCasting] = useState(false);
   const [preview, setPreview] = useState(null);
+  const [sendingDocusign, setSendingDocusign] = useState(false);
+  const [docusignError, setDocusignError] = useState('');
   const isOpen = session.status === 'open' && !isPast(new Date(session.deadline));
   const tally = session.tally;
+
+  async function sendDocusign() {
+    setDocusignError('');
+    setSendingDocusign(true);
+    try {
+      await api.post(`/docusign/sessions/${session.id}/send`);
+      onRefresh();
+    } catch (err) {
+      setDocusignError(
+        err.response?.data?.error || 'Failed to send trade confirmation'
+      );
+    } finally {
+      setSendingDocusign(false);
+    }
+  }
 
   useEffect(() => {
     if (session.myBallot) {
@@ -538,6 +555,19 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
                 </p>
               </div>
             )}
+
+            {/* DocuSign trade-confirmation panel — only shown when the
+                club actually voted Buy. The admin sends the envelope;
+                the rest of the membership just sees the status. */}
+            {tally.finalDecision === 'Buy' && (
+              <DocusignPanel
+                session={session}
+                canSend={isAdmin}
+                sending={sendingDocusign}
+                error={docusignError}
+                onSend={sendDocusign}
+              />
+            )}
           </Card>
         )}
       </div>
@@ -582,6 +612,95 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
         />
       )}
     </>
+  );
+}
+
+// ── DocuSign trade-confirmation panel ────────────────────────────────
+
+// Renders inside the Final Decision card when the club voted Buy. Three
+// states: no envelope (admin sees a Send button, others see nothing yet),
+// envelope sent (everyone sees a status pill + frozen trade context), or
+// envelope completed (signed pill + completion date).
+function DocusignPanel({ session, canSend, sending, error, onSend }) {
+  const status = session.docusignStatus;
+  const ctx = session.docusignTradeContext;
+
+  if (!session.docusignEnvelopeId) {
+    if (!canSend) return null;
+    return (
+      <div className="mt-3 rounded-lg border border-navy-100 bg-white p-3">
+        <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-navy-400">
+          Trade confirmation
+        </div>
+        <p className="mb-3 text-xs text-navy-400">
+          Sends a DocuSign envelope to the configured signer with the
+          ticker, share count, and live quote pre-filled.
+        </p>
+        <Button onClick={onSend} disabled={sending}>
+          {sending ? 'Sending…' : 'Send trade confirmation'}
+        </Button>
+        {error && (
+          <div className="mt-2 text-xs font-semibold text-red-700">{error}</div>
+        )}
+      </div>
+    );
+  }
+
+  const pillTone =
+    status === 'completed'
+      ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+      : status === 'declined' || status === 'voided'
+      ? 'bg-red-100 text-red-800 border-red-200'
+      : 'bg-gold-100 text-gold-800 border-gold-300';
+  const pillLabel =
+    status === 'completed'
+      ? 'Signed'
+      : status === 'declined'
+      ? 'Declined'
+      : status === 'voided'
+      ? 'Voided'
+      : 'Awaiting signature';
+
+  return (
+    <div className="mt-3 rounded-lg border border-navy-100 bg-white p-3">
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-navy-400">
+          Trade confirmation
+        </div>
+        <span
+          className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${pillTone}`}
+        >
+          {pillLabel}
+        </span>
+      </div>
+      {ctx && (
+        <div className="mt-2 text-xs text-navy-400">
+          {ctx.shares} share{ctx.shares === 1 ? '' : 's'} of {ctx.ticker} at $
+          {Number(ctx.pricePerShare).toFixed(2)} · $
+          {Number(ctx.totalCost).toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}{' '}
+          total
+        </div>
+      )}
+      {session.docusignSentAt && (
+        <div className="mt-1 text-xs text-navy-400">
+          Sent {format(new Date(session.docusignSentAt), 'MMM d, yyyy h:mm a')}
+          {' '}to the template signatories
+          {status === 'completed' && session.docusignCompletedAt && (
+            <>
+              {' '}
+              · signed{' '}
+              {format(
+                new Date(session.docusignCompletedAt),
+                'MMM d, yyyy h:mm a'
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -16,7 +16,7 @@ router.use(verifyJwt);
 const GENERAL_BODY_WEIGHT = 3;
 const LEADERSHIP_ROLES = new Set(['President', 'CIO']);
 
-function computeTally(ballots, allUsers) {
+export function computeTally(ballots, allUsers) {
   const userMap = new Map(allUsers.map((u) => [u.id, u]));
 
   const leadershipBallots = ballots.filter((b) =>

@@ -138,6 +138,100 @@ If something feels weird with auth on Safari, check that order in
   MapLibre vessel map + click-to-detail drawer.
 - `server/prisma/schema.prisma` — full schema. Migrations in
   `server/prisma/migrations/`.
+- `server/src/services/docusign.js` + `server/src/routes/docusign.js` —
+  trade-confirmation envelope flow. JWT-grant auth, single-template
+  envelopes, Connect webhook for status reconciliation. Triggered by an
+  exec clicking "Send trade confirmation" on a closed Buy session.
+
+---
+
+## DocuSign integration
+
+We send a trade-confirmation envelope (built from a stored template)
+when an exec closes a Buy vote. Flow:
+
+1. Exec opens the closed Buy session and clicks **Send trade
+   confirmation** in the Final Decision card.
+2. Server recomputes the tally → derives shares from `Math.round(
+   avg_buy_amount / live_quote)` → resolves the signer (env override or
+   first CIO) → posts the envelope to DocuSign with the trade context
+   baked into named template tabs.
+3. The envelope's status is mirrored to `VotingSession.docusignStatus`,
+   first as `sent`, then via the Connect webhook on
+   `POST /api/docusign/webhook` (HMAC-SHA256 signed) it walks through
+   `delivered` → `completed` / `declined` / `voided`.
+4. A frozen snapshot of what we sent (ticker, shares, price, total)
+   lives on `VotingSession.docusignTradeContext` so audits don't drift
+   with later quote changes.
+
+**Auth shape:** JWT Grant. The integration key + impersonated user
+must have one-time consent granted in a browser before the server can
+mint tokens. Consent URL pattern (prod):
+
+```
+https://account.docusign.com/oauth/auth?response_type=code
+  &scope=signature%20impersonation
+  &client_id=<DOCUSIGN_INTEGRATION_KEY>
+  &redirect_uri=https://thegriffinfund.org
+```
+
+Sign in as the API user, click Allow, ignore the redirect.
+
+**Env vars (Render):**
+
+| Var | Notes |
+|-----|-------|
+| `DOCUSIGN_INTEGRATION_KEY` | App's integration key GUID |
+| `DOCUSIGN_USER_ID` | API user GUID (the impersonated user) |
+| `DOCUSIGN_ACCOUNT_ID` | eSign account GUID — Thomas's account is `c52c39eb-294c-4527-8bde-bd75c3cf7a2b` |
+| `DOCUSIGN_PRIVATE_KEY` | RSA private key (PEM). Newlines may be real or `\n` — the service normalizes |
+| `DOCUSIGN_TEMPLATE_ID` | Trade-confirmation template GUID |
+| `DOCUSIGN_SIGNER_ROLE_NAME` | Template role that owns the prefilled anchor tabs. Default `President` — matches Thomas's role on the Trading Approval template. Roles on the template are `Facility Advisory` (Nicholas), `President` (Thomas), `President.` (Sander — note trailing period) |
+| `DOCUSIGN_OAUTH_BASE` | `account.docusign.com` (prod) or `account-d.docusign.com` (demo) |
+| `DOCUSIGN_API_BASE` | Default `https://na4.docusign.net/restapi`. Confirm via `/oauth/userinfo` if the account ever migrates data centers |
+| `DOCUSIGN_WEBHOOK_HMAC_KEY` | Connect HMAC secret. Same string as configured on the Connect listener |
+
+**Pre-fill strategy: anchor strings.** Lower DocuSign tiers don't
+expose the "Data Label" field on text tabs, so we attach text tabs
+to invisible anchor strings already present on the PDF instead of
+binding by label. The PDF embedded in the template must contain these
+literal strings (rendered in ~2pt white text so signers don't see
+them):
+
+| Anchor | Filled with |
+|--------|-------------|
+| `\\ticker\\` | Ticker (e.g. `AIT`) |
+| `\\shares\\` | Whole-share count |
+| `\\decisiondate\\` | ISO date of the send |
+| `\\buysell\\` | `Buy` (always — we don't send Sell envelopes today) |
+| `\\price\\` | Per-share price at send time (`$12.34`) |
+| `\\total\\` | Shares × price (`$1,234.56`) |
+
+DocuSign ignores anchors it can't find in the PDF, so leaving any
+out is safe — they just don't get filled. The first four go in the
+four table cells; `\\price\\` and `\\total\\` are optional and only
+needed if the PDF surface has space for them.
+
+**Adding anchors to the PDF (Word / Pages workflow):**
+1. Open the source doc (not the PDF — re-export afterward).
+2. Type the anchor string at the position you want the value to
+   render (inside the table cell, just left-aligned).
+3. Select that string only, set font size to **2pt**, font color
+   to **white**. It collapses to a near-invisible smear.
+4. Export to PDF and re-upload to the DocuSign template.
+5. In the template editor, **delete the existing green text tabs**
+   from the table cells — our integration creates fresh tabs at
+   send time, so any tabs sitting there would just collide.
+
+**`DOCUSIGN_SIGNER_ROLE_NAME` env var** specifies which template
+recipient owns the prefilled tabs. Defaults to `President`. The
+owner doesn't have to be one of the actual signers — the tabs are
+locked read-only, so they look the same to everyone — but DocuSign
+requires each tab to belong to a recipient.
+
+**Connect listener config (DocuSign Admin → Integrations → Connect):**
+JSON v2 format, URL `https://gcig-api.onrender.com/api/docusign/webhook`,
+HMAC enabled, events: envelope sent/delivered/completed/declined/voided.
 
 ---
 
@@ -201,7 +295,13 @@ Hit-rate stats count `Approved` toward Voted Yes too.
 - Don't add features through a brand-new role gate without checking
   every existing route — easier to use `extraRoles`.
 - Don't reach for paid APIs. We've stayed on free tiers (Finnhub
-  free, SEC EDGAR, FRED) deliberately.
+  free, SEC EDGAR, FRED) deliberately. The exception is DocuSign,
+  which we use because Thomas already pays for an account; never
+  fall back to a second e-sign vendor.
+- Don't auto-send the trade-confirmation envelope on vote close.
+  The Send button is manual on purpose — gives the exec a chance to
+  eyeball the share count against the live quote before the
+  envelope goes out.
 
 ---
 

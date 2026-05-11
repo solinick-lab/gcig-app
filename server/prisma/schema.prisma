@@ -263,6 +263,17 @@ model VotingSession {
   synthesis  String?
   ballots    Ballot[]
 
+  // DocuSign trade-confirmation linkage. Populated when an exec clicks
+  // "Send trade confirmation" on a closed Buy session. We keep the
+  // envelope ID for status polling / webhook reconciliation and the
+  // tradeContext snapshot (ticker, shares, price, total at send time)
+  // so the audit trail survives later quote drift.
+  docusignEnvelopeId   String?
+  docusignStatus       String?
+  docusignSentAt       DateTime?
+  docusignCompletedAt  DateTime?
+  docusignTradeContext Json?
+
   @@index([createdAt])
 }
 
