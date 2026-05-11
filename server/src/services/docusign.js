@@ -70,6 +70,15 @@ function normalizePrivateKey(raw) {
   s = s.replace(/\\n/g, '\n');
   // CRLF / CR → LF.
   s = s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  // Collapse blank or whitespace-only lines and trim each line. Render's UI
+  // sometimes returns BOTH real newlines AND literal "\n" escapes in the
+  // same value; after the replace above that produces double-newlines and
+  // OpenSSL refuses to parse a PEM with empty lines in the body.
+  s = s
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join('\n');
 
   // If the key has no newlines at all (everything is one blob), rebuild PEM
   // format by re-wrapping the base64 body at 64 chars between header/footer.
