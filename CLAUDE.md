@@ -158,8 +158,9 @@ If something feels weird with auth on Safari, check that order in
   list lives in the route file as `QUESTIONS` and is shipped to the
   client via `GET /api/president-review/config`. `GET /results` is
   super-admin only and returns aggregated averages + distributions per
-  president + anonymized comments — reviewer identity never appears in
-  the aggregate. Self-review is blocked.
+  president, plus the full set of individual responses (reviewer name,
+  their nine ratings, optional comment, submitted date). Self-review
+  is blocked.
 
 ---
 

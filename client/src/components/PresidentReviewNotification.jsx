@@ -84,9 +84,7 @@ export default function PresidentReviewNotification() {
         <div className="p-6">
           <p className="text-sm text-navy">
             Please rate this year's {remaining === 1 ? 'president' : 'presidents'}{' '}
-            on nine quick questions. Your responses are anonymous — only the
-            super-admin sees the aggregate, and reviewer identity is never
-            included.
+            on nine quick questions. It takes about a minute per president.
           </p>
 
           <div className="mt-4 rounded-lg border border-navy-100 bg-navy-50/40 px-3 py-2 text-xs text-navy">

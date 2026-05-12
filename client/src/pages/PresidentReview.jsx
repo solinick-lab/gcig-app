@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, AlertCircle, ClipboardList, BarChart3 } from 'lucide-react';
+import {
+  CheckCircle2,
+  AlertCircle,
+  ClipboardList,
+  BarChart3,
+  ChevronDown,
+  ChevronRight,
+} from 'lucide-react';
 import api from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
@@ -181,7 +188,7 @@ export default function PresidentReview() {
       <PageHeader
         kicker={`Cycle ${config?.cycle || ''}`}
         title="President Review"
-        subtitle="Honest, constructive feedback on each president's year. Responses are anonymous in the results view; only the super-admin can see them, and reviewer identity is never shown in the aggregate."
+        subtitle="Honest, constructive feedback on each president's year."
         actions={
           isSuperAdmin ? (
             <div className="inline-flex overflow-hidden rounded-lg border border-navy-100 bg-white">
@@ -356,9 +363,10 @@ export default function PresidentReview() {
   );
 }
 
-// Aggregated, anonymized results. One card per president showing the
-// overall mean, per-question mean with a 1-5 bar, and the list of
-// free-form comments. Super-admin only — gating happens at the API.
+// Results view. One card per president: overall mean, per-question mean
+// with a 1-5 bar, plus an expandable list of every individual response
+// (reviewer, their nine ratings, optional comment, submitted date).
+// Super-admin only — gating happens at the API.
 function ResultsView({ results, loading, error, onRefresh }) {
   if (loading) {
     return <div className="text-sm text-navy-400">Loading results…</div>;
@@ -461,28 +469,129 @@ function ResultsView({ results, loading, error, onRefresh }) {
                     })}
                   </div>
 
-                  {row.comments && row.comments.length > 0 && (
-                    <div className="mt-6 border-t border-navy-50 pt-4">
-                      <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.2em] text-navy-400">
-                        Comments ({row.comments.length})
-                      </div>
-                      <div className="space-y-2">
-                        {row.comments.map((c, i) => (
-                          <blockquote
-                            key={i}
-                            className="rounded-lg border border-navy-100 bg-navy-50/30 px-3 py-2 text-sm text-navy"
-                          >
-                            "{c.comment}"
-                          </blockquote>
-                        ))}
-                      </div>
-                    </div>
+                  {row.responses && row.responses.length > 0 && (
+                    <IndividualResponses
+                      questions={questions}
+                      responses={row.responses}
+                    />
                   )}
                 </>
               )}
             </Card>
           );
         })}
+    </div>
+  );
+}
+
+// Per-president expandable list of every submitted review, with the
+// reviewer's name, their nine ratings rendered as compact pills, and any
+// free-form comment they left. Collapsed by default so the aggregate
+// stays the headline; one click opens the whole roll.
+function IndividualResponses({ questions, responses }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="mt-6 border-t border-navy-50 pt-4">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 rounded-md px-1 py-1 text-left text-[10px] font-bold uppercase tracking-[0.2em] text-navy-400 hover:text-navy"
+      >
+        <span>Individual responses ({responses.length})</span>
+        {open ? (
+          <ChevronDown className="h-4 w-4" />
+        ) : (
+          <ChevronRight className="h-4 w-4" />
+        )}
+      </button>
+
+      {open && (
+        <div className="mt-3 space-y-3">
+          {responses.map((r, i) => (
+            <IndividualResponseRow
+              key={`${r.reviewer?.id || 'unknown'}-${i}`}
+              questions={questions}
+              response={r}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IndividualResponseRow({ questions, response }) {
+  const reviewerName = response.reviewer?.name || 'Unknown reviewer';
+  const submitted = response.submittedAt
+    ? new Date(response.submittedAt).toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      })
+    : null;
+
+  const ratings = response.ratings || {};
+  const values = questions
+    .map((q) => ratings[q.id])
+    .filter((v) => Number.isInteger(v));
+  const personalAvg =
+    values.length > 0
+      ? (values.reduce((a, b) => a + b, 0) / values.length).toFixed(2)
+      : null;
+
+  return (
+    <div className="rounded-lg border border-navy-100 bg-white px-3 py-3">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <div className="flex items-baseline gap-2">
+          <span className="text-sm font-semibold text-navy">{reviewerName}</span>
+          {submitted && (
+            <span className="text-[10px] uppercase tracking-wider text-navy-300">
+              {submitted}
+            </span>
+          )}
+        </div>
+        {personalAvg != null && (
+          <div className="text-[11px] text-navy-400">
+            avg <span className="font-semibold text-navy">{personalAvg}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-9 gap-1">
+        {questions.map((q, idx) => {
+          const v = ratings[q.id];
+          const has = Number.isInteger(v);
+          const shade =
+            !has
+              ? 'bg-navy-50 text-navy-300'
+              : v >= 4
+              ? 'bg-emerald-100 text-emerald-800'
+              : v === 3
+              ? 'bg-navy-50 text-navy'
+              : 'bg-red-100 text-red-800';
+          return (
+            <div
+              key={q.id}
+              title={q.text}
+              className={`flex flex-col items-center rounded-md px-1 py-1 text-center ${shade}`}
+            >
+              <span className="text-[9px] font-bold tracking-wider text-navy-400">
+                Q{idx + 1}
+              </span>
+              <span className="text-sm font-semibold leading-none">
+                {has ? v : '—'}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {response.comment && (
+        <blockquote className="mt-3 rounded-md border border-navy-100 bg-navy-50/40 px-3 py-2 text-sm text-navy">
+          "{response.comment}"
+        </blockquote>
+      )}
     </div>
   );
 }

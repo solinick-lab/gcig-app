@@ -146,7 +146,8 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: validated });
   }
 
-  // Don't allow reviewing yourself — keeps the aggregate honest.
+  // No self-review — a president rating their own year would skew the
+  // aggregate and the per-reviewer breakdown.
   if (presidentId === req.user.id) {
     return res.status(400).json({ error: 'You cannot review yourself' });
   }
@@ -200,8 +201,6 @@ router.post('/', async (req, res) => {
       },
     });
 
-    // Audit trail records WHO submitted (so a member can request removal of
-    // their own review) but the aggregate endpoint never exposes this.
     auditReq(req, 'president_review.submit', `president=${presidentId} cycle=${cycle}`);
 
     return res.json({ ok: true, submission: row });
@@ -211,9 +210,10 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Aggregated results for all presidents in the current (or requested)
-// cycle. Super-admin only — comments are returned without any reviewer
-// attribution. Per-question averages + distribution counts.
+// Results for all presidents in the current (or requested) cycle.
+// Super-admin only. Each president row carries the rolled-up averages
+// plus the full set of individual responses (reviewer, ratings, comment,
+// timestamp) so the results page can drill into who said what.
 router.get('/results', requireSuperAdmin, async (req, res) => {
   const cycle = typeof req.query.cycle === 'string' && req.query.cycle
     ? req.query.cycle
@@ -223,7 +223,14 @@ router.get('/results', requireSuperAdmin, async (req, res) => {
     const presidents = await listPresidents();
     const rows = await prisma.presidentReview.findMany({
       where: { cycle },
-      select: { presidentId: true, ratings: true, comment: true, submittedAt: true },
+      select: {
+        presidentId: true,
+        ratings: true,
+        comment: true,
+        submittedAt: true,
+        updatedAt: true,
+        reviewer: { select: { id: true, name: true, email: true } },
+      },
       orderBy: { submittedAt: 'asc' },
     });
 
@@ -235,7 +242,7 @@ router.get('/results', requireSuperAdmin, async (req, res) => {
         perQuestion: Object.fromEntries(
           QUESTION_IDS.map((id) => [id, { sum: 0, n: 0, dist: [0, 0, 0, 0, 0] }])
         ),
-        comments: [],
+        responses: [],
       });
     }
 
@@ -251,9 +258,13 @@ router.get('/results', requireSuperAdmin, async (req, res) => {
           bucket.perQuestion[id].dist[v - 1] += 1;
         }
       }
-      if (r.comment) {
-        bucket.comments.push({ comment: r.comment, submittedAt: r.submittedAt });
-      }
+      bucket.responses.push({
+        reviewer: r.reviewer || null,
+        ratings: r.ratings || {},
+        comment: r.comment || null,
+        submittedAt: r.submittedAt,
+        updatedAt: r.updatedAt,
+      });
     }
 
     const out = [];
@@ -273,7 +284,7 @@ router.get('/results', requireSuperAdmin, async (req, res) => {
         responseCount: bucket.count,
         overallAvg: totalN > 0 ? totalSum / totalN : null,
         perQuestion,
-        comments: bucket.comments,
+        responses: bucket.responses,
       });
     }
 
