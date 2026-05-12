@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, AlertCircle } from 'lucide-react';
+import { CheckCircle2, AlertCircle, ClipboardList, BarChart3 } from 'lucide-react';
 import api from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
@@ -21,8 +21,9 @@ function firstName(full) {
 }
 
 export default function PresidentReview() {
-  const { user } = useAuth();
+  const { user, isSuperAdmin } = useAuth();
 
+  const [view, setView] = useState('submit'); // 'submit' | 'results'
   const [loading, setLoading] = useState(true);
   const [config, setConfig] = useState(null); // { cycle, questions, presidents }
   const [submissions, setSubmissions] = useState({}); // presidentId -> submission
@@ -30,6 +31,9 @@ export default function PresidentReview() {
   const [savingId, setSavingId] = useState(null);
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null); // { kind, text }
+  const [results, setResults] = useState(null);
+  const [resultsLoading, setResultsLoading] = useState(false);
+  const [resultsError, setResultsError] = useState(null);
 
   async function load() {
     setLoading(true);
@@ -66,6 +70,26 @@ export default function PresidentReview() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function loadResults() {
+    setResultsLoading(true);
+    setResultsError(null);
+    try {
+      const { data } = await api.get('/president-review/results');
+      setResults(data);
+    } catch (err) {
+      setResultsError(err.response?.data?.error || 'Failed to load results');
+    } finally {
+      setResultsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (view === 'results' && isSuperAdmin && !results && !resultsLoading) {
+      loadResults();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, isSuperAdmin]);
 
   function setRating(presidentId, questionId, value) {
     setDrafts((prev) => ({
@@ -158,9 +182,48 @@ export default function PresidentReview() {
         kicker={`Cycle ${config?.cycle || ''}`}
         title="President Review"
         subtitle="Honest, constructive feedback on each president's year. Responses are anonymous in the results view; only the super-admin can see them, and reviewer identity is never shown in the aggregate."
+        actions={
+          isSuperAdmin ? (
+            <div className="inline-flex overflow-hidden rounded-lg border border-navy-100 bg-white">
+              <button
+                type="button"
+                onClick={() => setView('submit')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition ${
+                  view === 'submit'
+                    ? 'bg-navy text-white'
+                    : 'text-navy hover:bg-navy-50'
+                }`}
+              >
+                <ClipboardList className="h-3.5 w-3.5" />
+                Form
+              </button>
+              <button
+                type="button"
+                onClick={() => setView('results')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition ${
+                  view === 'results'
+                    ? 'bg-navy text-white'
+                    : 'text-navy hover:bg-navy-50'
+                }`}
+              >
+                <BarChart3 className="h-3.5 w-3.5" />
+                Results
+              </button>
+            </div>
+          ) : null
+        }
       />
 
-      {toast && (
+      {view === 'results' && isSuperAdmin && (
+        <ResultsView
+          results={results}
+          loading={resultsLoading}
+          error={resultsError}
+          onRefresh={loadResults}
+        />
+      )}
+
+      {view === 'submit' && toast && (
         <div
           className={`mb-4 flex items-start gap-2 rounded-lg border px-4 py-3 text-sm ${
             toast.kind === 'success'
@@ -177,7 +240,7 @@ export default function PresidentReview() {
         </div>
       )}
 
-      {visiblePresidents.length === 0 ? (
+      {view === 'submit' && (visiblePresidents.length === 0 ? (
         <Card>
           <p className="text-sm text-navy-400">
             There are no presidents to review right now.
@@ -288,7 +351,138 @@ export default function PresidentReview() {
             );
           })}
         </div>
-      )}
+      ))}
+    </div>
+  );
+}
+
+// Aggregated, anonymized results. One card per president showing the
+// overall mean, per-question mean with a 1-5 bar, and the list of
+// free-form comments. Super-admin only — gating happens at the API.
+function ResultsView({ results, loading, error, onRefresh }) {
+  if (loading) {
+    return <div className="text-sm text-navy-400">Loading results…</div>;
+  }
+  if (error) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        {error}
+      </div>
+    );
+  }
+  if (!results || !results.results || results.results.length === 0) {
+    return (
+      <Card>
+        <p className="text-sm text-navy-400">No reviews submitted yet for {results?.cycle}.</p>
+      </Card>
+    );
+  }
+
+  const questions = results.questions || [];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between text-xs text-navy-400">
+        <span>
+          Cycle {results.cycle} · {results.results.reduce((s, r) => s + (r.responseCount || 0), 0)} total responses
+        </span>
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="font-semibold text-navy hover:underline"
+        >
+          Refresh
+        </button>
+      </div>
+
+      {results.results
+        .slice()
+        .sort((a, b) => (b.overallAvg || 0) - (a.overallAvg || 0))
+        .map((row) => {
+          const name = row.president?.name || `User ${row.president?.id}`;
+          const overall = row.overallAvg != null ? row.overallAvg.toFixed(2) : '—';
+          return (
+            <Card
+              key={row.president?.id}
+              kicker={`${row.responseCount} ${row.responseCount === 1 ? 'response' : 'responses'}`}
+              title={name}
+              action={
+                <div className="text-right">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-navy-400">
+                    Overall avg
+                  </div>
+                  <div className="font-serif text-2xl font-semibold text-navy">
+                    {overall}
+                  </div>
+                </div>
+              }
+            >
+              {row.responseCount === 0 ? (
+                <p className="text-sm text-navy-400">No reviews submitted yet.</p>
+              ) : (
+                <>
+                  <div className="space-y-3">
+                    {questions.map((q, idx) => {
+                      const stats = row.perQuestion?.[q.id];
+                      const avg = stats?.avg;
+                      const n = stats?.n || 0;
+                      const pct = avg != null ? ((avg - 1) / 4) * 100 : 0;
+                      return (
+                        <div key={q.id}>
+                          <div className="mb-1 flex items-baseline justify-between gap-3">
+                            <div className="flex items-baseline gap-2 text-sm text-navy">
+                              <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-gold-700">
+                                {String(idx + 1).padStart(2, '0')}
+                              </span>
+                              <span className="font-medium">{q.text}</span>
+                            </div>
+                            <div className="shrink-0 text-xs tabular-nums text-navy-400">
+                              {avg != null ? avg.toFixed(2) : '—'}{' '}
+                              <span className="text-navy-300">({n})</span>
+                            </div>
+                          </div>
+                          <div className="h-2 w-full overflow-hidden rounded-full bg-navy-50">
+                            <div
+                              className="h-full rounded-full bg-gold"
+                              style={{ width: `${Math.max(0, Math.min(100, pct))}%` }}
+                            />
+                          </div>
+                          {stats?.dist && (
+                            <div className="mt-1 flex justify-between text-[10px] text-navy-300">
+                              {stats.dist.map((c, i) => (
+                                <span key={i}>
+                                  {i + 1}: <span className="text-navy-400">{c}</span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {row.comments && row.comments.length > 0 && (
+                    <div className="mt-6 border-t border-navy-50 pt-4">
+                      <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.2em] text-navy-400">
+                        Comments ({row.comments.length})
+                      </div>
+                      <div className="space-y-2">
+                        {row.comments.map((c, i) => (
+                          <blockquote
+                            key={i}
+                            className="rounded-lg border border-navy-100 bg-navy-50/30 px-3 py-2 text-sm text-navy"
+                          >
+                            "{c.comment}"
+                          </blockquote>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </Card>
+          );
+        })}
     </div>
   );
 }

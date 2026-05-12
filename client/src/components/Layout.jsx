@@ -4,6 +4,7 @@ import Sidebar from './Sidebar.jsx';
 import MobileTabBar from './MobileTabBar.jsx';
 import VoteNotification from './VoteNotification.jsx';
 import PitchNotification from './PitchNotification.jsx';
+import PresidentReviewNotification from './PresidentReviewNotification.jsx';
 
 export default function Layout() {
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -12,6 +13,7 @@ export default function Layout() {
     <div className="flex h-full bg-[#F7F8FB]">
       <VoteNotification />
       <PitchNotification />
+      <PresidentReviewNotification />
 
       {/* Desktop sidebar — hidden below md */}
       <div className="hidden md:block shrink-0">

@@ -77,6 +77,42 @@ router.get('/config', async (req, res) => {
   }
 });
 
+// Tells the login modal whether the caller still owes any reviews this
+// cycle. `pending` is the roster of presidents they haven't submitted yet,
+// minus themselves (no self-review). The modal hides itself when this is
+// empty, and the per-cycle dismissal key on the client uses `cycle`.
+router.get('/status', async (req, res) => {
+  try {
+    const cycle = currentCycle();
+    const presidents = await listPresidents();
+    const eligible = presidents.filter((p) => p.id !== req.user.id);
+    if (eligible.length === 0) {
+      return res.json({ cycle, totalPresidents: 0, completedCount: 0, pending: [] });
+    }
+    const submitted = await prisma.presidentReview.findMany({
+      where: {
+        reviewerId: req.user.id,
+        cycle,
+        presidentId: { in: eligible.map((p) => p.id) },
+      },
+      select: { presidentId: true },
+    });
+    const submittedIds = new Set(submitted.map((s) => s.presidentId));
+    const pending = eligible
+      .filter((p) => !submittedIds.has(p.id))
+      .map((p) => ({ id: p.id, name: p.name }));
+    return res.json({
+      cycle,
+      totalPresidents: eligible.length,
+      completedCount: eligible.length - pending.length,
+      pending,
+    });
+  } catch (err) {
+    console.error('president-review /status failed', err);
+    return res.status(500).json({ error: 'Failed to load review status' });
+  }
+});
+
 // Submissions the caller has already made this cycle, so the form can
 // pre-fill and the "Submitted" pill can render per president.
 router.get('/mine', async (req, res) => {
