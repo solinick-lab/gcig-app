@@ -87,7 +87,10 @@ export default function Dashboard() {
     api.get('/holdings/history').then((r) => setHistory(r.data || [])).catch(() => setHistory([]));
     api.get('/holdings/earnings').then((r) => setEarnings(r.data)).catch(() => setEarnings(null));
     api.get('/dashboard/macro').then((r) => setMacro(r.data)).catch(() => setMacro(null));
-    api.get('/holdings/cash-yield').then((r) => setCashYield(r.data)).catch(() => setCashYield(null));
+    api
+      .get('/holdings/cash-yield', { params: { series: 1 } })
+      .then((r) => setCashYield(r.data))
+      .catch(() => setCashYield(null));
     // DIR runs in parallel with the dashboard request. On cache miss
     // it can take 10-30s; on cache hit it's instant. The page
     // renders without waiting either way.
@@ -116,16 +119,61 @@ export default function Dashboard() {
 
   const firstName = user?.name?.split(' ')[0] || '';
 
-  // History in JS dates, equity = total - cash so the sparkline tracks
-  // actual market movement, not capital infusions.
+  // Pre-compute a sorted list of (date, cumulativeInterest) so each
+  // history snapshot can be lifted by the cash interest earned through
+  // that date — same convention as the headline number. Binary search
+  // keeps the per-point cost O(log N).
+  const interestCumulative = useMemo(() => {
+    const series = cashYield?.series;
+    if (!Array.isArray(series) || series.length === 0) return null;
+    const sorted = series
+      .map((s) => ({
+        ts: new Date(s.date).getTime(),
+        delta: Number(s.bdaInterest || 0) + Number(s.fgtxxInterest || 0),
+      }))
+      .sort((a, b) => a.ts - b.ts);
+    let running = 0;
+    for (const row of sorted) {
+      running += row.delta;
+      row.cum = running;
+    }
+    return sorted;
+  }, [cashYield]);
+
+  function interestThrough(date) {
+    if (!interestCumulative) return 0;
+    const target = date.getTime();
+    let lo = 0;
+    let hi = interestCumulative.length - 1;
+    let best = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (interestCumulative[mid].ts <= target) {
+        best = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return best === -1 ? 0 : interestCumulative[best].cum;
+  }
+
+  // History in JS dates. Each snapshot is lifted by the cash interest
+  // earned through that date so the sparkline reflects what the fund
+  // would have looked like with the off-sheet BDA + FGTXX sleeves
+  // included. Older snapshots (pre-simulation start) carry zero
+  // interest, which is correct.
   const normalizedHistory = useMemo(
     () =>
-      (history || []).map((s) => ({
-        date: new Date(s.date),
-        value: Number(s.totalValue || 0),
-        cash: Number(s.cashValue || 0),
-      })),
-    [history]
+      (history || []).map((s) => {
+        const date = new Date(s.date);
+        return {
+          date,
+          value: Number(s.totalValue || 0) + interestThrough(date),
+          cash: Number(s.cashValue || 0),
+        };
+      }),
+    [history, interestCumulative]
   );
 
   return (
@@ -209,14 +257,15 @@ function PortfolioHero({ totals, holdings, history, cashInterestEarned = 0 }) {
 
   // Headline fund value folds in the YTD cash interest earned on the
   // off-sheet BDA + FGTXX sleeves — same convention as Portfolio.jsx.
-  // WoW / YTD comparisons below stay against the equity-only history
-  // snapshots (apples-to-apples).
+  // History snapshots are also lifted by interest-through-date upstream,
+  // so WoW / YTD compare interest-lifted now against interest-lifted
+  // then (apples-to-apples).
   const displayedValue =
     totalValue != null ? totalValue + cashInterestEarned : null;
 
   // Return metrics. Lifetime goes against total invested capital (100k start
   // + infusions) and includes cash interest. Daily / weekly / YTD use
-  // history snapshots which are equity-only.
+  // history snapshots which already carry the accumulated interest.
   const lifetimeDelta =
     displayedValue != null ? displayedValue - TOTAL_INVESTED : null;
   const lifetimePct =
@@ -225,7 +274,7 @@ function PortfolioHero({ totals, holdings, history, cashInterestEarned = 0 }) {
       : null;
 
   const { weekPct, ytdPct } = useMemo(() => {
-    if (!history || history.length < 2 || totalValue == null)
+    if (!history || history.length < 2 || displayedValue == null)
       return { weekPct: null, ytdPct: null };
     const now = new Date();
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -239,14 +288,14 @@ function PortfolioHero({ totals, holdings, history, cashInterestEarned = 0 }) {
       const cfInWindow = CASH_FLOWS.filter(
         (cf) => cf.date > fromDate && cf.date <= now
       ).reduce((s, cf) => s + cf.amount, 0);
-      const adjustedDelta = totalValue - cfInWindow - from.value;
+      const adjustedDelta = displayedValue - cfInWindow - from.value;
       return (adjustedDelta / from.value) * 100;
     };
     return {
       weekPct: pct(findOnOrBefore(weekAgo), weekAgo),
       ytdPct: pct(findOnOrBefore(yearStart), yearStart),
     };
-  }, [history, totalValue]);
+  }, [history, displayedValue]);
 
   const cashPct = totalValue > 0 ? (cashValue / totalValue) * 100 : null;
 
