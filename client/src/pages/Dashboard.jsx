@@ -141,7 +141,7 @@ export default function Dashboard() {
         <MacroStrip macro={macro} />
       )}
 
-      {cashYield && cashYield.daysCounted > 0 && (
+      {cashYield && cashYield.daysSimulated > 0 && (
         <CashInterestCard data={cashYield} />
       )}
 
@@ -513,20 +513,30 @@ function MacroStrip({ macro }) {
 
 function CashInterestCard({ data }) {
   const {
-    ytdFgtxxInterest,
-    ytdBankInterest,
-    ytdTotalInterest,
-    currentFgtxxBalance,
-    currentBankBalance,
-    latestFgtxxYield,
-    latestFgtxxYieldDate,
-    bankApy,
-    daysCounted,
+    fgtxxTotalInterest,
+    bdaTotalInterest,
+    totalInterest,
+    fgtxxEndingBalance,
+    bdaEndingBalance,
+    combinedEndingValue,
+    fgtxxLatestYield,
+    fgtxxLatestYieldDate,
+    bdaApy,
+    daysSimulated,
+    fgtxxPrincipal,
+    bdaPrincipal,
   } = data || {};
 
-  const yieldDateLabel = latestFgtxxYieldDate
-    ? format(new Date(latestFgtxxYieldDate), 'MMM d')
+  const yieldDateLabel = fgtxxLatestYieldDate
+    ? format(new Date(fgtxxLatestYieldDate), 'MMM d')
     : null;
+
+  const fgtxxStartingPrincipal = fgtxxPrincipal ?? 40_000;
+  const bdaStartingPrincipal = bdaPrincipal ?? 60_000;
+  // Match the deposit schedule baked into the server — used so we can
+  // show "principal + deposits" honestly instead of pretending the
+  // ending balance grew only from interest.
+  const bdaTotalPrincipal = bdaStartingPrincipal + 25_000;
 
   return (
     <div className="rounded-2xl border border-navy-100 bg-white p-5 shadow-card md:p-7">
@@ -538,13 +548,16 @@ function CashInterestCard({ data }) {
           <div className="mt-1 font-serif text-2xl font-semibold text-navy">
             Interest earned · YTD
           </div>
+          <div className="mt-1 text-[11px] text-navy-300">
+            Two-account simulation, daily compounding from Oct 17, 2025.
+          </div>
         </div>
         <div className="text-right">
           <div className="font-serif text-3xl font-semibold text-navy tabular-nums">
-            {fmtMoney(ytdTotalInterest, { cents: true })}
+            {fmtMoney(totalInterest, { cents: true })}
           </div>
           <div className="mt-1 text-[10px] uppercase tracking-wider text-navy-300">
-            across {daysCounted} {daysCounted === 1 ? 'day' : 'days'}
+            {daysSimulated} {daysSimulated === 1 ? 'day' : 'days'} · ending {fmtMoney(combinedEndingValue, { cents: true })}
           </div>
         </div>
       </div>
@@ -553,29 +566,31 @@ function CashInterestCard({ data }) {
         <SleeveTile
           accent="gold"
           label="FGTXX · GS Government MMF"
-          interest={ytdFgtxxInterest}
-          balance={currentFgtxxBalance}
+          interest={fgtxxTotalInterest}
+          balance={fgtxxEndingBalance}
+          principal={fgtxxStartingPrincipal}
           rate={
-            latestFgtxxYield != null
-              ? `${latestFgtxxYield.toFixed(2)}% · 7-day`
+            fgtxxLatestYield != null
+              ? `${fgtxxLatestYield.toFixed(2)}% · 7-day net`
               : '—'
           }
           asOf={yieldDateLabel ? `as of ${yieldDateLabel}` : null}
         />
         <SleeveTile
           accent="navy"
-          label="Bank USA Deposit"
-          interest={ytdBankInterest}
-          balance={currentBankBalance}
-          rate={bankApy != null ? `${(bankApy * 100).toFixed(2)}% · APY` : '—'}
-          asOf="flat sweep rate"
+          label="BDA · GS Bank USA Deposit"
+          interest={bdaTotalInterest}
+          balance={bdaEndingBalance}
+          principal={bdaTotalPrincipal}
+          rate={bdaApy != null ? `${(bdaApy * 100).toFixed(2)}% · APY` : '—'}
+          asOf="$60k seed + $25k Jan 29 add"
         />
       </div>
     </div>
   );
 }
 
-function SleeveTile({ accent, label, interest, balance, rate, asOf }) {
+function SleeveTile({ accent, label, interest, balance, principal, rate, asOf }) {
   const dot = accent === 'gold' ? 'bg-gold' : 'bg-navy';
   return (
     <div className="rounded-xl border border-navy-100 bg-[#FAFBFE] px-4 py-3">
@@ -588,12 +603,14 @@ function SleeveTile({ accent, label, interest, balance, rate, asOf }) {
           {fmtMoney(interest, { cents: true })}
         </div>
         <div className="text-right text-[11px] tabular-nums text-navy-400">
-          <div>bal {fmtMoney(balance)}</div>
+          <div>bal {fmtMoney(balance, { cents: true })}</div>
           <div>{rate}</div>
         </div>
       </div>
-      {asOf && (
-        <div className="mt-1 text-[10px] text-navy-300">{asOf}</div>
+      {principal != null && (
+        <div className="mt-1 text-[10px] text-navy-300">
+          principal {fmtMoney(principal)} · {asOf}
+        </div>
       )}
     </div>
   );

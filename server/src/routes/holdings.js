@@ -126,6 +126,7 @@ import {
 import { getRecentFilings } from '../services/secFilings.js';
 import { computeCashInterest } from '../services/cashInterest.js';
 import { scrapeAndStoreDailyRates } from '../services/gsamRates.js';
+import { backfillFgtxxFromEdgar } from '../services/secNmfp.js';
 
 const router = Router();
 
@@ -891,6 +892,19 @@ router.post('/cash-yield/refresh', requireRole('PortfolioManager'), async (_req,
   } catch (err) {
     console.error('gsam scrape failed:', err.message);
     res.status(502).json({ error: err.message || 'Scrape failed' });
+  }
+});
+
+// One-shot historical backfill from SEC N-MFP3 filings. Idempotent — safe
+// to re-hit. Super-admin only because it talks to EDGAR and writes a
+// chunk of rows; we don't want this firing accidentally.
+router.post('/cash-yield/backfill', requireSuperAdmin, async (_req, res) => {
+  try {
+    const stats = await backfillFgtxxFromEdgar();
+    res.json(stats);
+  } catch (err) {
+    console.error('n-mfp backfill failed:', err.message);
+    res.status(502).json({ error: err.message || 'Backfill failed' });
   }
 });
 
