@@ -62,7 +62,7 @@ function fmtPct(n, digits = 2) {
 }
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, isPmOrAbove, isSuperAdmin } = useAuth();
   const [dashboard, setDashboard] = useState(null);
   const [quotes, setQuotes] = useState(null);
   const [history, setHistory] = useState([]);
@@ -142,7 +142,17 @@ export default function Dashboard() {
       )}
 
       {cashYield && cashYield.daysSimulated > 0 && (
-        <CashInterestCard data={cashYield} />
+        <CashInterestCard
+          data={cashYield}
+          canRefresh={isPmOrAbove}
+          canBackfill={isSuperAdmin}
+          onReload={() =>
+            api
+              .get('/holdings/cash-yield')
+              .then((r) => setCashYield(r.data))
+              .catch(() => {})
+          }
+        />
       )}
 
       {/* DIR text comes from its own endpoint; on the very first load
@@ -511,7 +521,7 @@ function MacroStrip({ macro }) {
   );
 }
 
-function CashInterestCard({ data }) {
+function CashInterestCard({ data, canRefresh, canBackfill, onReload }) {
   const {
     fgtxxTotalInterest,
     bdaTotalInterest,
@@ -526,6 +536,32 @@ function CashInterestCard({ data }) {
     fgtxxPrincipal,
     bdaPrincipal,
   } = data || {};
+
+  const [busy, setBusy] = useState(null); // 'refresh' | 'backfill' | null
+  const [msg, setMsg] = useState(null); // { kind: 'success'|'error', text }
+
+  async function runAction(kind, path, successText) {
+    setBusy(kind);
+    setMsg(null);
+    try {
+      const { data: result } = await api.post(path);
+      const detail =
+        kind === 'backfill'
+          ? ` — ${result?.yieldsStored ?? 0} yields stored from ${result?.matched ?? 0} filing(s)`
+          : result?.latest?.sevenDayCurrentYield != null
+          ? ` — latest 7-day net ${Number(result.latest.sevenDayCurrentYield).toFixed(2)}%`
+          : '';
+      setMsg({ kind: 'success', text: successText + detail });
+      if (typeof onReload === 'function') onReload();
+    } catch (err) {
+      setMsg({
+        kind: 'error',
+        text: err?.response?.data?.error || err.message || 'Action failed',
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
 
   const yieldDateLabel = fgtxxLatestYieldDate
     ? format(new Date(fgtxxLatestYieldDate), 'MMM d')
@@ -586,6 +622,54 @@ function CashInterestCard({ data }) {
           asOf="$60k seed + $25k Jan 29 add"
         />
       </div>
+
+      {(canRefresh || canBackfill) && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-navy-50 pt-3">
+          <div className="flex flex-wrap gap-2">
+            {canRefresh && (
+              <button
+                type="button"
+                onClick={() =>
+                  runAction(
+                    'refresh',
+                    '/holdings/cash-yield/refresh',
+                    "Pulled today's FGTXX yield"
+                  )
+                }
+                disabled={busy != null}
+                className="rounded-md border border-navy-100 bg-white px-3 py-1.5 text-xs font-semibold text-navy transition hover:border-navy hover:bg-navy hover:text-white disabled:opacity-50"
+              >
+                {busy === 'refresh' ? 'Refreshing…' : "Refresh today's yield"}
+              </button>
+            )}
+            {canBackfill && (
+              <button
+                type="button"
+                onClick={() =>
+                  runAction(
+                    'backfill',
+                    '/holdings/cash-yield/backfill',
+                    'Backfill complete'
+                  )
+                }
+                disabled={busy != null}
+                className="rounded-md border border-navy-100 bg-white px-3 py-1.5 text-xs font-semibold text-navy transition hover:border-navy hover:bg-navy hover:text-white disabled:opacity-50"
+              >
+                {busy === 'backfill' ? 'Backfilling…' : 'Backfill from SEC'}
+              </button>
+            )}
+          </div>
+          {msg && (
+            <div
+              className={`text-[11px] ${
+                msg.kind === 'success' ? 'text-emerald-700' : 'text-red-700'
+              }`}
+            >
+              {msg.text}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
