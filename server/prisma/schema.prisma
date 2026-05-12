@@ -87,8 +87,6 @@ model User {
   presidentDecisions PitchRequest[]  @relation("PitchRequestPresident")
   pmDecisions       PitchRequest[]   @relation("PitchRequestPM")
   rosterOverrides   EventRosterOverride[]
-  gradeExamples     GradePredictorExample[]
-  gradeAnalyses     GradePredictorAnalysis[]
   tradeRequests     TradeRequest[]   @relation("TradeRequestCreator")
   presidentReviewsGiven    PresidentReview[] @relation("PresidentReviewReviewer")
   presidentReviewsReceived PresidentReview[] @relation("PresidentReviewPresident")
@@ -617,89 +615,11 @@ model SeaSnapshot {
   updatedAt   DateTime @updatedAt
 }
 
-// LLM-generated priority tag for a news article, keyed by URL. Lets us skip
-// re-ranking articles we've already classified — articles don't change after
-// publish, so the classification is stable. One row per unique URL. `model`
-// records which local model generated the tag; useful for invalidation later
-// (e.g. clear rows where model = '3b' after upgrading to 14b).
-// Grade predictor training corpus. One row per (essay, real teacher
-// feedback, real grade) tuple captured after the LLM made a cold-start
-// prediction. The next iteration of the predictor will retrieve the
-// top-K most similar prior examples for the same teacher (RAG) and
-// inject them into the prompt to mimic that teacher's voice. Stored
-// in Postgres rather than the original sandbox/data/ SQLite so the
-// data survives Render redeploys and is available wherever the API is.
-model GradePredictorExample {
-  id          Int      @id @default(autoincrement())
-  teacher     String?  // free-text; per-teacher RAG groups by this
-  essay       String   // the student's submission
-  rubric      String?  // optional, copied from the prediction request
-  feedback    String   // teacher's actual margin notes / end-comment
-  grade       String   // teacher's actual final grade ("A-", "92", "4/5")
-  // Predicted-vs-actual snapshot, stored verbatim so we can later
-  // backtest how close the cold-start prediction came to the truth.
-  predictedGrade    String?
-  predictedFeedback String?
-  // OneDrive itemId + webUrl for the original essay file. Populated
-  // when a .docx was uploaded (we keep the actual file) or when text
-  // was pasted (we serialize it to .txt and upload). Nullable because
-  // OneDrive may not be authorized at save time, and we'd rather keep
-  // the corpus row than refuse to save it.
-  essayFileRef String?
-  essayFileUrl String?
-  createdById Int?
-  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt   DateTime @default(now())
-
-  @@index([teacher])
-  @@index([createdAt])
-}
-
-// Snapshot of every /predict call so members can come back to a past
-// essay without re-running the LLM. Mirrors the GradePredictorExample
-// table (essay + teacher + rubric) but additionally stores the LLM's
-// raw JSON response and the RAG metadata so the result panel can
-// render exactly what was shown the first time. Per-user — each row
-// is owned by its createdBy and only that user (or the super-admin
-// gate) can read it back.
-model GradePredictorAnalysis {
-  id          Int      @id @default(autoincrement())
-  teacher     String?  // free-text, may be empty for cold-start
-  essay       String   // the student's submission, verbatim
-  rubric      String?
-  // The LLM's parsed JSON object — line_by_line, overall_feedback,
-  // grade, severity/category per comment, strengths/weaknesses,
-  // next_steps, etc. Stored as Json so we can index into it later
-  // (e.g. distribution of predicted grades) without reparsing strings.
-  result      Json
-  // Denormalized hot fields, copied out of `result` at write time so
-  // the recent-essays list renders without parsing every JSON blob.
-  gradeLabel    String?
-  numericGrade  Int?
-  confidence    String?
-  // RAG metadata at the time of the prediction. Useful for both the
-  // result-panel "grounded in N of M" line and for later analysis of
-  // how cold-start vs RAG-grounded predictions compare in accuracy.
-  examplesUsed     Int      @default(0)
-  examplesAvailable Int     @default(0)
-  mode             String?   // 'rag' | 'cold-start'
-  // Optional .docx archival reference, mirroring GradePredictorExample.
-  essayFileRef String?
-  essayFileUrl String?
-  createdById Int?
-  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt   DateTime @default(now())
-
-  @@index([createdById, createdAt])
-  @@index([teacher])
-}
-
 // End-of-year performance review submitted by a member about a President.
-// Nine statements on a 1-5 Likert scale (stored as a JSON map keyed by
-// q1..q9) plus an optional free-form comment. One row per reviewer x
-// president x cycle; resubmitting upserts. Results are visible to the
-// super-admin only — reviewer identity is never exposed in aggregates,
-// only used to enforce one-per-member.
+// A short Likert-scale set (currently four statements, stored as a JSON
+// map keyed by q1..qN) plus an optional free-form comment. One row per
+// reviewer × president × cycle; resubmitting upserts. Results are
+// visible to the super-admin only, including the per-reviewer breakdown.
 model PresidentReview {
   id           Int      @id @default(autoincrement())
   reviewerId   Int
@@ -718,6 +638,11 @@ model PresidentReview {
   @@index([presidentId, cycle])
 }
 
+// LLM-generated priority tag for a news article, keyed by URL. Lets us skip
+// re-ranking articles we've already classified — articles don't change after
+// publish, so the classification is stable. One row per unique URL. `model`
+// records which local model generated the tag; useful for invalidation later
+// (e.g. clear rows where model = '3b' after upgrading to 14b).
 model ArticleRanking {
   id        Int      @id @default(autoincrement())
   url       String   @unique

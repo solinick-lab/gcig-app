@@ -18,7 +18,6 @@ import {
   Send,
   Activity,
   Ship,
-  GraduationCap,
   ClipboardList,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -60,7 +59,6 @@ const NAV_SECTIONS = [
     items: [
       { to: '/admin', label: 'Admin', icon: ShieldAlert, executiveOnly: true },
       { to: '/ai-chat', label: 'AI Assistant', icon: Bot },
-      { to: '/sandbox', label: 'Grade Predictor', icon: GraduationCap },
     ],
   },
   {

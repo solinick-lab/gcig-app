@@ -126,9 +126,6 @@ export default function Admin() {
   //   Members — always shown (every executive can see the roster).
   //   Participation — President only (isAdmin).
   //   Audit Log / Name Inference — super admin only.
-  // (The Grade Predictor used to live here as a Sandbox tab; it now
-  // has its own sidebar entry available to every member, so the
-  // redundant admin shortcut was removed.)
   const tabs = [
     { id: 'members', label: 'Members' },
     ...(isAdmin ? [{ id: 'participation', label: 'Participation' }] : []),

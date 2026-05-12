@@ -17,7 +17,7 @@ import {
 // Keep in sync with TICKER_TOPIC_OVERRIDES in services/news.js.
 const BROAD_MARKET_TICKERS = ['VOO', 'VGT', 'QQQ', 'SPY', 'XLK', 'XLV'];
 
-// Builds the system prompt for the AI Sandbox. Combines:
+// Builds the system prompt for the AI Assistant chat. Combines:
 //   1. A tight scope directive (investing + Griffin Fund only)
 //   2. The club's IPS and Internal Policies docs (verbatim, as reference)
 //   3. Live club data (portfolio, votes, pitches, events) pulled on demand

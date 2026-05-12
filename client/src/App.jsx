@@ -29,7 +29,6 @@ import Landing from './pages/Landing.jsx';
 import PitchRequests from './pages/PitchRequests.jsx';
 import CPI from './pages/CPI.jsx';
 import Tankers from './pages/Tankers.jsx';
-import Sandbox from './pages/Sandbox.jsx';
 import PresidentReview from './pages/PresidentReview.jsx';
 
 export default function App() {
@@ -87,16 +86,6 @@ export default function App() {
         <Route path="/profile" element={<Profile />} />
         <Route path="/president-review" element={<PresidentReview />} />
       </Route>
-      {/* Outside the Layout group on purpose — Sandbox renders */}
-      {/* full-screen with its own X-button chrome (super-admin only). */}
-      <Route
-        path="/sandbox"
-        element={
-          <ProtectedRoute>
-            <Sandbox />
-          </ProtectedRoute>
-        }
-      />
       <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
