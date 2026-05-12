@@ -30,6 +30,8 @@ import PitchRequests from './pages/PitchRequests.jsx';
 import CPI from './pages/CPI.jsx';
 import Tankers from './pages/Tankers.jsx';
 import PresidentReview from './pages/PresidentReview.jsx';
+import Participation from './pages/Participation.jsx';
+import PageHeader from './components/PageHeader.jsx';
 
 export default function App() {
   const { loading } = useAuth();
@@ -85,9 +87,33 @@ export default function App() {
         <Route path="/members/:id" element={<MemberProfile />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/president-review" element={<PresidentReview />} />
+        <Route path="/participation" element={<ParticipationRoute />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+    </>
+  );
+}
+
+// Lightweight gate for the standalone Participation page. The Admin
+// route already enforces the executive gate at its own component level;
+// this mirrors that pattern so PMs can reach the ranking without being
+// granted the rest of Admin.
+function ParticipationRoute() {
+  const { isPmOrAbove } = useAuth();
+  if (!isPmOrAbove) return <Navigate to="/dashboard" replace />;
+  return <ParticipationPage />;
+}
+
+function ParticipationPage() {
+  return (
+    <>
+      <PageHeader
+        kicker="Club Management"
+        title="Participation"
+        subtitle="Members ranked by attendance, pitches, and role."
+      />
+      <Participation />
     </>
   );
 }

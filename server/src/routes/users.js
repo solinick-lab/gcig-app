@@ -7,6 +7,7 @@ import {
   requireAdmin,
   requireExecutive,
   requireSuperAdmin,
+  requireRole,
   ROLE_RANK,
 } from '../middleware/auth.js';
 import { sendInviteEmail, primaryClientOrigin } from '../services/email.js';
@@ -74,10 +75,11 @@ router.get('/lunch/leaders', async (_req, res) => {
 
 router.use(verifyJwt);
 
-// President-only: participation ranking. Aggregates attendance, pitches,
-// and role rank into a single 0-100 score with per-component breakdown so
-// the President can see exactly why each member ranks where they do.
-router.get('/participation', requireAdmin, async (_req, res) => {
+// Portfolio Manager and above: participation ranking. Aggregates
+// attendance, pitches, and role rank into a single 0-100 score with a
+// per-component breakdown, so PMs (and execs) can see exactly why each
+// member ranks where they do when planning meeting groups or promotions.
+router.get('/participation', requireRole('PortfolioManager'), async (_req, res) => {
   try {
     const data = await computeParticipation(prisma);
     res.json(data);

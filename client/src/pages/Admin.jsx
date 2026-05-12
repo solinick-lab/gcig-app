@@ -7,7 +7,6 @@ import Card from '../components/Card.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import Members from './Members.jsx';
 import AuditLog from './AuditLog.jsx';
-import Participation from './Participation.jsx';
 import TradeRequests from './TradeRequests.jsx';
 
 function ProviderRow({ label, data }) {
@@ -124,11 +123,11 @@ export default function Admin() {
 
   // Tab visibility:
   //   Members — always shown (every executive can see the roster).
-  //   Participation — President only (isAdmin).
   //   Audit Log / Name Inference — super admin only.
+  // Participation moved out to its own /participation page (PM and
+  // above) so PMs can use it without seeing the rest of Admin.
   const tabs = [
     { id: 'members', label: 'Members' },
-    ...(isAdmin ? [{ id: 'participation', label: 'Participation' }] : []),
     // Trade Approval is exec-tier: bundled DocuSign envelopes spanning
     // multiple closed Buy votes (and an optional Sell-to-cover line).
     { id: 'trade-requests', label: 'Trade Approval' },
@@ -181,8 +180,6 @@ export default function Admin() {
         <AuditLog embedded />
       ) : tab === 'inference' && isSuperAdmin ? (
         <NameInferenceTable />
-      ) : tab === 'participation' && isAdmin ? (
-        <Participation embedded />
       ) : tab === 'trade-requests' ? (
         <TradeRequests embedded />
       ) : (

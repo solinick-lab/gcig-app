@@ -134,6 +134,15 @@ export function AuthProvider({ children }) {
 
   const isAdmin = user?.role === 'President';
   const isExecutive = user?.role === 'President' || user?.role === 'CIO';
+  // Portfolio Manager and above: PMs, Senior PMs, CIO, President. Mirrors
+  // requireRole('PortfolioManager') on the server. Used to gate management
+  // tools (e.g. the Participation ranking) that PMs need for planning but
+  // junior analysts don't.
+  const isPmOrAbove =
+    user?.role === 'President' ||
+    user?.role === 'CIO' ||
+    user?.role === 'SeniorPortfolioManager' ||
+    user?.role === 'PortfolioManager';
   const isAdvisory =
     user?.role === 'AdvisoryBoardMember' || user?.role === 'FacultyAdvisory';
   // Owner-only tier above President. Identified by email via SUPER_ADMIN_EMAIL
@@ -157,6 +166,7 @@ export function AuthProvider({ children }) {
         logoutEverywhere,
         isAdmin,
         isExecutive,
+        isPmOrAbove,
         isAdvisory,
         isSuperAdmin,
       }}

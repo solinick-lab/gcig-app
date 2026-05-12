@@ -63,7 +63,7 @@ export default function Participation({ embedded = false }) {
               Participation Ranking
             </div>
             <div className="mt-1 text-[11px] text-navy-400">
-              President-only. Score = {weights.attendance}% attendance +{' '}
+              Score = {weights.attendance}% attendance +{' '}
               {weights.pitches}% pitches (capped at {weights.pitchCap}) +{' '}
               {weights.role}% role rank.
             </div>
