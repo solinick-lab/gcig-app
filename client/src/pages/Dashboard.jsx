@@ -75,6 +75,11 @@ export default function Dashboard() {
   // FRED macro snapshot. Cheap (1h server cache). Hidden when
   // FRED_API_KEY isn't configured — endpoint returns configured: false.
   const [macro, setMacro] = useState(null);
+  // YTD cash-interest simulation (BDA + FGTXX). The brokerage sheet
+  // doesn't know about the off-platform cash sleeves, so we layer this
+  // on top of totalValue for the headline number, the same way the
+  // Portfolio page does.
+  const [cashYield, setCashYield] = useState(null);
 
   useEffect(() => {
     api.get('/dashboard').then((r) => setDashboard(r.data)).catch(() => setDashboard({}));
@@ -82,6 +87,7 @@ export default function Dashboard() {
     api.get('/holdings/history').then((r) => setHistory(r.data || [])).catch(() => setHistory([]));
     api.get('/holdings/earnings').then((r) => setEarnings(r.data)).catch(() => setEarnings(null));
     api.get('/dashboard/macro').then((r) => setMacro(r.data)).catch(() => setMacro(null));
+    api.get('/holdings/cash-yield').then((r) => setCashYield(r.data)).catch(() => setCashYield(null));
     // DIR runs in parallel with the dashboard request. On cache miss
     // it can take 10-30s; on cache hit it's instant. The page
     // renders without waiting either way.
@@ -130,6 +136,7 @@ export default function Dashboard() {
         totals={quotes?.totals}
         holdings={quotes?.holdings}
         history={normalizedHistory}
+        cashInterestEarned={Number(cashYield?.totalInterest) || 0}
       />
 
       {macro?.configured && macro.indicators?.length > 0 && (
@@ -195,15 +202,23 @@ function Masthead({ user }) {
 
 // ─── Portfolio hero ─────────────────────────────────────────────────────
 
-function PortfolioHero({ totals, holdings, history }) {
+function PortfolioHero({ totals, holdings, history, cashInterestEarned = 0 }) {
   const totalValue = totals?.totalValue;
   const cashValue = totals?.cashValue;
   const nonCashHoldings = (holdings || []).filter((h) => !h.isCash);
 
+  // Headline fund value folds in the YTD cash interest earned on the
+  // off-sheet BDA + FGTXX sleeves — same convention as Portfolio.jsx.
+  // WoW / YTD comparisons below stay against the equity-only history
+  // snapshots (apples-to-apples).
+  const displayedValue =
+    totalValue != null ? totalValue + cashInterestEarned : null;
+
   // Return metrics. Lifetime goes against total invested capital (100k start
-  // + infusions). Daily / weekly / YTD use history snapshots.
+  // + infusions) and includes cash interest. Daily / weekly / YTD use
+  // history snapshots which are equity-only.
   const lifetimeDelta =
-    totalValue != null ? totalValue - TOTAL_INVESTED : null;
+    displayedValue != null ? displayedValue - TOTAL_INVESTED : null;
   const lifetimePct =
     lifetimeDelta != null && TOTAL_INVESTED > 0
       ? (lifetimeDelta / TOTAL_INVESTED) * 100
@@ -277,7 +292,7 @@ function PortfolioHero({ totals, holdings, history }) {
             Fund value
           </div>
           <div className="mt-3 font-serif text-4xl font-semibold leading-none tabular-nums md:text-6xl">
-            {fmtMoney(totalValue)}
+            {fmtMoney(displayedValue)}
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <span
