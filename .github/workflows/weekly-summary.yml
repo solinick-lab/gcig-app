@@ -18,39 +18,36 @@ jobs:
 
       - name: Build weekly summary
         id: build
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           SINCE=$(date -d '7 days ago' '+%Y-%m-%d')
           TODAY=$(date '+%B %d, %Y')
           WEEK_AGO=$(date -d '7 days ago' '+%B %d, %Y')
-
-          LOG=$(git log --since="$SINCE" --pretty=format:"%ad - %s" --date=format:"%a %b %d")
-
-          if [ -z "$LOG" ]; then
-            PLAIN="No changes were made to the GCIG website this week."
-          else
-            ESCAPED=$(echo "$LOG" | python3 -c "import sys, json; print(json.dumps(sys.stdin.read()))")
-            PROMPT="You are writing a weekly update email for a student investment club website. Here are the technical changes made this week:\n\n$LOG\n\nRewrite these as a short, plain-English summary (3-5 sentences max) that a non-technical person can understand. Focus on what actually changed for users, not technical details. Do not use bullet points. Write in a friendly, professional tone."
-            ESCAPED_PROMPT=$(echo "$PROMPT" | python3 -c "import sys, json; print(json.dumps(sys.stdin.read()))")
-            RESPONSE=$(curl -s https://api.anthropic.com/v1/messages \
-              -H "x-api-key: $ANTHROPIC_API_KEY" \
-              -H "anthropic-version: 2023-06-01" \
-              -H "content-type: application/json" \
-              -d "{\"model\": \"claude-haiku-4-5-20251001\", \"max_tokens\": 512, \"messages\": [{\"role\": \"user\", \"content\": $ESCAPED_PROMPT}]}")
-            PLAIN=$(echo "$RESPONSE" | python3 -c "import sys, json; d=json.load(sys.stdin); print(d['content'][0]['text'])" 2>/dev/null || echo "$LOG")
-          fi
-
-          printf 'Hi - here is your GCIG website update for the week of %s:
-
-%s' "$WEEK_AGO" "$PLAIN" > /tmp/body.txt
-
+          export LOG=$(git log --since="$SINCE" --pretty=format:"%ad - %s" --date=format:"%a %b %d")
+          PLAIN=$(python3 - << 'PYEOF'
+import os, json, urllib.request
+log = os.environ.get('LOG', '')
+key = os.environ.get('ANTHROPIC_API_KEY', '')
+if not log.strip():
+    print('No changes were made to the GCIG website this week.')
+else:
+    prompt = 'Translate these git commits into a 2-4 sentence plain-English summary for a non-technical reader. No bullet points.\n\n' + log
+    req = urllib.request.Request('https://api.anthropic.com/v1/messages',
+        data=json.dumps({'model':'claude-haiku-4-5-20251001','max_tokens':512,'messages':[{'role':'user','content':prompt}]}).encode(),
+        headers={'x-api-key':key,'anthropic-version':'2023-06-01','content-type':'application/json'})
+    resp = json.loads(urllib.request.urlopen(req).read())
+    print(resp['content'][0]['text'])
+PYEOF
+          )
+          echo "Hi - GCIG website update for the week of $WEEK_AGO:" > /tmp/body.txt
+          echo "" >> /tmp/body.txt
+          echo "$PLAIN" >> /tmp/body.txt
           echo "body<<EOF" >> $GITHUB_OUTPUT
           cat /tmp/body.txt >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-
           echo "subject=GCIG Weekly Update: $WEEK_AGO - $TODAY" >> $GITHUB_OUTPUT
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: Send email
         uses: dawidd6/action-send-mail@v3
