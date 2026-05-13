@@ -23,22 +23,17 @@ jobs:
           TODAY=$(date '+%B %d, %Y')
           WEEK_AGO=$(date -d '7 days ago' '+%B %d, %Y')
 
-          LOG=$(git log --since="$SINCE" \
-            --pretty=format:"%ad - %s" \
-            --date=format:"%a %b %d")
+          LOG=$(git log --since="$SINCE" --pretty=format:"%ad - %s" --date=format:"%a %b %d")
 
           if [ -z "$LOG" ]; then
-            BODY="Hi - no changes were made to the GCIG website between $WEEK_AGO and $TODAY."
+            printf 'Hi - no changes were made to the GCIG website between %s and %s.' "$WEEK_AGO" "$TODAY" > /tmp/body.txt
           else
-            BODY="Hi - here is what changed on the GCIG website between $WEEK_AGO and $TODAY:
-
-$LOG
-
-This is an automated weekly summary."
+            printf 'Hi - here is what changed on the GCIG website between %s and %s:\n\n%s\n\nThis is an automated weekly summary.' "$WEEK_AGO" "$TODAY" "$LOG" > /tmp/body.txt
           fi
 
           echo "body<<EOF" >> $GITHUB_OUTPUT
-          echo "$BODY" >> $GITHUB_OUTPUT
+          cat /tmp/body.txt >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
           echo "subject=GCIG Weekly Update: $WEEK_AGO - $TODAY" >> $GITHUB_OUTPUT
