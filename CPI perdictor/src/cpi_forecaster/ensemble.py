@@ -37,6 +37,27 @@ def _inverse_error_weights(rmses: dict[str, float]) -> dict[str, float]:
     return {k: v / total for k, v in inverses.items()}
 
 
+def _last_released_yoy_pct(cpi: pd.Series) -> float:
+    """YoY % change for the latest observation, looking up the year-ago
+    value by calendar date rather than by row position. The naive
+    ``cpi.iloc[-1] / cpi.iloc[-13]`` math silently picks the wrong base
+    month whenever the panel has a publication gap — which has happened
+    at least once (October 2025 NSA was briefly missing from FRED),
+    producing a 4.13% YoY where the real number was 3.81%."""
+    latest_idx = cpi.index[-1]
+    year_ago_idx = pd.Timestamp(latest_idx) - pd.DateOffset(months=12)
+    year_ago_idx = year_ago_idx + pd.offsets.MonthEnd(0)
+    if year_ago_idx in cpi.index:
+        year_ago = float(cpi.loc[year_ago_idx])
+    else:
+        # `asof` returns the most recent prior value when the exact
+        # month is absent. That's the right behavior for a one-off
+        # publication gap; it slightly biases YoY in the gap's
+        # direction but doesn't slip an entire base month like iloc.
+        year_ago = float(cpi.asof(year_ago_idx))
+    return float((float(cpi.iloc[-1]) / year_ago - 1.0) * 100.0)
+
+
 def _yoy_from_chain(latest_cpi: float, mom_pct: np.ndarray, panel_cpi: pd.Series) -> np.ndarray:
     """Convert a chain of MoM log-% predictions to YoY % at each step.
 
@@ -132,7 +153,7 @@ def build_champion_payload(
     as the legacy ensemble, no client changes needed.
     """
     cpi = panel[TARGET.fred_id].dropna()
-    last_yoy = float((cpi.iloc[-1] / cpi.iloc[-13] - 1.0) * 100.0)
+    last_yoy = _last_released_yoy_pct(cpi)
     last_month = cpi.index[-1]
 
     months_ahead = [
@@ -212,7 +233,7 @@ def to_payload(
     backtest: BacktestResult,
 ) -> dict:
     cpi = panel[TARGET.fred_id].dropna()
-    last_yoy = float((cpi.iloc[-1] / cpi.iloc[-13] - 1.0) * 100.0)
+    last_yoy = _last_released_yoy_pct(cpi)
 
     forecasts = []
     for i, m in enumerate(ensemble.months_ahead):
