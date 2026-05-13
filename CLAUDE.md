@@ -238,7 +238,7 @@ caps the bundled flow at 8 — the 9th row is reserved.
 
 | Anchor | Filled with |
 |--------|-------------|
-| `\\decisiondate\\` | ISO date of the send. Place in every row's Date cell — DocuSign stamps one value at each occurrence. |
+| `\\decisiondate{N}\\` | ISO date of the send. Indexed per row so empty rows stay blank — earlier we used a single `\\decisiondate\\` that DocuSign stamped in every row. Each row's Date cell must carry its own `\\decisiondateN\\` anchor. |
 | `\\grandtotal\\` | (Bundled only) Net cash flow, signed: `+$3,210.00` (Sells outweigh Buys) or `-$8,250.00` (Buys outweigh Sells) |
 | `\\ticker{N}\\` | Row N's ticker (`AIT`, `SPY`, …) |
 | `\\buysell{N}\\` | Row N's action — `Buy` or `Sell` |

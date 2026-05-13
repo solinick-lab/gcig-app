@@ -140,7 +140,10 @@ router.post(
       const anchorTabs = {
         '\\ticker1\\': session.ticker,
         '\\shares1\\': shares.toString(),
-        '\\decisiondate\\': decisionDate,
+        // Per-row date anchor (\decisiondate1\) so rows 2..N stay blank.
+        // Pairs with the bundled flow's indexed scheme — the legacy
+        // unindexed `\decisiondate\` is no longer emitted.
+        '\\decisiondate1\\': decisionDate,
         '\\buysell1\\': 'Buy',
         '\\price1\\': `$${price.toFixed(2)}`,
         '\\total1\\': `$${totalCost.toFixed(2)}`,

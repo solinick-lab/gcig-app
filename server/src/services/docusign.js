@@ -332,11 +332,16 @@ export async function sendTradeConfirmationEnvelope({
 //   { kind: "Buy" | "Sell", ticker, shares, pricePerShare, totalCost }
 //
 // We expand each item into indexed anchor strings on the PDF:
-//   \ticker1\, \shares1\, \buysell1\, \price1\, \total1\
-//   \ticker2\, \shares2\, \buysell2\, ...
+//   \ticker1\, \shares1\, \buysell1\, \price1\, \total1\, \decisiondate1\
+//   \ticker2\, \shares2\, \buysell2\, \price2\, \total2\, \decisiondate2\
+//   ...
 //
-// Plus envelope-level anchors:
-//   \decisiondate\   ISO date of send
+// The date is indexed per row instead of a single envelope-level anchor
+// because DocuSign stamps every occurrence of an anchor — a shared
+// `\decisiondate\` would fill empty rows too. Each row's date cell in
+// the PDF must carry its own `\decisiondateN\` anchor.
+//
+// Plus the one envelope-level anchor:
 //   \grandtotal\     Net cash flow (Buy totals minus Sell totals). Negative
 //                    means the club is spending cash; positive means freeing
 //                    cash. Formatted with sign so the signer sees direction.
@@ -360,9 +365,9 @@ export async function sendBundledTradeEnvelope({
     });
   }
 
-  const anchorTabs = {
-    '\\decisiondate\\': decisionDate || new Date().toISOString().slice(0, 10),
-  };
+  const decisionDateStr =
+    decisionDate || new Date().toISOString().slice(0, 10);
+  const anchorTabs = {};
 
   let netCash = 0;
   items.forEach((item, idx) => {
@@ -374,6 +379,10 @@ export async function sendBundledTradeEnvelope({
     anchorTabs[`\\buysell${n}\\`] = item.kind || '';
     anchorTabs[`\\price${n}\\`] = formatMoney(item.pricePerShare);
     anchorTabs[`\\total${n}\\`] = formatMoney(item.totalCost);
+    // Per-row date so empty rows below the last item stay blank. DocuSign
+    // drops the anchor silently if the PDF doesn't carry it, so this is
+    // safe to emit even if the template hasn't been updated yet.
+    anchorTabs[`\\decisiondate${n}\\`] = decisionDateStr;
   });
 
   // Grand total displays signed cash flow. Positive = cash freed up (Sell
