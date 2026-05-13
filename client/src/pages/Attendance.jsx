@@ -182,7 +182,6 @@ function AdminAttendance() {
     setData({ ...data });
     try {
       await api.post('/attendance', { userId, eventId, status });
-      load();
     } catch {
       if (prev) recordMap.set(key, prev);
       else recordMap.delete(key);
