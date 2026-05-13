@@ -25,21 +25,8 @@ jobs:
           TODAY=$(date '+%B %d, %Y')
           WEEK_AGO=$(date -d '7 days ago' '+%B %d, %Y')
           export LOG=$(git log --since="$SINCE" --pretty=format:"%ad - %s" --date=format:"%a %b %d")
-          PLAIN=$(python3 - << 'PYEOF'
-import os, json, urllib.request
-log = os.environ.get('LOG', '')
-key = os.environ.get('ANTHROPIC_API_KEY', '')
-if not log.strip():
-    print('No changes were made to the GCIG website this week.')
-else:
-    prompt = 'Translate these git commits into a 2-4 sentence plain-English summary for a non-technical reader. No bullet points.\n\n' + log
-    req = urllib.request.Request('https://api.anthropic.com/v1/messages',
-        data=json.dumps({'model':'claude-haiku-4-5-20251001','max_tokens':512,'messages':[{'role':'user','content':prompt}]}).encode(),
-        headers={'x-api-key':key,'anthropic-version':'2023-06-01','content-type':'application/json'})
-    resp = json.loads(urllib.request.urlopen(req).read())
-    print(resp['content'][0]['text'])
-PYEOF
-          )
+          python3 .github/scripts/summarize.py
+          PLAIN=$(cat /tmp/plain.txt)
           echo "Hi - GCIG website update for the week of $WEEK_AGO:" > /tmp/body.txt
           echo "" >> /tmp/body.txt
           echo "$PLAIN" >> /tmp/body.txt
