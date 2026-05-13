@@ -1,0 +1,438 @@
+"""Online / recursive Bayesian Ridge nowcaster.
+
+Most CPI nowcasters fit batch-wise: every cut sees all historical training
+rows weighted equally. That's wasteful. Inflation has obvious regimes —
+the 2021-22 surge, the 2023-24 disinflation, the post-pandemic shelter
+catch-up — and treating a 1995 CPI print as "as relevant" as a 2024 print
+when forecasting 2025 dilutes signal.
+
+The fix is exponential forgetting. Before fitting BayesianRidge we apply
+sample weights w_t = alpha^(T - t) where T is the most recent training
+month. With alpha < 1, older rows are systematically down-weighted.
+Bayesian Ridge handles `sample_weight` natively in `fit`, so the weighted
+posterior collapses to a closed-form ridge with the same posterior std
+returned by `predict(return_std=True)`.
+
+Two design choices worth pinning down:
+  1. Forgetting factor alpha is searched over {0.95, 0.97, 0.99} via an
+     inner walk-forward CV on the training tail (last 12 cuts).
+  2. Features = quantile_rich + Cleveland Fed nowcast + standard CPI lag
+     features. Same surface as `nowcast_clev.py` so the comparison is
+     apples-to-apples — we're isolating the effect of online weighting,
+     not feature engineering.
+
+The 80% interval comes straight out of BayesianRidge's posterior std with
+z=1.2816 (one-sided), floored at _RESID_FLOOR for the YoY band.
+
+Public API mirrors `nowcast_clev.py`:
+  backtest_online_nowcast(panel, daily_frame, ...) -> dict
+  run_online_nowcast(as_of_day=20) -> OnlineNowcastResult
+"""
+
+from __future__ import annotations
+
+import warnings
+from dataclasses import dataclass
+
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import BayesianRidge
+from sklearn.preprocessing import StandardScaler
+
+from .api_client import get_daily_panel, get_cleveland_nowcast
+from .features import build_target
+from .fred import TARGET, fetch_panel
+from .nowcast import _as_of_for_month, DEFAULT_AS_OF_DAY
+from .nowcast_clev import _clev_features_for_month, _safe_get_clev
+from .nowcast_features import build_daily_frame
+from .nowcast_richfeats import rich_features_at
+
+
+warnings.filterwarnings("ignore")
+
+
+# --- constants -------------------------------------------------------
+
+_QUANTILES = (0.1, 0.5, 0.9)
+_MOM_LO_CLIP = -1.5
+_MOM_HI_CLIP = 2.5
+_RESID_FLOOR = 0.05
+_Z80 = 1.2816  # one-sided z for 80% interval
+_STD_FLOOR = 0.10
+
+_ALPHAS = (0.95, 0.97, 0.99)
+_INNER_CV_FOLDS = 12  # last K training months held out for alpha search
+
+_BR_PARAMS = dict(
+    n_iter=300,
+    alpha_init=1.0,
+    lambda_init=1.0,
+)
+
+
+@dataclass
+class OnlineNowcastResult:
+    as_of: pd.Timestamp
+    target_month: str
+    pred_mom: float
+    pred_yoy: float
+    lo80_yoy: float
+    hi80_yoy: float
+    days_observed: int
+    used_clev_scrape: bool
+    chosen_alpha: float
+
+
+# ---------------------------------------------------------------------------
+# Supervised dataset (same surface as nowcast_clev)
+# ---------------------------------------------------------------------------
+
+
+def _build_supervised(
+    panel: pd.DataFrame,
+    daily_frame: dict[str, pd.Series],
+    clev: dict,
+    as_of_day: int,
+    min_history_months: int = 36,
+) -> tuple[pd.DataFrame, pd.Series]:
+    """quantile_rich features + CPI lags + Cleveland nowcast features."""
+    cpi = panel[TARGET.fred_id].dropna()
+    y_mom = build_target(panel).dropna()
+    eligible_months = y_mom.index[min_history_months:]
+
+    rows: list[dict] = []
+    targets: list[float] = []
+    for month_end in eligible_months:
+        m_start = month_end + pd.offsets.MonthBegin(-1)
+        as_of = _as_of_for_month(m_start, as_of_day)
+        try:
+            feats = rich_features_at(daily_frame, as_of)
+        except Exception:
+            continue
+
+        try:
+            feats["cpi_mom_lag1"] = float(y_mom.loc[:month_end].iloc[-2])
+        except Exception:
+            feats["cpi_mom_lag1"] = np.nan
+        try:
+            feats["cpi_mom_lag2"] = (
+                float(y_mom.loc[:month_end].iloc[-3])
+                if len(y_mom.loc[:month_end]) >= 3 else np.nan
+            )
+        except Exception:
+            feats["cpi_mom_lag2"] = np.nan
+        try:
+            cpi_until = cpi.loc[:month_end]
+            if len(cpi_until) >= 14:
+                feats["cpi_yoy_lag1"] = float(
+                    (cpi_until.iloc[-2] / cpi_until.iloc[-14] - 1.0) * 100.0
+                )
+            else:
+                feats["cpi_yoy_lag1"] = np.nan
+        except Exception:
+            feats["cpi_yoy_lag1"] = np.nan
+        feats["month_sin"] = float(np.sin(2 * np.pi * month_end.month / 12.0))
+        feats["month_cos"] = float(np.cos(2 * np.pi * month_end.month / 12.0))
+
+        try:
+            feats.update(_clev_features_for_month(clev, month_end, panel))
+        except Exception:
+            pass
+
+        feats["target_month_end"] = month_end
+        rows.append(feats)
+        targets.append(float(y_mom.loc[month_end]))
+
+    df = pd.DataFrame(rows).set_index("target_month_end")
+    y = pd.Series(targets, index=df.index, name="y_mom")
+    df = df.dropna(axis=1, how="all")
+    df = df.fillna(df.median(numeric_only=True))
+    df = df.fillna(0.0)
+    return df, y
+
+
+# ---------------------------------------------------------------------------
+# Forgetting weights + alpha selection
+# ---------------------------------------------------------------------------
+
+
+def _forget_weights(n: int, alpha: float) -> np.ndarray:
+    """w_t = alpha^(n-1-t) for t=0..n-1. Most recent row gets weight 1.0."""
+    if n <= 0:
+        return np.ones(0, dtype=float)
+    ages = np.arange(n - 1, -1, -1, dtype=float)  # [n-1, n-2, ..., 0]
+    return np.power(alpha, ages)
+
+
+def _fit_br_weighted(X: np.ndarray, y: np.ndarray, alpha: float) -> tuple[BayesianRidge, StandardScaler]:
+    """Fit BayesianRidge with exponential-forgetting sample weights."""
+    scaler = StandardScaler().fit(X)
+    Xs = scaler.transform(X)
+    w = _forget_weights(len(y), alpha)
+    br = BayesianRidge(**_BR_PARAMS).fit(Xs, y, sample_weight=w)
+    return br, scaler
+
+
+def _choose_alpha(X: pd.DataFrame, y: pd.Series) -> float:
+    """Inner walk-forward CV: try each alpha, score by RMSE on the last K folds."""
+    n = len(y)
+    folds = min(_INNER_CV_FOLDS, max(1, n // 4))
+    if folds < 3 or n - folds < 24:
+        # Not enough history for a meaningful inner CV — default to mid alpha.
+        return 0.97
+
+    scores: dict[float, float] = {}
+    for alpha in _ALPHAS:
+        errs: list[float] = []
+        for k in range(folds, 0, -1):
+            cut = n - k
+            X_tr = X.iloc[:cut].values.astype(float)
+            y_tr = y.iloc[:cut].values.astype(float)
+            X_te = X.iloc[cut:cut + 1].values.astype(float)
+            y_te = float(y.iloc[cut])
+            try:
+                br, scaler = _fit_br_weighted(X_tr, y_tr, alpha)
+                yhat = float(br.predict(scaler.transform(X_te))[0])
+                errs.append((yhat - y_te) ** 2)
+            except Exception:
+                continue
+        if errs:
+            scores[alpha] = float(np.sqrt(np.mean(errs)))
+
+    if not scores:
+        return 0.97
+    return min(scores, key=scores.get)
+
+
+# ---------------------------------------------------------------------------
+# Predict (mid + 80% band via posterior std)
+# ---------------------------------------------------------------------------
+
+
+def _predict_with_band(
+    br: BayesianRidge,
+    scaler: StandardScaler,
+    x_inf: np.ndarray,
+) -> tuple[float, float, float]:
+    """Return (mid, lo80, hi80) in MoM space using BayesianRidge posterior std."""
+    x_s = scaler.transform(x_inf.reshape(1, -1))
+    mean, std = br.predict(x_s, return_std=True)
+    mid = float(mean[0])
+    post_std = max(float(std[0]), _STD_FLOOR)
+    spread = _Z80 * post_std
+    return mid, mid - spread, mid + spread
+
+
+# ---------------------------------------------------------------------------
+# YoY conversion (mirrors nowcast_clev)
+# ---------------------------------------------------------------------------
+
+
+def _mom_to_yoy(
+    pred_mom: float,
+    last_cpi: float,
+    target_month_end: pd.Timestamp,
+    cpi: pd.Series,
+) -> float:
+    predicted_cpi = last_cpi * float(np.exp(pred_mom / 100.0))
+    denom_idx = target_month_end - pd.DateOffset(years=1)
+    denom_idx = pd.Timestamp(denom_idx) + pd.offsets.MonthEnd(0)
+    try:
+        denom = float(cpi.loc[denom_idx])
+    except KeyError:
+        denom = float(cpi.asof(denom_idx))
+    return (predicted_cpi / denom - 1.0) * 100.0
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def backtest_online_nowcast(
+    panel: pd.DataFrame,
+    daily_frame: dict[str, pd.Series],
+    window_months: int = 24,
+    as_of_day: int = DEFAULT_AS_OF_DAY,
+) -> dict:
+    """Walk-forward backtest using BayesianRidge with exponential forgetting."""
+    cpi = panel[TARGET.fred_id].dropna()
+    y_mom = build_target(panel).dropna()
+
+    clev = _safe_get_clev()
+    used_scrape = bool(clev.get("ok") and clev.get("historical"))
+
+    cuts = list(range(len(y_mom) - window_months, len(y_mom)))
+    preds_mom: list[float] = []
+    actuals_mom: list[float] = []
+    preds_yoy: list[float] = []
+    actuals_yoy: list[float] = []
+    rows: list[dict] = []
+    chosen_alphas: list[float] = []
+
+    for ci in cuts:
+        try:
+            target_month_end = y_mom.index[ci]
+            train_panel = panel.loc[panel.index < target_month_end]
+            if len(train_panel) < 60:
+                continue
+
+            X, y = _build_supervised(
+                train_panel, daily_frame, clev, as_of_day=as_of_day,
+            )
+            if len(X) < 24:
+                continue
+
+            cols = list(X.columns)
+            chosen_alpha = _choose_alpha(X, y)
+            br, scaler = _fit_br_weighted(
+                X.values.astype(float), y.values.astype(float), chosen_alpha,
+            )
+
+            # Inference features
+            m_start = target_month_end + pd.offsets.MonthBegin(-1)
+            as_of = _as_of_for_month(m_start, as_of_day)
+            feats = rich_features_at(daily_frame, as_of)
+            train_y = build_target(train_panel).dropna()
+            if len(train_y) < 13:
+                continue
+            feats["cpi_mom_lag1"] = float(train_y.iloc[-1])
+            feats["cpi_mom_lag2"] = float(train_y.iloc[-2]) if len(train_y) >= 2 else np.nan
+            feats["cpi_yoy_lag1"] = float(
+                (train_panel[TARGET.fred_id].dropna().iloc[-1]
+                 / train_panel[TARGET.fred_id].dropna().iloc[-13] - 1.0) * 100.0
+            )
+            feats["month_sin"] = float(np.sin(2 * np.pi * target_month_end.month / 12.0))
+            feats["month_cos"] = float(np.cos(2 * np.pi * target_month_end.month / 12.0))
+            try:
+                feats.update(_clev_features_for_month(clev, target_month_end, panel))
+            except Exception:
+                pass
+
+            x_inf = pd.Series(feats)
+            x_inf = x_inf.reindex(cols).fillna(X.median(numeric_only=True)).fillna(0.0)
+            x_inf_arr = x_inf.values.astype(float)
+
+            mid, lo, hi = _predict_with_band(br, scaler, x_inf_arr)
+            mid = float(np.clip(mid, _MOM_LO_CLIP, _MOM_HI_CLIP))
+            actual_mom = float(y_mom.iloc[ci])
+
+            last_cpi_train = float(train_panel[TARGET.fred_id].dropna().iloc[-1])
+            pred_yoy = _mom_to_yoy(mid, last_cpi_train, target_month_end, cpi)
+            actual_cpi = float(cpi.loc[target_month_end])
+            denom_idx = target_month_end - pd.DateOffset(years=1)
+            denom_idx = pd.Timestamp(denom_idx) + pd.offsets.MonthEnd(0)
+            try:
+                denom = float(cpi.loc[denom_idx])
+            except KeyError:
+                denom = float(cpi.asof(denom_idx))
+            actual_yoy = (actual_cpi / denom - 1.0) * 100.0
+
+            preds_mom.append(mid)
+            actuals_mom.append(actual_mom)
+            preds_yoy.append(pred_yoy)
+            actuals_yoy.append(actual_yoy)
+            chosen_alphas.append(chosen_alpha)
+            rows.append({
+                "target_month": target_month_end.strftime("%Y-%m"),
+                "as_of": as_of.strftime("%Y-%m-%d"),
+                "alpha": chosen_alpha,
+                "pred_mom": round(mid, 4),
+                "actual_mom": round(actual_mom, 4),
+                "pred_yoy": round(pred_yoy, 3),
+                "actual_yoy": round(actual_yoy, 3),
+                "yoy_err": round(pred_yoy - actual_yoy, 3),
+            })
+        except Exception:
+            continue
+
+    if not preds_mom:
+        return {"error": "no successful cuts"}
+
+    pm = np.array(preds_mom); am = np.array(actuals_mom)
+    py = np.array(preds_yoy); ay = np.array(actuals_yoy)
+    yoy_err = np.abs(py - ay)
+    return {
+        "asOfDay": as_of_day,
+        "windowMonths": window_months,
+        "totalCuts": len(preds_mom),
+        "rmseMom": float(np.sqrt(np.mean((pm - am) ** 2))),
+        "rmseYoy": float(np.sqrt(np.mean((py - ay) ** 2))),
+        "maeYoy": float(np.mean(yoy_err)),
+        "hitWithin25bp": float((yoy_err <= 0.25).mean()) * 100,
+        "hitWithin50bp": float((yoy_err <= 0.50).mean()) * 100,
+        "usedClevScrape": used_scrape,
+        "alphaCounts": {
+            float(a): int((np.array(chosen_alphas) == a).sum()) for a in _ALPHAS
+        },
+        "rows": rows,
+    }
+
+
+def run_online_nowcast(as_of_day: int = DEFAULT_AS_OF_DAY) -> OnlineNowcastResult:
+    """Live nowcast using fresh Cleveland scrape + online Bayesian Ridge."""
+    panel = fetch_panel()
+    daily_panel = get_daily_panel()
+    daily_frame = build_daily_frame(daily_panel)
+    clev = _safe_get_clev()
+    used_scrape = bool(clev.get("ok"))
+
+    X, y = _build_supervised(panel, daily_frame, clev, as_of_day=as_of_day)
+    cols = list(X.columns)
+    chosen_alpha = _choose_alpha(X, y)
+    br, scaler = _fit_br_weighted(
+        X.values.astype(float), y.values.astype(float), chosen_alpha,
+    )
+
+    today = pd.Timestamp.utcnow().tz_localize(None).normalize()
+    cpi = panel[TARGET.fred_id].dropna()
+    last_released_month_end = cpi.index[-1]
+    target_month_end = (last_released_month_end + pd.offsets.MonthBegin(1)) + pd.offsets.MonthEnd(0)
+    target_month_start = target_month_end + pd.offsets.MonthBegin(-1)
+
+    as_of = min(today, target_month_end)
+    if today < target_month_start:
+        as_of = _as_of_for_month(target_month_start, as_of_day)
+
+    feats = rich_features_at(daily_frame, as_of)
+    y_mom = build_target(panel).dropna()
+    feats["cpi_mom_lag1"] = float(y_mom.iloc[-1])
+    feats["cpi_mom_lag2"] = float(y_mom.iloc[-2])
+    feats["cpi_yoy_lag1"] = float((cpi.iloc[-1] / cpi.iloc[-13] - 1.0) * 100.0)
+    feats["month_sin"] = float(np.sin(2 * np.pi * target_month_end.month / 12.0))
+    feats["month_cos"] = float(np.cos(2 * np.pi * target_month_end.month / 12.0))
+    try:
+        feats.update(_clev_features_for_month(clev, target_month_end, panel))
+    except Exception:
+        pass
+
+    x_inf = pd.Series(feats).reindex(cols).fillna(X.median(numeric_only=True)).fillna(0.0)
+    x_inf_arr = x_inf.values.astype(float)
+    mid, lo, hi = _predict_with_band(br, scaler, x_inf_arr)
+    mid = float(np.clip(mid, _MOM_LO_CLIP, _MOM_HI_CLIP))
+
+    last_cpi = float(cpi.iloc[-1])
+    pred_yoy = _mom_to_yoy(mid, last_cpi, target_month_end, cpi)
+    lo80_yoy = _mom_to_yoy(lo, last_cpi, target_month_end, cpi)
+    hi80_yoy = _mom_to_yoy(hi, last_cpi, target_month_end, cpi)
+
+    if (hi80_yoy - pred_yoy) < _RESID_FLOOR:
+        hi80_yoy = pred_yoy + _RESID_FLOOR
+    if (pred_yoy - lo80_yoy) < _RESID_FLOOR:
+        lo80_yoy = pred_yoy - _RESID_FLOOR
+
+    days_observed = sum(
+        1 for s in daily_frame.values()
+        if len(s.loc[(s.index >= target_month_start) & (s.index <= as_of)]) > 0
+    )
+    return OnlineNowcastResult(
+        as_of=as_of,
+        target_month=target_month_end.strftime("%Y-%m"),
+        pred_mom=mid,
+        pred_yoy=pred_yoy,
+        lo80_yoy=lo80_yoy,
+        hi80_yoy=hi80_yoy,
+        days_observed=days_observed,
+        used_clev_scrape=used_scrape,
+        chosen_alpha=float(chosen_alpha),
+    )

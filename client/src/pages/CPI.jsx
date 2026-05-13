@@ -340,14 +340,14 @@ export default function CPI() {
           </div>
           <div>
             <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-gold-700">
-              Naive baseline
+              Prior ensemble
             </div>
             <div className="mt-1 font-serif text-2xl font-semibold text-navy-400">
-              {forecast.backtest?.naiveRmseMom != null
-                ? `${forecast.backtest.naiveRmseMom.toFixed(3)}%`
+              {forecast.backtest?.perModel?.ensemble?.rmseYoy != null
+                ? `${forecast.backtest.perModel.ensemble.rmseYoy.toFixed(3)}%`
                 : '—'}
             </div>
-            <div className="text-xs text-navy-400">For comparison</div>
+            <div className="text-xs text-navy-400">YoY error, same window</div>
           </div>
           <div>
             <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-gold-700">
