@@ -1,25 +1,16 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client.js';
 
-// MOVR — the fund's own book ranked by today's move, read live from
-// the positions sheet (the same source as the dashboard), not the
-// tickers people happened to chart in the terminal. No ticker input.
-// Mirrors DES/CN: fetch, then hand the list to the shared /annotate
-// AI brief.
+// MOVR — every holding in the book and how much it's up or down today,
+// read live from the positions sheet (the same source as the
+// dashboard), not the tickers people charted in the terminal. One
+// flat list, sorted best-to-worst. No ticker input. Mirrors DES/CN:
+// fetch, then hand the list to the shared /annotate AI brief.
 
 const fmt = {
   px: (v) => (v == null || Number.isNaN(v) ? '—' : Number(v).toFixed(2)),
   pct: (v) =>
     v == null || Number.isNaN(v) ? '—' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`,
-  wt: (v) => (v == null || Number.isNaN(v) ? '—' : `${(v * 100).toFixed(1)}%`),
-  usd: (v) => {
-    if (v == null || Number.isNaN(v)) return '—';
-    const n = Number(v);
-    return `${n >= 0 ? '+' : '-'}$${Math.abs(n).toLocaleString('en-US', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })}`;
-  },
 };
 
 export default function Movers() {
@@ -35,7 +26,7 @@ export default function Movers() {
     setErr(null);
     setBrief('');
     api
-      .get('/terminal/movers', { params: { limit: 10 } })
+      .get('/terminal/movers')
       .then(({ data }) => {
         if (!cancelled) setData(data);
       })
@@ -51,15 +42,12 @@ export default function Movers() {
   }, []);
 
   useEffect(() => {
-    if (!data || (!data.gainers?.length && !data.losers?.length)) return;
+    if (!data?.rows?.length) return;
     let cancelled = false;
     setBriefLoading(true);
-    const line = (m) =>
-      `${m.ticker} ${fmt.pct(m.changePct)} (${fmt.usd(m.dayUsd)}, ${fmt.wt(m.weight)} wt)`;
     const context = [
-      `GCIG portfolio, as of ${data.asOf || 'n/a'} — ${data.ranked}/${data.universe} holdings moved`,
-      `Gainers: ${data.gainers.map(line).join(', ') || 'none'}`,
-      `Losers: ${data.losers.map(line).join(', ') || 'none'}`,
+      `GCIG portfolio, as of ${data.asOf || 'n/a'} — ${data.count} holdings, today's move:`,
+      ...data.rows.map((m) => `${m.ticker} ${fmt.pct(m.changePct)}`),
     ].join('\n');
     api
       .post('/terminal/annotate', { function: 'MOVR', context })
@@ -80,7 +68,7 @@ export default function Movers() {
   if (loading) {
     return (
       <div className="term-panel">
-        <div className="term-loading">Loading portfolio movers…</div>
+        <div className="term-loading">Loading portfolio…</div>
       </div>
     );
   }
@@ -93,7 +81,7 @@ export default function Movers() {
   }
   if (!data) return null;
 
-  const empty = !data.gainers?.length && !data.losers?.length;
+  const rows = data.rows || [];
 
   return (
     <div className="term-panel">
@@ -101,7 +89,7 @@ export default function Movers() {
         <span className="ticker">MOVR</span>
         <span className="name">
           Portfolio{data.asOf ? ` · as of ${data.asOf}` : ''}
-          {data.universe ? ` · ${data.ranked}/${data.universe} holdings` : ''}
+          {data.count ? ` · ${data.count} holdings` : ''}
         </span>
       </div>
 
@@ -110,32 +98,11 @@ export default function Movers() {
         {briefLoading ? 'Generating…' : brief || 'No brief available.'}
       </div>
 
-      {empty ? (
-        <div className="term-loading">
-          No daily moves on the book yet — the positions sheet returned no
-          non-cash holdings with a day change.
-        </div>
-      ) : (
-        <div className="term-movers">
-          <MoversTable title="▲ GAINERS" rows={data.gainers} dir="pos" />
-          <MoversTable title="▼ LOSERS" rows={data.losers} dir="neg" />
-        </div>
-      )}
-
-      <div style={{ color: 'var(--term-fg-muted)', fontSize: 11 }}>
-        GCIG holdings · daily change, live from the positions sheet. Cash
-        excluded.
-      </div>
-    </div>
-  );
-}
-
-function MoversTable({ title, rows, dir }) {
-  return (
-    <div className="term-movers-col">
-      <div className="term-movers-title">{title}</div>
       {rows.length === 0 ? (
-        <div className="term-loading">None.</div>
+        <div className="term-loading">
+          No daily moves on the book — the positions sheet returned no non-cash
+          holdings with a day change.
+        </div>
       ) : (
         <table className="term-table">
           <thead>
@@ -143,8 +110,6 @@ function MoversTable({ title, rows, dir }) {
               <th style={{ width: 22 }}>#</th>
               <th>Ticker</th>
               <th className="num">Last</th>
-              <th className="num">Wt</th>
-              <th className="num">Day $</th>
               <th className="num">Day %</th>
             </tr>
           </thead>
@@ -154,14 +119,19 @@ function MoversTable({ title, rows, dir }) {
                 <td className="rank">{i + 1}</td>
                 <td className="sym" title={m.name}>{m.ticker}</td>
                 <td className="num">{fmt.px(m.last)}</td>
-                <td className="num">{fmt.wt(m.weight)}</td>
-                <td className={`num ${dir}`}>{fmt.usd(m.dayUsd)}</td>
-                <td className={`num ${dir}`}>{fmt.pct(m.changePct)}</td>
+                <td className={`num ${m.changePct >= 0 ? 'pos' : 'neg'}`}>
+                  {fmt.pct(m.changePct)}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
+
+      <div style={{ color: 'var(--term-fg-muted)', fontSize: 11 }}>
+        GCIG holdings · today's move, live from the positions sheet. Cash
+        excluded.
+      </div>
     </div>
   );
 }

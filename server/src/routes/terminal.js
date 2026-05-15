@@ -71,15 +71,15 @@ router.get('/chart/:ticker', async (req, res) => {
   }
 });
 
-// MOVR — the fund's portfolio ranked by today's move, read live from
-// the positions sheet (same source as the dashboard). Not the tickers
-// charted in the terminal: this is the actual book. The sheet service
+// MOVR — every holding and how much it's up or down today, read live
+// from the positions sheet (same source as the dashboard). Not the
+// tickers charted in the terminal: the actual book. The sheet service
 // caches 20m internally, so hitting this often is cheap. If the sheet
 // is unreachable we surface that rather than a half-empty list — the
 // panel renders the message.
-router.get('/movers', async (req, res) => {
+router.get('/movers', async (_req, res) => {
   try {
-    const data = await getPortfolioMovers({ limit: req.query.limit });
+    const data = await getPortfolioMovers();
     res.json(data);
   } catch (err) {
     console.error('terminal/movers failed:', err.message);

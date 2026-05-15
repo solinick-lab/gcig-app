@@ -190,61 +190,40 @@ export async function getSheetPortfolio({ forceFresh = false } = {}) {
   return data;
 }
 
-// MOVR — the fund's own book, ranked by today's move. This is the
-// portfolio, deliberately not "whatever's been charted in the
-// terminal": it reads the same live sheet the dashboard does, so the
-// numbers match what members already see and cash is excluded.
+// MOVR — every holding in the book and how much it's up or down
+// today. The portfolio, read from the same live sheet the dashboard
+// uses (cash excluded), as one flat list sorted best-to-worst — not a
+// gainers/losers split with weights.
 //
-// The sheet's day-change column is a position-level dollar figure
-// (formatted as money everywhere else it's consumed — see
-// clubBrief.js). Daily percent is recovered as the dollar move over
-// the prior position value, where prior value is today's market
-// value minus today's dollar move. Share count is static intraday
-// for a buy-and-hold club book, so that ratio is the security's
-// close-to-close return.
-export async function getPortfolioMovers({ limit = 10 } = {}) {
-  const n = Math.min(25, Math.max(1, Math.trunc(Number(limit)) || 10));
+// The sheet's day-change column is a PER-SHARE dollar figure (it's
+// money — clubBrief.js formats it so — but on the same scale as the
+// share price, not the position). Daily percent is therefore the
+// per-share move over the prior share price: dayChange / (price -
+// dayChange). An earlier cut divided it by position value and
+// produced percentages ~100x too small.
+export async function getPortfolioMovers() {
   const { holdings, fetchedAt } = await getSheetPortfolio();
 
-  let book = 0;
-  const moves = [];
+  const rows = [];
   for (const h of holdings) {
     if (h.isCash) continue;
-    book += 1;
-    if (h.dayChange == null) continue;
-    const mv =
-      h.marketValue != null
-        ? h.marketValue
-        : h.shares != null && h.price != null
-        ? h.shares * h.price
-        : null;
-    if (mv == null) continue;
-    const priorValue = mv - h.dayChange;
-    if (!(priorValue > 0)) continue;
-    moves.push({
+    if (h.dayChange == null || h.price == null) continue;
+    const prior = h.price - h.dayChange;
+    if (!(prior > 0)) continue;
+    rows.push({
       ticker: h.ticker,
       name: h.name || h.ticker,
       last: h.price,
       dayUsd: h.dayChange,
-      changePct: h.dayChange / priorValue,
-      weight: h.portfolioPct != null ? h.portfolioPct / 100 : null,
+      changePct: h.dayChange / prior,
     });
   }
 
-  const gainers = moves
-    .filter((m) => m.changePct > 0)
-    .sort((a, b) => b.changePct - a.changePct)
-    .slice(0, n);
-  const losers = moves
-    .filter((m) => m.changePct < 0)
-    .sort((a, b) => a.changePct - b.changePct)
-    .slice(0, n);
+  rows.sort((a, b) => b.changePct - a.changePct);
 
   return {
     asOf: fetchedAt ? String(fetchedAt).slice(0, 10) : null,
-    universe: book,        // non-cash holdings in the book
-    ranked: moves.length,  // holdings with a usable daily move
-    gainers,
-    losers,
+    count: rows.length,
+    rows,
   };
 }
