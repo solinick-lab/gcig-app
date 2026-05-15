@@ -19,6 +19,7 @@ import {
   Activity,
   Ship,
   ClipboardList,
+  Terminal as TerminalIcon,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import RoleBadge from './RoleBadge.jsx';
@@ -50,6 +51,7 @@ const NAV_SECTIONS = [
       { to: '/industries', label: 'Industries', icon: Building2 },
       { to: '/cpi', label: 'CPI Forecast', icon: Activity },
       { to: '/tankers', label: 'Tanker Tracker', icon: Ship },
+      { to: '/terminal', label: 'Terminal', icon: TerminalIcon, executiveOnly: true },
     ],
   },
   {

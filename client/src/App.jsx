@@ -30,6 +30,7 @@ import PitchRequests from './pages/PitchRequests.jsx';
 import CPI from './pages/CPI.jsx';
 import Tankers from './pages/Tankers.jsx';
 import PresidentReview from './pages/PresidentReview.jsx';
+import Terminal from './pages/Terminal.jsx';
 
 export default function App() {
   const { loading } = useAuth();
@@ -86,6 +87,15 @@ export default function App() {
         <Route path="/profile" element={<Profile />} />
         <Route path="/president-review" element={<PresidentReview />} />
       </Route>
+      {/* Terminal lives outside the standard Layout — it owns the viewport. */}
+      <Route
+        path="/terminal"
+        element={
+          <ProtectedRoute>
+            <Terminal />
+          </ProtectedRoute>
+        }
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>

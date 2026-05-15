@@ -1,0 +1,507 @@
+/*
+ * Terminal theme — scoped to elements inside [data-theme="terminal"].
+ * Amber-on-black, dense, mono. Loosely modeled on classic Bloomberg.
+ * Nothing in this file should leak to the rest of the app; all selectors
+ * are gated under the data-theme attribute.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+[data-theme='terminal'] {
+  --term-bg: #0a0a08;
+  --term-bg-panel: #0f0f0c;
+  --term-bg-panel-hover: #14140f;
+  --term-bg-header: #1a1a14;
+  --term-border: #2a2a20;
+  --term-border-focused: #6a4d00;
+  --term-fg: #ffb000;
+  --term-fg-dim: #b07700;
+  --term-fg-muted: #6a4d00;
+  --term-positive: #00d860;
+  --term-negative: #ff4040;
+  --term-cyan: #4ecdc4;
+  --term-blue: #6ea8ff;
+  --term-magenta: #ff6ec7;
+  --term-white: #f0e6d2;
+
+  background: var(--term-bg);
+  color: var(--term-fg);
+  font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  font-feature-settings: 'tnum' 1, 'zero' 1;
+}
+
+/* Full-bleed: the terminal owns the whole screen real estate. */
+[data-theme='terminal'].terminal-root {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+[data-theme='terminal'] *,
+[data-theme='terminal'] *::before,
+[data-theme='terminal'] *::after {
+  box-sizing: border-box;
+}
+
+[data-theme='terminal'] .term-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 36px;
+  padding: 0 14px;
+  background: var(--term-bg-header);
+  border-bottom: 1px solid var(--term-border);
+  color: var(--term-fg);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  flex-shrink: 0;
+}
+
+[data-theme='terminal'] .term-topbar-brand {
+  color: var(--term-fg);
+  font-weight: 700;
+}
+
+[data-theme='terminal'] .term-topbar-status {
+  margin-left: auto;
+  color: var(--term-fg-dim);
+  font-weight: 500;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+[data-theme='terminal'] .term-topbar-status .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--term-positive);
+  display: inline-block;
+  box-shadow: 0 0 6px var(--term-positive);
+}
+
+[data-theme='terminal'] .term-topbar-status .dot.off {
+  background: var(--term-fg-muted);
+  box-shadow: none;
+}
+
+[data-theme='terminal'] .term-topbar-exit {
+  background: transparent;
+  border: 1px solid var(--term-border);
+  color: var(--term-fg-dim);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+  letter-spacing: 0.08em;
+}
+
+[data-theme='terminal'] .term-topbar-exit:hover {
+  border-color: var(--term-fg-dim);
+  color: var(--term-fg);
+}
+
+[data-theme='terminal'] .term-commandbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--term-bg);
+  border-bottom: 1px solid var(--term-border);
+  flex-shrink: 0;
+}
+
+[data-theme='terminal'] .term-commandbar-prompt {
+  color: var(--term-fg-dim);
+  font-weight: 700;
+}
+
+[data-theme='terminal'] .term-commandbar-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--term-fg);
+  font-family: inherit;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  caret-color: var(--term-fg);
+}
+
+[data-theme='terminal'] .term-commandbar-input::placeholder {
+  color: var(--term-fg-muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+[data-theme='terminal'] .term-commandbar-go {
+  background: var(--term-fg);
+  color: #000;
+  border: none;
+  padding: 4px 14px;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+[data-theme='terminal'] .term-commandbar-go:disabled {
+  background: var(--term-fg-muted);
+  cursor: not-allowed;
+}
+
+[data-theme='terminal'] .term-commandbar-hint {
+  color: var(--term-fg-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+[data-theme='terminal'] .term-workspace {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  background: var(--term-bg);
+}
+
+/* React-mosaic overrides — match terminal aesthetics. */
+[data-theme='terminal'] .mosaic {
+  background: var(--term-bg);
+}
+
+[data-theme='terminal'] .mosaic-tile {
+  margin: 4px;
+}
+
+[data-theme='terminal'] .mosaic-window {
+  background: var(--term-bg-panel);
+  border: 1px solid var(--term-border);
+  box-shadow: none;
+  border-radius: 0;
+}
+
+[data-theme='terminal'] .mosaic-window:focus-within {
+  border-color: var(--term-border-focused);
+}
+
+[data-theme='terminal'] .mosaic-window-toolbar {
+  background: var(--term-bg-header);
+  border-bottom: 1px solid var(--term-border);
+  height: 26px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  color: var(--term-fg);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+[data-theme='terminal'] .mosaic-window-title {
+  color: var(--term-fg);
+  font-weight: 700;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-theme='terminal'] .mosaic-window-controls .mosaic-default-control {
+  background: transparent;
+  color: var(--term-fg-dim);
+  border: none;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+[data-theme='terminal'] .mosaic-window-controls .mosaic-default-control:hover {
+  color: var(--term-fg);
+  background: transparent;
+}
+
+[data-theme='terminal'] .mosaic-window-body {
+  background: var(--term-bg-panel);
+  color: var(--term-fg);
+  overflow: auto;
+}
+
+[data-theme='terminal'] .mosaic-split {
+  background: var(--term-border);
+}
+
+[data-theme='terminal'] .mosaic-split:hover {
+  background: var(--term-border-focused);
+}
+
+[data-theme='terminal'] .mosaic-preview {
+  background: var(--term-bg-panel-hover);
+  border: 1px solid var(--term-border-focused);
+}
+
+/* Panel content scaffolding. */
+[data-theme='terminal'] .term-panel {
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+[data-theme='terminal'] .term-panel-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  color: var(--term-fg);
+  border-bottom: 1px solid var(--term-border);
+  padding-bottom: 6px;
+}
+
+[data-theme='terminal'] .term-panel-header .ticker {
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.05em;
+}
+
+[data-theme='terminal'] .term-panel-header .name {
+  color: var(--term-white);
+  font-size: 12px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-theme='terminal'] .term-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 6px 18px;
+}
+
+[data-theme='terminal'] .term-stat {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px dotted var(--term-border);
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+[data-theme='terminal'] .term-stat-label {
+  color: var(--term-fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+[data-theme='terminal'] .term-stat-value {
+  color: var(--term-white);
+  font-weight: 500;
+}
+
+[data-theme='terminal'] .term-stat-value.pos {
+  color: var(--term-positive);
+}
+
+[data-theme='terminal'] .term-stat-value.neg {
+  color: var(--term-negative);
+}
+
+[data-theme='terminal'] .term-ai-block {
+  background: rgba(255, 176, 0, 0.06);
+  border: 1px solid var(--term-fg-muted);
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--term-white);
+  line-height: 1.5;
+}
+
+[data-theme='terminal'] .term-ai-block .label {
+  color: var(--term-fg);
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  display: block;
+  margin-bottom: 4px;
+}
+
+[data-theme='terminal'] .term-ai-block.loading {
+  color: var(--term-fg-dim);
+  font-style: italic;
+}
+
+[data-theme='terminal'] .term-loading {
+  color: var(--term-fg-dim);
+  padding: 12px 0;
+  font-size: 12px;
+}
+
+[data-theme='terminal'] .term-error {
+  color: var(--term-negative);
+  padding: 12px 0;
+  font-size: 12px;
+}
+
+[data-theme='terminal'] .term-news-row {
+  display: flex;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px dotted var(--term-border);
+  font-size: 12px;
+}
+
+[data-theme='terminal'] .term-news-row .time {
+  color: var(--term-fg-dim);
+  flex-shrink: 0;
+  width: 56px;
+}
+
+[data-theme='terminal'] .term-news-row .title {
+  color: var(--term-white);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-theme='terminal'] .term-news-row .title a {
+  color: var(--term-white);
+  text-decoration: none;
+}
+
+[data-theme='terminal'] .term-news-row .title a:hover {
+  color: var(--term-fg);
+}
+
+/* BI (chat) panel */
+[data-theme='terminal'] .term-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+[data-theme='terminal'] .term-chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 12px;
+}
+
+[data-theme='terminal'] .term-chat-msg .role {
+  color: var(--term-fg);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  margin-bottom: 3px;
+}
+
+[data-theme='terminal'] .term-chat-msg.user .role {
+  color: var(--term-cyan);
+}
+
+[data-theme='terminal'] .term-chat-msg .body {
+  color: var(--term-white);
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+[data-theme='terminal'] .term-chat-input-row {
+  display: flex;
+  border-top: 1px solid var(--term-border);
+  padding: 8px 14px;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+[data-theme='terminal'] .term-chat-input {
+  flex: 1;
+  background: transparent;
+  border: 1px solid var(--term-border);
+  color: var(--term-fg);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  outline: none;
+  resize: none;
+  min-height: 40px;
+  max-height: 120px;
+}
+
+[data-theme='terminal'] .term-chat-input:focus {
+  border-color: var(--term-border-focused);
+}
+
+[data-theme='terminal'] .term-chat-send {
+  background: var(--term-fg);
+  color: #000;
+  border: none;
+  padding: 0 14px;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+[data-theme='terminal'] .term-chat-send:disabled {
+  background: var(--term-fg-muted);
+  cursor: not-allowed;
+}
+
+/* Help / command palette */
+[data-theme='terminal'] .term-help-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+[data-theme='terminal'] .term-help-cell {
+  border: 1px solid var(--term-border);
+  padding: 8px 10px;
+}
+
+[data-theme='terminal'] .term-help-cell .mnemonic {
+  color: var(--term-fg);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+}
+
+[data-theme='terminal'] .term-help-cell .desc {
+  color: var(--term-fg-dim);
+  font-size: 11px;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+/* Chart panel placeholder area */
+[data-theme='terminal'] .term-chart {
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+}
+
+/* Bottom status bar */
+[data-theme='terminal'] .term-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 26px;
+  padding: 0 14px;
+  background: var(--term-bg-header);
+  border-top: 1px solid var(--term-border);
+  color: var(--term-fg-dim);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+
+[data-theme='terminal'] .term-statusbar .sep {
+  color: var(--term-border);
+}
