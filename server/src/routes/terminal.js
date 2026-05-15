@@ -2,7 +2,8 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { verifyJwt, requireExecutive } from '../middleware/auth.js';
 import { llmChat } from '../services/llm.js';
-import { getHistory, getMovers } from '../services/priceHistory.js';
+import { getHistory } from '../services/priceHistory.js';
+import { getPortfolioMovers } from '../services/sheetPortfolio.js';
 
 // Terminal — AI-driven endpoints that back the /terminal workstation.
 // Quote/news/fundamentals data is reused from /api/holdings/* (already
@@ -70,17 +71,19 @@ router.get('/chart/:ticker', async (req, res) => {
   }
 });
 
-// MOVR — biggest close-to-close movers across the tickers we cache.
-// Pure cache read (no upstream call on this path), so it's cheap and
-// safe to hit often. The universe grows as members chart tickers via
-// GP and the nightly price-cache cron keeps it warm.
+// MOVR — the fund's portfolio ranked by today's move, read live from
+// the positions sheet (same source as the dashboard). Not the tickers
+// charted in the terminal: this is the actual book. The sheet service
+// caches 20m internally, so hitting this often is cheap. If the sheet
+// is unreachable we surface that rather than a half-empty list — the
+// panel renders the message.
 router.get('/movers', async (req, res) => {
   try {
-    const data = await getMovers({ limit: req.query.limit });
+    const data = await getPortfolioMovers({ limit: req.query.limit });
     res.json(data);
   } catch (err) {
     console.error('terminal/movers failed:', err.message);
-    res.status(502).json({ error: 'Movers fetch failed' });
+    res.status(502).json({ error: 'Portfolio unavailable — could not read the positions sheet.' });
   }
 });
 
