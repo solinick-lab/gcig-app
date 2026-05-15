@@ -35,6 +35,7 @@ import { ensureRecurringMeetings } from './services/recurringMeetings.js';
 import cron from 'node-cron';
 import { regenerate as regenerateDayInReview } from './services/dayInReview.js';
 import { scrapeAndStoreDailyRates } from './services/gsamRates.js';
+import { refreshUniverse as refreshPriceUniverse } from './services/priceHistory.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -183,6 +184,27 @@ cron.schedule(
       })
       .catch((err) => {
         console.error('[cron] gsam-rates failed:', err.message);
+      });
+  },
+  { timezone: 'America/New_York' }
+);
+
+// Refresh the Terminal price cache at 21:30 ET — late enough that Yahoo
+// has fully reconciled the day's close, early enough to be warm for the
+// pre-market reader. Throttled internally to one Yahoo call every 250ms
+// to stay polite. New tickers are still lazy-backfilled on first hit.
+cron.schedule(
+  '30 21 * * *',
+  () => {
+    console.log('[cron] price-cache: refreshing tracked universe');
+    refreshPriceUniverse()
+      .then((r) => {
+        console.log(
+          `[cron] price-cache: ${r.ok}/${r.tickers} ok, ${r.failed} failed`
+        );
+      })
+      .catch((err) => {
+        console.error('[cron] price-cache failed:', err.message);
       });
   },
   { timezone: 'America/New_York' }

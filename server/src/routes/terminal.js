@@ -2,6 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { verifyJwt, requireExecutive } from '../middleware/auth.js';
 import { llmChat } from '../services/llm.js';
+import { getHistory } from '../services/priceHistory.js';
 
 // Terminal — AI-driven endpoints that back the /terminal workstation.
 // Quote/news/fundamentals data is reused from /api/holdings/* (already
@@ -45,41 +46,25 @@ router.get('/functions', (_req, res) => {
   res.json({ functions: KNOWN_FUNCTIONS });
 });
 
-// Chart history proxy. The browser can't hit Yahoo's chart endpoint
-// directly (no CORS headers), so the GP panel fetches via the server.
-// Returns { points: [{ t, close }] }.
+// Chart history. Reads from the PriceBar cache (services/priceHistory.js)
+// which lazy-backfills 5y on first sighting of a ticker and tops up daily
+// via the price-cache cron. Falls back to a direct Yahoo proxy if the
+// cache layer throws unexpectedly so a single bad row doesn't kill GP.
 router.get('/chart/:ticker', async (req, res) => {
   const raw = String(req.params.ticker || '').trim().toUpperCase();
   if (!raw || !/^[A-Z0-9.\-]{1,12}$/.test(raw)) {
     return res.status(400).json({ error: 'Invalid ticker' });
   }
   const range = String(req.query.range || '6mo');
-  const interval = String(req.query.interval || '1d');
-  if (!/^(1d|5d|1mo|3mo|6mo|1y|2y|5y|10y|ytd|max)$/.test(range)) {
+  if (!/^(1mo|3mo|6mo|1y|2y|5y|10y|ytd|max)$/.test(range)) {
     return res.status(400).json({ error: 'Invalid range' });
   }
-  if (!/^(1m|2m|5m|15m|30m|60m|90m|1h|1d|5d|1wk|1mo|3mo)$/.test(interval)) {
-    return res.status(400).json({ error: 'Invalid interval' });
-  }
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(raw)}?range=${range}&interval=${interval}`;
-    const r = await fetch(url, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        Accept: 'application/json',
-      },
-    });
-    if (!r.ok) return res.status(502).json({ error: `Yahoo HTTP ${r.status}` });
-    const json = await r.json();
-    const result = json?.chart?.result?.[0];
-    const ts = result?.timestamp || [];
-    const closes = result?.indicators?.quote?.[0]?.close || [];
-    const points = ts
-      .map((t, i) => ({ t: t * 1000, close: closes[i] }))
-      .filter((p) => p.close != null);
-    res.json({ ticker: raw, range, interval, points });
+    const bars = await getHistory(raw, range);
+    const points = bars.map((b) => ({ t: new Date(b.date).getTime(), close: b.close }));
+    res.json({ ticker: raw, range, interval: '1d', points, _source: 'cache' });
   } catch (err) {
+    if (err.status === 404) return res.status(404).json({ error: 'Ticker not found' });
     console.error(`terminal/chart(${raw}) failed:`, err.message);
     res.status(502).json({ error: 'Chart fetch failed' });
   }

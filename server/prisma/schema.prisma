@@ -687,3 +687,24 @@ model ArticleRanking {
   @@index([createdAt])
   @@index([ticker])
 }
+
+// Cached daily OHLCV from Yahoo. Powers the Terminal GP chart, future
+// screeners, and total-return calcs without re-hitting Yahoo on every load.
+// Backfilled lazily the first time a ticker is requested (5y default),
+// then refreshed nightly by the price-cache cron.
+model PriceBar {
+  id        Int      @id @default(autoincrement())
+  ticker    String
+  date      DateTime @db.Date
+  open      Float?
+  high      Float?
+  low       Float?
+  close     Float?
+  adjClose  Float?
+  volume    BigInt?
+  source    String   @default("yahoo")
+  fetchedAt DateTime @default(now())
+
+  @@unique([ticker, date])
+  @@index([ticker, date(sort: Desc)])
+}
