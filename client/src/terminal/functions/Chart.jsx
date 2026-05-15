@@ -27,21 +27,16 @@ export default function Chart({ ticker }) {
     setLoading(true);
     setErr(null);
     setData([]);
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=${sel.range}&interval=${sel.interval}`;
-    fetch(url)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((json) => {
+    api
+      .get(`/terminal/chart/${encodeURIComponent(ticker)}`, {
+        params: { range: sel.range, interval: sel.interval },
+      })
+      .then(({ data: payload }) => {
         if (cancelled) return;
-        const result = json?.chart?.result?.[0];
-        const ts = result?.timestamp || [];
-        const closes = result?.indicators?.quote?.[0]?.close || [];
-        const points = ts
-          .map((t, i) => ({ t: t * 1000, close: closes[i] }))
-          .filter((p) => p.close != null);
-        setData(points);
+        setData(Array.isArray(payload?.points) ? payload.points : []);
       })
       .catch((e) => {
-        if (!cancelled) setErr(e.message || 'Chart failed');
+        if (!cancelled) setErr(e.response?.data?.error || e.message || 'Chart failed');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

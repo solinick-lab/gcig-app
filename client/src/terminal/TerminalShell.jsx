@@ -164,7 +164,6 @@ export default function TerminalShell({ onExit }) {
           renderTile={renderTile}
           value={layout}
           onChange={setLayout}
-          className="mosaic-blueprint-theme"
         />
       </div>
 

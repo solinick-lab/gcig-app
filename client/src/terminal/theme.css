@@ -170,17 +170,24 @@
   background: var(--term-bg);
 }
 
-/* React-mosaic overrides — match terminal aesthetics. */
-[data-theme='terminal'] .mosaic {
-  background: var(--term-bg);
+/* React-mosaic overrides — match terminal aesthetics.
+   The library ships with a light default + an optional Blueprint theme.
+   We explicitly NOT load the blueprint theme and override every surface
+   so nothing falls back to white. */
+[data-theme='terminal'] .mosaic,
+[data-theme='terminal'] .mosaic-root,
+[data-theme='terminal'] .mosaic > * {
+  background: var(--term-bg) !important;
+  color: var(--term-fg);
 }
 
 [data-theme='terminal'] .mosaic-tile {
   margin: 4px;
 }
 
-[data-theme='terminal'] .mosaic-window {
-  background: var(--term-bg-panel);
+[data-theme='terminal'] .mosaic-window,
+[data-theme='terminal'] .mosaic-tile > .mosaic-window {
+  background: var(--term-bg-panel) !important;
   border: 1px solid var(--term-border);
   box-shadow: none;
   border-radius: 0;
@@ -226,10 +233,20 @@
   background: transparent;
 }
 
-[data-theme='terminal'] .mosaic-window-body {
-  background: var(--term-bg-panel);
-  color: var(--term-fg);
+[data-theme='terminal'] .mosaic-window-body,
+[data-theme='terminal'] .mosaic-window > .mosaic-window-body {
+  background: var(--term-bg-panel) !important;
+  color: var(--term-fg) !important;
   overflow: auto;
+}
+
+/* Any container the library drops in between (mosaic-tile, drop-targets,
+   internal flex wrappers) must not bleed white through. */
+[data-theme='terminal'] .mosaic-tile,
+[data-theme='terminal'] .mosaic-drop-target,
+[data-theme='terminal'] .drop-target-container,
+[data-theme='terminal'] .drop-target {
+  background: var(--term-bg) !important;
 }
 
 [data-theme='terminal'] .mosaic-split {
@@ -245,12 +262,16 @@
   border: 1px solid var(--term-border-focused);
 }
 
-/* Panel content scaffolding. */
+/* Panel content scaffolding. Always set our own bg so even if mosaic's
+   light theme wins on the wrapper, the panel content stays on the dark
+   amber surface. */
 [data-theme='terminal'] .term-panel {
   padding: 10px 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  background: var(--term-bg-panel);
+  min-height: 100%;
 }
 
 [data-theme='terminal'] .term-panel-header {
@@ -381,6 +402,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  background: var(--term-bg-panel);
 }
 
 [data-theme='terminal'] .term-chat-log {

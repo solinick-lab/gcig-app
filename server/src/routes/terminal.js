@@ -45,6 +45,46 @@ router.get('/functions', (_req, res) => {
   res.json({ functions: KNOWN_FUNCTIONS });
 });
 
+// Chart history proxy. The browser can't hit Yahoo's chart endpoint
+// directly (no CORS headers), so the GP panel fetches via the server.
+// Returns { points: [{ t, close }] }.
+router.get('/chart/:ticker', async (req, res) => {
+  const raw = String(req.params.ticker || '').trim().toUpperCase();
+  if (!raw || !/^[A-Z0-9.\-]{1,12}$/.test(raw)) {
+    return res.status(400).json({ error: 'Invalid ticker' });
+  }
+  const range = String(req.query.range || '6mo');
+  const interval = String(req.query.interval || '1d');
+  if (!/^(1d|5d|1mo|3mo|6mo|1y|2y|5y|10y|ytd|max)$/.test(range)) {
+    return res.status(400).json({ error: 'Invalid range' });
+  }
+  if (!/^(1m|2m|5m|15m|30m|60m|90m|1h|1d|5d|1wk|1mo|3mo)$/.test(interval)) {
+    return res.status(400).json({ error: 'Invalid interval' });
+  }
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(raw)}?range=${range}&interval=${interval}`;
+    const r = await fetch(url, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        Accept: 'application/json',
+      },
+    });
+    if (!r.ok) return res.status(502).json({ error: `Yahoo HTTP ${r.status}` });
+    const json = await r.json();
+    const result = json?.chart?.result?.[0];
+    const ts = result?.timestamp || [];
+    const closes = result?.indicators?.quote?.[0]?.close || [];
+    const points = ts
+      .map((t, i) => ({ t: t * 1000, close: closes[i] }))
+      .filter((p) => p.close != null);
+    res.json({ ticker: raw, range, interval, points });
+  } catch (err) {
+    console.error(`terminal/chart(${raw}) failed:`, err.message);
+    res.status(502).json({ error: 'Chart fetch failed' });
+  }
+});
+
 // AI brief for a single panel. Body: { ticker, function, context }
 // Returns: { brief: string }
 router.post('/annotate', async (req, res) => {
