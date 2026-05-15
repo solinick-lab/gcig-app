@@ -7,20 +7,27 @@ import prisma from '../db.js';
 //   - Lazy 5y backfill on first request for an unknown ticker.
 //   - Read-through cache on subsequent requests: if the most recent
 //     bar in the DB is from today (or the most recent trading day),
-//     we serve from DB. Otherwise we top up from Yahoo.
+//     we serve from DB. Otherwise we top up from the upstream.
 //   - Daily cron (see index.js) refreshes the universe at 21:00 ET so
 //     the next morning's reads are warm.
 //
-// Yahoo's /v8/finance/chart endpoint is free, no key, no CORS for
-// server-side calls. We respect a User-Agent header to avoid 401s.
+// NASDAQ's public historical endpoint (api.nasdaq.com) is the upstream
+// here. Yahoo's /v8/finance/chart used to be the go-to but it rate-
+// limits Render's egress IPs aggressively, so even the first backfill
+// returns 429 and the chart panel never paints. NASDAQ tolerates
+// datacenter IPs, doesn't require a key, and returns the same OHLCV
+// surface (just stringy — "$298.21" / "35,324,920" — so we parse).
+// Two asset-class buckets are exposed: `stocks` and `etf`. We try
+// stocks first and fall back to etf, since most tickers in our
+// universe are common equities.
 
-const YAHOO_UA =
+const HTTP_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 const VALID_RANGES = new Set(['1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max']);
 const VALID_INTERVALS = new Set(['1d', '5d', '1wk', '1mo']);
 
-// How fresh is fresh enough before we top-up from Yahoo?
+// How fresh is fresh enough before we top-up the cache?
 // 18 hours: serves all weekend traffic from cache; weekday morning
 // triggers a top-up to pull in yesterday's close.
 const FRESHNESS_MS = 18 * 60 * 60 * 1000;
@@ -52,44 +59,105 @@ function rangeToCutoff(range) {
   }
 }
 
-// Pull from Yahoo and upsert. Returns the number of rows written.
-async function fetchYahooAndStore(ticker, range = '5y', interval = '1d') {
-  if (!VALID_RANGES.has(range)) range = '5y';
-  if (!VALID_INTERVALS.has(interval)) interval = '1d';
+// Strip "$1,234.56" → 1234.56. Returns null if the cell is blank or
+// "N/A", which NASDAQ uses for missing intraday fields on bonus days.
+function parseMoney(s) {
+  if (s == null) return null;
+  const t = String(s).replace(/[$,\s]/g, '');
+  if (!t || t === 'N/A') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
 
+// Strip "12,345,678" → 12345678 (returns null for empty cells).
+function parseInt0(s) {
+  if (s == null) return null;
+  const t = String(s).replace(/[,\s]/g, '');
+  if (!t || t === 'N/A') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+function rangeStart(range) {
+  // NASDAQ wants explicit fromdate/todate; map our range bucket to a
+  // start date a touch wider than needed so trading-day boundaries
+  // never trim the response short.
+  const cutoff = rangeToCutoff(range);
+  return cutoff.toISOString().slice(0, 10);
+}
+
+// Pull from NASDAQ for one asset-class bucket. Returns null on 404 so
+// the caller can retry the other bucket; other failures throw.
+async function fetchNasdaqRows(ticker, range, assetclass) {
+  const today = new Date().toISOString().slice(0, 10);
+  const from = rangeStart(range);
   const url =
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}` +
-    `?range=${range}&interval=${interval}&includeAdjustedClose=true`;
+    `https://api.nasdaq.com/api/quote/${encodeURIComponent(ticker)}/historical` +
+    `?assetclass=${assetclass}&fromdate=${from}&todate=${today}&limit=9999`;
 
   const res = await fetch(url, {
-    headers: { 'User-Agent': YAHOO_UA, Accept: 'application/json' },
+    headers: {
+      'User-Agent': HTTP_UA,
+      Accept: 'application/json, text/plain, */*',
+      // NASDAQ's edge sometimes 403s requests without a plausible
+      // Referer/Origin pair. These match what their own site sends.
+      Referer: 'https://www.nasdaq.com/',
+      Origin: 'https://www.nasdaq.com',
+    },
   });
   if (!res.ok) {
-    const err = new Error(`Yahoo HTTP ${res.status}`);
-    err.status = res.status === 404 ? 404 : 502;
+    if (res.status === 404 || res.status === 400) return null;
+    const err = new Error(`NASDAQ HTTP ${res.status}`);
+    err.status = 502;
     throw err;
   }
   const json = await res.json();
-  const result = json?.chart?.result?.[0];
-  const timestamps = result?.timestamp || [];
-  const quote = result?.indicators?.quote?.[0] || {};
-  const adj = result?.indicators?.adjclose?.[0]?.adjclose || [];
+  const code = json?.status?.rCode;
+  // rCode 200 is success; anything else (typically 400 = "bad asset
+  // class") is treated as "wrong bucket, try the other one".
+  if (code !== 200) return null;
+  const rawRows = json?.data?.tradesTable?.rows;
+  if (!Array.isArray(rawRows)) return null;
+  return rawRows;
+}
+
+// Pull from NASDAQ and upsert. Returns the number of rows written.
+// `interval` is accepted for signature compatibility; NASDAQ only
+// serves daily, so weekly buckets are downsampled at read time.
+async function fetchNasdaqAndStore(ticker, range = '5y', interval = '1d') {
+  if (!VALID_RANGES.has(range)) range = '5y';
+  if (!VALID_INTERVALS.has(interval)) interval = '1d';
+
+  // Try common equities first; if that bucket says "no", retry as ETF.
+  let raw = await fetchNasdaqRows(ticker, range, 'stocks');
+  if (raw == null || raw.length === 0) {
+    raw = await fetchNasdaqRows(ticker, range, 'etf');
+  }
+  if (raw == null) {
+    const e = new Error('Ticker not found');
+    e.status = 404;
+    throw e;
+  }
 
   const rows = [];
-  for (let i = 0; i < timestamps.length; i += 1) {
-    const ts = timestamps[i];
-    if (!ts) continue;
-    const close = quote.close?.[i];
+  for (const r of raw) {
+    // NASDAQ dates come back as MM/DD/YYYY in en-US format.
+    const m = String(r.date || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!m) continue;
+    const close = parseMoney(r.close);
     if (close == null) continue;
+    const date = startOfDayUTC(new Date(Date.UTC(+m[3], +m[1] - 1, +m[2])));
+    const vol = parseInt0(r.volume);
     rows.push({
       ticker,
-      date: startOfDayUTC(new Date(ts * 1000)),
-      open: quote.open?.[i] ?? null,
-      high: quote.high?.[i] ?? null,
-      low: quote.low?.[i] ?? null,
+      date,
+      open: parseMoney(r.open),
+      high: parseMoney(r.high),
+      low: parseMoney(r.low),
       close,
-      adjClose: adj[i] ?? null,
-      volume: quote.volume?.[i] != null ? BigInt(quote.volume[i]) : null,
+      adjClose: close,
+      volume: vol != null ? BigInt(vol) : null,
+      source: 'nasdaq',
     });
   }
 
@@ -109,7 +177,7 @@ async function fetchYahooAndStore(ticker, range = '5y', interval = '1d') {
         close: r.close,
         adjClose: r.adjClose,
         volume: r.volume,
-        source: 'yahoo',
+        source: 'nasdaq',
         fetchedAt: new Date(),
       },
     });
@@ -143,7 +211,7 @@ export async function getHistory(rawTicker, range = '6mo') {
     // First sighting of this ticker — backfill 5y so future range
     // requests up to 5y are served from cache.
     try {
-      await fetchYahooAndStore(ticker, '5y', '1d');
+      await fetchNasdaqAndStore(ticker, '5y', '1d');
     } catch (err) {
       if (err.status === 404) {
         const e = new Error('Ticker not found');
@@ -160,7 +228,7 @@ export async function getHistory(rawTicker, range = '6mo') {
     // a full 5y refetch every day. The unique index dedupes overlapping
     // bars; we just add today's (and any holiday-recovery bars).
     try {
-      await fetchYahooAndStore(ticker, '1mo', '1d');
+      await fetchNasdaqAndStore(ticker, '1mo', '1d');
     } catch (err) {
       console.warn(`priceHistory(${ticker}) top-up failed:`, err.message);
     }
@@ -203,7 +271,7 @@ export async function refreshUniverse() {
   let failed = 0;
   for (const ticker of tickers) {
     try {
-      await fetchYahooAndStore(ticker, '1mo', '1d');
+      await fetchNasdaqAndStore(ticker, '1mo', '1d');
       ok += 1;
     } catch (err) {
       failed += 1;
