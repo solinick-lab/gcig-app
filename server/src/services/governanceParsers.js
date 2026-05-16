@@ -11,16 +11,23 @@ const TITLES = [
 const TITLE_RE = new RegExp(`(${TITLES.join('|')})`, 'i');
 
 // "Jane A. Doe, 54, has served as Chief Executive Officer since 2018"
-// Name pattern: first token is a capitalized word (mixed case, no trailing
-// period — rules out abbreviated entities like "Corp."); subsequent tokens
-// may be a single capital initial ("A.") or another capitalized word.
-// This combination excludes all-caps section headers like "OFFICERS" and
-// cross-sentence collisions like "Corp. John B. Smith".
-// The sentence pattern after the title is greedy up to the period so
-// "since YYYY" is captured when present; the group is optional for
-// officers whose bio omits the start year.
-const EXEC_RE =
-  /([A-Z][a-z][a-zA-Z'-]*(?:\s+(?:[A-Z]\.|[A-Z][a-z][a-zA-Z'-]*))+),\s*(\d{2}),[^.]*?\b(Chief [A-Za-z ]+Officer|President|General Counsel|Executive Chairman)\b(?:[^.]*?since\s*(\d{4})|[^.]*)/g;
+// TOKEN matches one capitalized name word. The first alternative handles
+// ordinary mixed-case words (e.g. "Doe", "DeLuca"). The second handles the
+// Irish O'Xxxx form ("O'Brien", "O'Connor") whose second character is an
+// apostrophe, not a lowercase letter. All-caps section headings ("OFFICERS")
+// and period-terminated abbreviations ("Corp.") don't satisfy either branch.
+const TOKEN = "[A-Z](?:[a-z][A-Za-z'-]*|'[A-Z][a-z][A-Za-z'-]*)";
+
+// Build EXEC_RE from TOKEN so the name-token rule is defined in one place.
+// The since-fragment accepts "since YYYY", "since Month YYYY", and
+// "since Month D, YYYY" — any word-or-digit tokens between "since" and
+// the 4-digit year, capped at two optional word-groups so we don't run
+// across unrelated text.
+const EXEC_RE = new RegExp(
+  `(${TOKEN}(?:\\s+(?:[A-Z]\\.|${TOKEN}))+),\\s*(\\d{2}),[^.]*?\\b(Chief [A-Za-z ]+Officer|President|General Counsel|Executive Chairman)\\b` +
+  `(?:[^.]*?since\\s+(?:[A-Za-z]+\\s+){0,2}(?:\\d{1,2},?\\s*)?(\\d{4})|[^.]*)`,
+  'g',
+);
 
 export function parseLeadership(sections) {
   const text = sections?.execBios || '';
@@ -50,7 +57,10 @@ function priorRoles(text, name) {
   if (i < 0) return [];
   const after = text.slice(i, i + 600);
   const out = [];
-  const re = /\b(?:Prior(?:\sto)?|Previously|formerly)\b[^.]*?\b(President|Chief [A-Za-z ]+Officer|Partner|Director)\b[^.]*?\bof\s+([A-Z][A-Za-z.,& ]{2,40}?)[.,]/g;
+  // Honorific periods (Ms. Mr. Dr. Jr. Sr.) must not terminate a sentence
+  // scan, so each [^.]*? fragment is widened to skip over them. The `i`
+  // flag handles "Formerly" / "PREVIOUSLY" / etc. without duplication.
+  const re = /\b(?:prior(?:\sto)?|previously|formerly)\b(?:(?:Ms|Mr|Dr|Jr|Sr)\.|[^.])*?\b(President|Chief [A-Za-z ]+Officer|Partner|Director)\b(?:(?:Ms|Mr|Dr|Jr|Sr)\.|[^.])*?\bof\s+([A-Z][A-Za-z.,& ]{2,40}?)[.,]/gi;
   let r;
   while ((r = re.exec(after)) !== null && out.length < 3) {
     out.push(`${r[1].trim()}, ${r[2].trim()}`);
