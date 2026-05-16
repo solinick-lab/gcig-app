@@ -85,6 +85,26 @@ export default function TerminalShell({ onExit }) {
     [focusedPaneId]
   );
 
+  // Drill-down from inside a panel (e.g. clicking a peer row). Routes
+  // the command to a *different* window so the source panel stays put
+  // and the user sees a sibling switch. Prefers an existing pane that
+  // already runs the target function (a de-facto detail pane), then any
+  // other pane, falling back to the caller only if it's the lone pane.
+  const openFromPane = useCallback(
+    (fromPaneId, cmd) => {
+      if (!cmd?.ticker) return;
+      const wantFn = cmd.fn || 'DES';
+      const ids = Object.keys(panes);
+      const target =
+        ids.find((id) => id !== fromPaneId && panes[id]?.fn === wantFn) ||
+        ids.find((id) => id !== fromPaneId) ||
+        fromPaneId;
+      setPanes((p) => ({ ...p, [target]: { ticker: cmd.ticker, fn: wantFn } }));
+      setFocusedPaneId(target);
+    },
+    [panes]
+  );
+
   const renderTile = useCallback(
     (paneId, path) => {
       const pane = panes[paneId] || { ticker: null, fn: 'HELP' };
@@ -136,13 +156,14 @@ export default function TerminalShell({ onExit }) {
                 ticker={pane.ticker}
                 fn={fnDef}
                 workspaceContext={workspaceContext}
+                onOpen={(cmd) => openFromPane(paneId, cmd)}
               />
             ) : null}
           </div>
         </MosaicWindow>
       );
     },
-    [panes, focusedPaneId, workspaceContext]
+    [panes, focusedPaneId, workspaceContext, openFromPane]
   );
 
   return (

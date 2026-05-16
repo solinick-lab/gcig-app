@@ -123,7 +123,7 @@ export default function News({ ticker }) {
         <span className="term-live-badge">● LIVE</span>
         {lastRefresh && (
           <span className="term-refresh-ts">
-            {lastRefresh.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+            {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
           </span>
         )}
       </div>
@@ -188,7 +188,7 @@ function formatTime(ts) {
     d.getMonth() === today.getMonth() &&
     d.getDate() === today.getDate();
   if (isToday) {
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
   }
   return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
 }

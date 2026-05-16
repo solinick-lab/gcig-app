@@ -164,7 +164,7 @@ function formatTime(ts) {
     d.getMonth() === today.getMonth() &&
     d.getDate() === today.getDate();
   if (isToday) {
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
   }
   return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
 }

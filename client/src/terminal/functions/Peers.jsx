@@ -21,7 +21,7 @@ const fmt = {
   },
 };
 
-export default function Peers({ ticker }) {
+export default function Peers({ ticker, onOpen }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
@@ -143,8 +143,16 @@ export default function Peers({ ticker }) {
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.ticker} className={r.isFocus ? 'focus' : undefined}>
-                <td className="sym" title={r.name}>{r.ticker}</td>
+              <tr
+                key={r.ticker}
+                className={`term-row-link${r.isFocus ? ' focus' : ''}`}
+                onClick={() => onOpen?.({ ticker: r.ticker, fn: 'DES' })}
+                title={`Open ${r.ticker} DES`}
+              >
+                <td className="sym">
+                  {r.ticker}
+                  {r.name ? <span className="peer-name">{r.name}</span> : null}
+                </td>
                 <td className="num">{fmt.px(r.price)}</td>
                 <td className={`num ${r.changePct == null ? '' : r.changePct >= 0 ? 'pos' : 'neg'}`}>
                   {fmt.pct(r.changePct)}
@@ -162,7 +170,7 @@ export default function Peers({ ticker }) {
 
       <div style={{ color: 'var(--term-fg-muted)', fontSize: 11 }}>
         Finnhub peer set · fundamentals snapshot, 15m cache. Focus row
-        highlighted.
+        highlighted · click any row to open its DES.
       </div>
     </div>
   );

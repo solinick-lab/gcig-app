@@ -472,6 +472,24 @@
   color: var(--term-fg);
 }
 
+/* Clickable peer rows — drill into a name's DES. */
+[data-theme='terminal'] .term-table tbody tr.term-row-link {
+  cursor: pointer;
+}
+
+[data-theme='terminal'] .term-table .sym .peer-name {
+  display: block;
+  margin-top: 1px;
+  max-width: 170px;
+  color: var(--term-fg-dim);
+  font-weight: 400;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 [data-theme='terminal'] .term-table .num.pos {
   color: var(--term-positive);
 }
