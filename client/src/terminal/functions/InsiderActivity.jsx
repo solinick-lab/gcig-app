@@ -46,6 +46,30 @@ const Triangle = ({ cx, cy, fill, up }) => {
   return <polygon points={pts} fill={fill} stroke="#000" strokeWidth={0.5} />;
 };
 
+const BuyShape = (p) => <Triangle {...p} up fill="var(--term-positive)" />;
+const SellShape = (p) => <Triangle {...p} fill="var(--term-negative)" />;
+
+const TxTooltip = ({ active, payload }) => {
+  if (!active || !payload?.length) return null;
+  const t = payload[0]?.payload?._tx;
+  if (!t) return null;
+  return (
+    <div
+      style={{
+        background: 'var(--term-bg-panel)',
+        border: '1px solid var(--term-border)',
+        color: 'var(--term-fg)',
+        fontSize: 11,
+        padding: '6px 8px',
+      }}
+    >
+      <div>{fmtDate(t.date)} · {t.code} {t.isBuy ? 'BUY' : 'SELL'}</div>
+      <div>{t.name}{t.role ? ` · ${t.role}` : ''}</div>
+      <div>{fmtNum(t.shares)} @ {t.price ?? '—'} = {fmtMoney(t.value)}</div>
+    </div>
+  );
+};
+
 export default function InsiderActivity({ ticker }) {
   const [points, setPoints] = useState([]);
   const [tx, setTx] = useState([]);
@@ -113,6 +137,19 @@ export default function InsiderActivity({ ticker }) {
     [tx, openOnly]
   );
 
+  const xDomain = useMemo(
+    () =>
+      points.length
+        ? [points[0].t, points[points.length - 1].t]
+        : ['dataMin', 'dataMax'],
+    [points]
+  );
+  const yDomain = useMemo(() => {
+    if (!points.length) return ['auto', 'auto'];
+    const closes = points.map((p) => p.close);
+    return [Math.min(...closes), Math.max(...closes)];
+  }, [points]);
+
   useEffect(() => {
     if (!ticker || tx.length === 0) return;
     let cancelled = false;
@@ -155,27 +192,13 @@ export default function InsiderActivity({ ticker }) {
       </div>
     );
   }
-
-  const TxTooltip = ({ active, payload }) => {
-    if (!active || !payload?.length) return null;
-    const t = payload[0]?.payload?._tx;
-    if (!t) return null;
+  if (err && !points.length) {
     return (
-      <div
-        style={{
-          background: 'var(--term-bg-panel)',
-          border: '1px solid var(--term-border)',
-          color: 'var(--term-fg)',
-          fontSize: 11,
-          padding: '6px 8px',
-        }}
-      >
-        <div>{fmtDate(t.date)} · {t.code} {t.isBuy ? 'BUY' : 'SELL'}</div>
-        <div>{t.name}{t.role ? ` · ${t.role}` : ''}</div>
-        <div>{fmtNum(t.shares)} @ {t.price ?? '—'} = {fmtMoney(t.value)}</div>
+      <div className="term-panel">
+        <div className="term-error">Error: {err}</div>
       </div>
     );
-  };
+  }
 
   return (
     <div className="term-panel" style={{ height: '100%' }}>
@@ -203,14 +226,14 @@ export default function InsiderActivity({ ticker }) {
               <XAxis
                 dataKey="t"
                 type="number"
-                domain={['dataMin', 'dataMax']}
+                domain={xDomain}
                 tickFormatter={(t) => new Date(t).toLocaleString('en', { month: 'short' })}
                 tick={{ fill: 'var(--term-fg-dim)', fontSize: 10 }}
                 axisLine={{ stroke: 'var(--term-border)' }}
                 tickLine={{ stroke: 'var(--term-border)' }}
               />
               <YAxis
-                domain={['auto', 'auto']}
+                domain={yDomain}
                 tick={{ fill: 'var(--term-fg-dim)', fontSize: 10 }}
                 axisLine={{ stroke: 'var(--term-border)' }}
                 tickLine={{ stroke: 'var(--term-border)' }}
@@ -229,13 +252,13 @@ export default function InsiderActivity({ ticker }) {
                 data={buys}
                 dataKey="y"
                 isAnimationActive={false}
-                shape={(p) => <Triangle {...p} up fill="var(--term-positive)" />}
+                shape={BuyShape}
               />
               <Scatter
                 data={sells}
                 dataKey="y"
                 isAnimationActive={false}
-                shape={(p) => <Triangle {...p} fill="var(--term-negative)" />}
+                shape={SellShape}
               />
             </ComposedChart>
           </ResponsiveContainer>
