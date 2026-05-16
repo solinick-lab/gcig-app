@@ -572,6 +572,29 @@
   pointer-events: all;
 }
 
+/* MGMT — tab strip */
+[data-theme='terminal'] .term-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--term-border);
+}
+[data-theme='terminal'] .term-tab {
+  background: transparent;
+  color: var(--term-fg-dim);
+  border: 1px solid var(--term-border);
+  border-bottom: none;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+[data-theme='terminal'] .term-tab.active {
+  background: var(--term-fg);
+  color: #000;
+  font-weight: 700;
+}
+
 /* BI (chat) panel */
 [data-theme='terminal'] .term-chat {
   display: flex;
