@@ -480,6 +480,75 @@
   color: var(--term-negative);
 }
 
+/* WEI — world indices table */
+[data-theme='terminal'] .term-idx-region {
+  color: var(--term-fg);
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin: 10px 0 2px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--term-border);
+}
+
+[data-theme='terminal'] .term-idx-region:first-child {
+  margin-top: 0;
+}
+
+[data-theme='terminal'] .term-idx-row {
+  display: grid;
+  grid-template-columns: 1fr 84px 84px 78px;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px dotted var(--term-border);
+  font-size: 12px;
+}
+
+[data-theme='terminal'] .term-idx-row .name {
+  color: var(--term-white);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-theme='terminal'] .term-idx-row .sym {
+  color: var(--term-fg-muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  margin-left: 6px;
+}
+
+[data-theme='terminal'] .term-idx-row .num {
+  text-align: right;
+  color: var(--term-white);
+  font-weight: 500;
+}
+
+[data-theme='terminal'] .term-idx-row .num.pos {
+  color: var(--term-positive);
+}
+
+[data-theme='terminal'] .term-idx-row .num.neg {
+  color: var(--term-negative);
+}
+
+[data-theme='terminal'] .term-idx-head {
+  display: grid;
+  grid-template-columns: 1fr 84px 84px 78px;
+  gap: 8px;
+  padding: 0 0 4px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--term-fg-dim);
+}
+
+[data-theme='terminal'] .term-idx-head span:not(:first-child) {
+  text-align: right;
+}
+
 /* BI (chat) panel */
 [data-theme='terminal'] .term-chat {
   display: flex;
