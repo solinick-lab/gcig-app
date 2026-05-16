@@ -45,6 +45,8 @@ export function roleFromRelationship(relXml) {
 export function parseForm4Xml(xml) {
   const doc = String(xml || '');
   if (!/<ownershipDocument/i.test(doc)) return [];
+  // Joint filings (multiple reportingOwners) are rare; we take the
+  // first owner and apply it to all rows — acceptable for a fallback.
   const name =
     (doc.match(/<rptOwnerName>([\s\S]*?)<\/rptOwnerName>/i) || [])[1]?.trim() ||
     'Unknown';
@@ -55,6 +57,8 @@ export function parseForm4Xml(xml) {
   const txBlocks = doc.match(/<nonDerivativeTransaction>[\s\S]*?<\/nonDerivativeTransaction>/gi) || [];
   for (const block of txBlocks) {
     const date = valueOf(block, 'transactionDate');
+    // transactionCode is nested in <transactionCoding>; tagVal finds it
+    // because it's the only <transactionCode> in a transaction block.
     const code = String(tagVal(block, 'transactionCode') || '').toUpperCase();
     const sharesRaw = valueOf(block, 'transactionShares');
     const priceRaw = valueOf(block, 'transactionPricePerShare');
@@ -74,7 +78,7 @@ export function parseForm4Xml(xml) {
       value: shares != null && price ? shares * price : null,
     });
   }
-  return out;
+  return out.sort((a, b) => new Date(b.date) - new Date(a.date));
 }
 
 // Finnhub /stock/insider-transactions rows: { name, transactionDate,

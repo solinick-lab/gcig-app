@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyCode, normalizeFinnhub } from './insiderTx.js';
-import { parseForm4Xml, roleFromRelationship } from './insiderTx.js';
+import { classifyCode, normalizeFinnhub, parseForm4Xml, roleFromRelationship } from './insiderTx.js';
 
 test('classifyCode flags only open-market P and S', () => {
   assert.deepEqual(classifyCode('P'), { isBuy: true, isSell: false });
@@ -103,4 +102,11 @@ test('parseForm4Xml extracts owner, role, and each transaction', () => {
 test('parseForm4Xml returns [] on garbage', () => {
   assert.deepEqual(parseForm4Xml('not xml'), []);
   assert.deepEqual(parseForm4Xml(''), []);
+});
+
+test('parseForm4Xml returns rows newest-first', () => {
+  const rows = parseForm4Xml(FORM4_FIXTURE);
+  assert.equal(rows[0].date, '2026-05-14');
+  assert.equal(rows[1].date, '2026-05-13');
+  assert.ok(new Date(rows[0].date) >= new Date(rows[1].date));
 });
