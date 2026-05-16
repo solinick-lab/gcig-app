@@ -25,20 +25,43 @@ const fmtDate = (d) => {
     : `${String(dt.getMonth() + 1).padStart(2, '0')}/${String(dt.getDate()).padStart(2, '0')}/${String(dt.getFullYear()).slice(2)}`;
 };
 
-// Snap a transaction date to the close of the nearest prior trading
-// day in the price series so the marker sits on the line.
-function priceAt(points, ts) {
-  if (!points.length) return null;
-  let best = null;
-  for (const p of points) {
-    if (p.t <= ts) best = p;
-    else break;
+// Markers must live in the SAME dataset as the price line. A Recharts
+// ComposedChart mis-binds its shared axes when a Scatter carries its
+// own `data` prop: out-of-window transaction timestamps drag the
+// x-domain and scramble the ticks, and stale transactions get pinned
+// to the first close at the far-left edge. So we clone the price
+// series and hang buy/sell info on the trading day each transaction
+// falls on. A transaction outside the price window maps to no point
+// (no marker) — it still shows in the table below.
+export function buildChartData(points, tx) {
+  if (!Array.isArray(points) || points.length === 0) return [];
+  const data = points.map((p) => ({ ...p }));
+  const firstT = data[0].t;
+  const lastT = data[data.length - 1].t;
+  for (const t of tx || []) {
+    if (!t || (!t.isBuy && !t.isSell)) continue;
+    const ts = new Date(t.date).getTime();
+    if (Number.isNaN(ts) || ts < firstT || ts > lastT) continue;
+    // Nearest prior trading day: last point whose date is <= the tx.
+    let idx = 0;
+    for (let i = 0; i < data.length; i++) {
+      if (data[i].t <= ts) idx = i;
+      else break;
+    }
+    const pt = data[idx];
+    if (t.isBuy) {
+      pt.buyY = pt.close;
+      (pt.buyTx = pt.buyTx || []).push(t);
+    } else {
+      pt.sellY = pt.close;
+      (pt.sellTx = pt.sellTx || []).push(t);
+    }
   }
-  return (best || points[0]).close;
+  return data;
 }
 
 const Triangle = ({ cx, cy, fill, up }) => {
-  if (cx == null || cy == null) return null;
+  if (cx == null || cy == null || Number.isNaN(cx) || Number.isNaN(cy)) return null;
   const s = 5;
   const pts = up
     ? `${cx},${cy - s} ${cx - s},${cy + s} ${cx + s},${cy + s}`
@@ -51,8 +74,9 @@ const SellShape = (p) => <Triangle {...p} fill="var(--term-negative)" />;
 
 const TxTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
-  const t = payload[0]?.payload?._tx;
-  if (!t) return null;
+  const row = payload[0]?.payload;
+  if (!row) return null;
+  const list = [...(row.buyTx || []), ...(row.sellTx || [])];
   return (
     <div
       style={{
@@ -63,9 +87,19 @@ const TxTooltip = ({ active, payload }) => {
         padding: '6px 8px',
       }}
     >
-      <div>{fmtDate(t.date)} · {t.code} {t.isBuy ? 'BUY' : 'SELL'}</div>
-      <div>{t.name}{t.role ? ` · ${t.role}` : ''}</div>
-      <div>{fmtNum(t.shares)} @ {t.price ?? '—'} = {fmtMoney(t.value)}</div>
+      <div>
+        {fmtDate(row.t)} · {row.close == null ? '—' : Number(row.close).toFixed(2)} close
+      </div>
+      {list.map((t, i) => (
+        <div
+          key={i}
+          style={{ color: t.isBuy ? 'var(--term-positive)' : 'var(--term-negative)' }}
+        >
+          {t.isBuy ? 'BUY' : 'SELL'} {t.name}
+          {t.role ? ` · ${t.role}` : ''} — {fmtNum(t.shares)} @{' '}
+          {t.price ?? '—'} = {fmtMoney(t.value)}
+        </div>
+      ))}
     </div>
   );
 };
@@ -118,37 +152,12 @@ export default function InsiderActivity({ ticker }) {
     };
   }, [ticker]);
 
-  const { buys, sells } = useMemo(() => {
-    const b = [];
-    const s = [];
-    for (const t of tx) {
-      const ts = new Date(t.date).getTime();
-      if (Number.isNaN(ts)) continue;
-      const y = priceAt(points, ts);
-      if (y == null) continue;
-      if (t.isBuy) b.push({ t: ts, y, _tx: t });
-      else if (t.isSell) s.push({ t: ts, y, _tx: t });
-    }
-    return { buys: b, sells: s };
-  }, [tx, points]);
+  const chartData = useMemo(() => buildChartData(points, tx), [points, tx]);
 
   const tableRows = useMemo(
     () => (openOnly ? tx.filter((t) => t.isBuy || t.isSell) : tx),
     [tx, openOnly]
   );
-
-  const xDomain = useMemo(
-    () =>
-      points.length
-        ? [points[0].t, points[points.length - 1].t]
-        : ['dataMin', 'dataMax'],
-    [points]
-  );
-  const yDomain = useMemo(() => {
-    if (!points.length) return ['auto', 'auto'];
-    const closes = points.map((p) => p.close);
-    return [Math.min(...closes), Math.max(...closes)];
-  }, [points]);
 
   useEffect(() => {
     if (!ticker || tx.length === 0) return;
@@ -222,18 +231,18 @@ export default function InsiderActivity({ ticker }) {
       ) : (
         <div className="term-chart" style={{ height: 240 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={points} margin={{ top: 6, right: 12, bottom: 0, left: 0 }}>
+            <ComposedChart data={chartData} margin={{ top: 6, right: 12, bottom: 0, left: 0 }}>
               <XAxis
                 dataKey="t"
                 type="number"
-                domain={xDomain}
+                domain={['dataMin', 'dataMax']}
                 tickFormatter={(t) => new Date(t).toLocaleString('en', { month: 'short' })}
                 tick={{ fill: 'var(--term-fg-dim)', fontSize: 10 }}
                 axisLine={{ stroke: 'var(--term-border)' }}
                 tickLine={{ stroke: 'var(--term-border)' }}
               />
               <YAxis
-                domain={yDomain}
+                domain={['auto', 'auto']}
                 tick={{ fill: 'var(--term-fg-dim)', fontSize: 10 }}
                 axisLine={{ stroke: 'var(--term-border)' }}
                 tickLine={{ stroke: 'var(--term-border)' }}
@@ -248,18 +257,8 @@ export default function InsiderActivity({ ticker }) {
                 dot={false}
                 isAnimationActive={false}
               />
-              <Scatter
-                data={buys}
-                dataKey="y"
-                isAnimationActive={false}
-                shape={BuyShape}
-              />
-              <Scatter
-                data={sells}
-                dataKey="y"
-                isAnimationActive={false}
-                shape={SellShape}
-              />
+              <Scatter dataKey="buyY" isAnimationActive={false} shape={BuyShape} />
+              <Scatter dataKey="sellY" isAnimationActive={false} shape={SellShape} />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
