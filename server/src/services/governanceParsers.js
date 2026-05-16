@@ -73,7 +73,10 @@ const COMMITTEES = ['Audit', 'Compensation', 'Nominating', 'Governance', 'Risk',
 // One director "record" is the text from their name+age up to the next
 // "<Name>, age NN" or end. We then mine that window for since /
 // committees / other boards.
-const DIR_HEAD_RE = /([A-Z][a-z][a-zA-Z'-]*(?:\s+[A-Z][a-z][a-zA-Z'-]*){1,3}),\s*age\s*(\d{2})/g;
+const DIR_HEAD_RE = new RegExp(
+  `(${TOKEN}(?:\\s+${TOKEN}){1,3}),\\s*age\\s*(\\d{2})`,
+  'g',
+);
 
 export function parseBoard(sections) {
   const text = sections?.board || '';
@@ -86,7 +89,9 @@ export function parseBoard(sections) {
   return heads.map((h, i) => {
     const end = i + 1 < heads.length ? heads[i + 1].at : text.length;
     const w = text.slice(h.at, end);
-    const since = (w.match(/(?:director since|since)\s*(\d{4})/i) || [])[1];
+    const since = (
+      w.match(/(?:director since|since)\s+(?:[A-Za-z]+\s+){0,2}(?:\d{1,2},?\s*)?(\d{4})/i) || []
+    )[1];
     const committees = COMMITTEES.filter((c) =>
       new RegExp(`${c}\\s+Committee`, 'i').test(w)
     );
@@ -97,7 +102,7 @@ export function parseBoard(sections) {
     while ((o = ob.exec(w)) !== null) {
       for (const name of o[1].split(/\band\b|,/)) {
         const n = name.replace(/\s+/g, ' ').trim().replace(/[.,]$/, '');
-        if (n.length > 2 && !/committee/i.test(n)) otherBoards.push(n);
+        if (n.length > 2 && /^[A-Z]/.test(n) && !/committee/i.test(n)) otherBoards.push(n);
       }
     }
     return {

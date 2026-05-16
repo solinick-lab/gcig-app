@@ -81,3 +81,31 @@ test('parseBoard extracts directors with age, since, committees, other boards', 
 test('parseBoard returns [] on missing section', () => {
   assert.deepEqual(parseBoard({}), []);
 });
+
+test('parseBoard extracts Irish-surname directors and month-form since', () => {
+  const board = parseBoard({
+    board:
+      "ELECTION OF DIRECTORS Seamus O'Brien, age 58, has been a director " +
+      'since June 2019. He serves on the Audit Committee. ' +
+      "Mary O'Connor, age 62, director since January 1, 2020.",
+  });
+  const ob = board.find((d) => d.name === "Seamus O'Brien");
+  assert.ok(ob, "O'Brien director should be found");
+  assert.equal(ob.age, 58);
+  assert.equal(ob.since, 2019);
+  assert.ok(ob.committees.includes('Audit'));
+  const oc = board.find((d) => d.name === "Mary O'Connor");
+  assert.ok(oc, "O'Connor director should be found");
+  assert.equal(oc.since, 2020);
+});
+
+test('parseBoard does not capture connector phrases as other boards', () => {
+  const board = parseBoard({
+    board:
+      'ELECTION OF DIRECTORS Jane Smith, age 55, director since 2017. ' +
+      'Ms. Smith serves on the board of Globex Corporation and also on the ' +
+      'Nominating Committee.',
+  });
+  const js = board.find((d) => d.name === 'Jane Smith');
+  assert.deepEqual(js.otherBoards, ['Globex Corporation']);
+});
