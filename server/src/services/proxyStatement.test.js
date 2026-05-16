@@ -71,6 +71,22 @@ test('splitSections skips a leading table-of-contents heading', () => {
   assert.match(s.comp, /Salary Bonus Stock Awards/);
 });
 
+test('getProxyStatement finds a DEF 14A buried deep in the filings list', async () => {
+  _resetProxyCache();
+  const filings = Array.from({ length: 60 }, (_, i) =>
+    i === 50
+      ? { form: 'DEF 14A', filingDate: '2026-01-08', url: 'https://x/proxy.htm' }
+      : { form: '8-K', filingDate: '2026-02-01', url: `https://x/k${i}.htm` }
+  );
+  const r = await getProxyStatement('DEEP', {
+    filingsFetch: async () => filings,
+    docFetch: async () => '<h1>ELECTION OF DIRECTORS</h1><p>Jane Doe age 55</p>',
+  });
+  assert.equal(r._source, 'sec');
+  assert.equal(r.filedAt, '2026-01-08');
+  assert.match(r.sections.board, /Jane Doe age 55/);
+});
+
 test('getProxyStatement parses + caches a found proxy', async () => {
   _resetProxyCache();
   let docCalls = 0;

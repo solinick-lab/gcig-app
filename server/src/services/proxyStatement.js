@@ -86,7 +86,7 @@ export function _resetProxyCache() {
 }
 
 async function defaultFilingsFetch(ticker) {
-  return getRecentFilings(ticker, { limit: 25 });
+  return getRecentFilings(ticker, { limit: 150 });
 }
 async function defaultDocFetch(url) {
   const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'text/html,*/*' } });

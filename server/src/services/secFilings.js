@@ -105,7 +105,10 @@ export async function getRecentFilings(ticker, { limit = 10 } = {}) {
     const data = await fetchJson(url);
     const r = data?.filings?.recent;
     if (r && Array.isArray(r.accessionNumber)) {
-      const cap = Math.min(r.accessionNumber.length, 25); // store top 25, slice for return
+      // Store enough to satisfy the caller's limit (default 25). Active
+      // large-caps push annual filings like DEF 14A well past the first 25
+      // rows behind constant 8-Ks/Form 4s, so MGMT needs a deeper window.
+      const cap = Math.min(r.accessionNumber.length, Math.max(25, limit));
       for (let i = 0; i < cap; i++) {
         const accession = r.accessionNumber[i];
         if (!accession) continue;
