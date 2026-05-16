@@ -141,10 +141,20 @@ export default function WorldIndices() {
                       ? 'pos'
                       : 'neg';
                 return (
-                  <div className="term-idx-row" key={r.symbol}>
+                  <div className="term-idx-row" key={r.name}>
                     <span className="name">
                       {r.name}
-                      <span className="sym">{r.symbol}</span>
+                      <span
+                        className="sym"
+                        title={
+                          r.approx
+                            ? `ETF proxy (${r.symbol}) — %-move tracks the index, level differs`
+                            : r.symbol
+                        }
+                      >
+                        {r.approx ? '≈ ' : ''}
+                        {r.symbol}
+                      </span>
                     </span>
                     <span className="num">{fmt.level(r.last)}</span>
                     <span className={`num ${cls}`}>{fmt.chg(r.change)}</span>

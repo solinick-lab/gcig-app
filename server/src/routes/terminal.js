@@ -6,7 +6,7 @@ import { getHistory } from '../services/priceHistory.js';
 import { getPortfolioMovers } from '../services/sheetPortfolio.js';
 import { getPeers, getPeerSnapshot } from '../services/marketData.js';
 import { getNewsForTicker } from '../services/news.js';
-import { getQuotes } from '../services/quotes.js';
+import { getWorldIndices, REGION_ORDER } from '../services/worldIndices.js';
 
 // Terminal — AI-driven endpoints that back the /terminal workstation.
 // Quote/news/fundamentals data is reused from /api/holdings/* (already
@@ -160,61 +160,13 @@ router.get('/top-news', async (_req, res) => {
   }
 });
 
-// WEI — world equity indices. A fixed, regionally-grouped basket of the
-// benchmarks a generalist desk actually watches at the open: the US
-// majors, the European cash indices, the big Asia-Pacific board, and a
-// volatility read. Yahoo carries all of these as `^`-prefixed index
-// symbols (Shanghai is the one exception, a bare `000001.SS`), so we
-// lean on the same getQuotes path the rest of the app uses rather than
-// standing up a second data source. Order here is the order rendered.
-const WORLD_INDICES = [
-  { symbol: '^GSPC', name: 'S&P 500', region: 'Americas' },
-  { symbol: '^DJI', name: 'Dow Jones Industrial', region: 'Americas' },
-  { symbol: '^IXIC', name: 'Nasdaq Composite', region: 'Americas' },
-  { symbol: '^RUT', name: 'Russell 2000', region: 'Americas' },
-  { symbol: '^GSPTSE', name: 'S&P/TSX Composite', region: 'Americas' },
-  { symbol: '^BVSP', name: 'Bovespa', region: 'Americas' },
-  { symbol: '^FTSE', name: 'FTSE 100', region: 'EMEA' },
-  { symbol: '^GDAXI', name: 'DAX', region: 'EMEA' },
-  { symbol: '^FCHI', name: 'CAC 40', region: 'EMEA' },
-  { symbol: '^STOXX50E', name: 'Euro Stoxx 50', region: 'EMEA' },
-  { symbol: '^IBEX', name: 'IBEX 35', region: 'EMEA' },
-  { symbol: '^N225', name: 'Nikkei 225', region: 'Asia-Pacific' },
-  { symbol: '^HSI', name: 'Hang Seng', region: 'Asia-Pacific' },
-  { symbol: '000001.SS', name: 'Shanghai Composite', region: 'Asia-Pacific' },
-  { symbol: '^AXJO', name: 'S&P/ASX 200', region: 'Asia-Pacific' },
-  { symbol: '^NSEI', name: 'Nifty 50', region: 'Asia-Pacific' },
-  { symbol: '^KS11', name: 'KOSPI', region: 'Asia-Pacific' },
-  { symbol: '^VIX', name: 'CBOE Volatility', region: 'Volatility' },
-];
-
-const REGION_ORDER = ['Americas', 'EMEA', 'Asia-Pacific', 'Volatility'];
-
-// GET /api/terminal/indices — snapshot of the WORLD_INDICES basket.
-// One bad symbol can't sink the panel: getQuotes settles each ticker
-// independently and hands back a null-priced stub for any that fail,
-// which we pass through so the row still renders as "—".
+// GET /api/terminal/indices — world index snapshot. Data sourcing and
+// the Stooq→Finnhub fallback live in services/worldIndices.js (Yahoo is
+// unreachable from Render's IP). The service never throws and stubs any
+// miss, so a bad feed degrades a row to "—" rather than failing here.
 router.get('/indices', async (_req, res) => {
   try {
-    const symbols = WORLD_INDICES.map((i) => i.symbol);
-    const quotes = await getQuotes(symbols);
-    const bySymbol = new Map(
-      quotes.filter(Boolean).map((q) => [q.ticker, q])
-    );
-    const rows = WORLD_INDICES.map((idx) => {
-      const q = bySymbol.get(idx.symbol.toUpperCase());
-      return {
-        symbol: idx.symbol,
-        name: idx.name,
-        region: idx.region,
-        last: q?.price ?? null,
-        change: q?.change ?? null,
-        // yahoo-finance2 reports the percent move in percent units
-        // already (1.23 == +1.23%), not as a fraction.
-        changePercent: q?.changePercent ?? null,
-        currency: q?.currency ?? null,
-      };
-    });
+    const rows = await getWorldIndices();
     res.json({ asOf: new Date().toISOString(), regions: REGION_ORDER, rows });
   } catch (err) {
     console.error('terminal/indices failed:', err.message);
