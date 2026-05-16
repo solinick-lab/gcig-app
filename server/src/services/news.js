@@ -18,11 +18,12 @@ import sanitizeHtml from 'sanitize-html';
 import { rankArticles } from './articleRanker.js';
 import { summarizeTickerNews, summarizeArticle } from './articleSummarizer.js';
 
-// 24 hours — news doesn't move fast enough for a long-term-hold investment
-// club to justify tighter refreshes, and longer caching also means fewer
-// LLM calls for ranking + narrative generation. Finnhub could support more
-// frequent polling but there's no user-visible benefit.
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+// 10 minutes — the terminal needs near-real-time headlines. Finnhub's free
+// tier allows 60 req/min so a 10-min cache is well within budget while
+// keeping stories fresh enough to feel like a live wire. LLM ranking is
+// cached separately in the DB (ArticleRanking) so repeat fetches only
+// re-rank genuinely new URLs.
+const CACHE_TTL_MS = 10 * 60 * 1000;
 const cache = new Map(); // key = ticker|name, value = { at, data }
 
 function cacheKey(ticker, name) {

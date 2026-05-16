@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../../api/client.js';
 
-// CN — company news. Reuses /api/holdings/news/:ticker.
-// Auto-polls every 60s for fresh headlines. New stories flash amber briefly.
+// TOP — market-wide top headlines. Auto-polls every 60s.
+// Uses the terminal/top-news endpoint (Finnhub general feed, 10-min server cache).
 
 const POLL_INTERVAL_MS = 60_000;
 
-export default function News({ ticker }) {
+export default function TopNews() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
@@ -16,9 +16,7 @@ export default function News({ ticker }) {
   const [newIds, setNewIds] = useState(new Set());
   const prevUrlsRef = useRef(new Set());
 
-  // Fetch news (initial + poll)
-  const fetchNews = (isInitial) => {
-    if (!ticker) return;
+  const fetchTop = (isInitial) => {
     if (isInitial) {
       setLoading(true);
       setErr(null);
@@ -27,19 +25,14 @@ export default function News({ ticker }) {
       prevUrlsRef.current = new Set();
     }
     api
-      .get(`/holdings/news/${encodeURIComponent(ticker)}`)
+      .get('/terminal/top-news')
       .then(({ data }) => {
-        const list = Array.isArray(data)
-          ? data
-          : data?.articles || data?.items || [];
-        const sliced = list.slice(0, 20);
+        const list = data?.articles || [];
 
-        // Detect new headlines on poll refreshes
         if (!isInitial && prevUrlsRef.current.size > 0) {
           const fresh = new Set();
-          for (const it of sliced) {
-            const key = it.url || it.link || it.title;
-            if (!prevUrlsRef.current.has(key)) fresh.add(key);
+          for (const it of list) {
+            if (!prevUrlsRef.current.has(it.url)) fresh.add(it.url);
           }
           if (fresh.size > 0) {
             setNewIds(fresh);
@@ -47,8 +40,8 @@ export default function News({ ticker }) {
           }
         }
 
-        prevUrlsRef.current = new Set(sliced.map((it) => it.url || it.link || it.title));
-        setItems(sliced);
+        prevUrlsRef.current = new Set(list.map((it) => it.url));
+        setItems(list);
         setLastRefresh(new Date());
       })
       .catch((e) => {
@@ -59,29 +52,26 @@ export default function News({ ticker }) {
       });
   };
 
-  // Initial fetch on ticker change
   useEffect(() => {
-    fetchNews(true);
-  }, [ticker]);
+    fetchTop(true);
+  }, []);
 
-  // Auto-poll every 60s
   useEffect(() => {
-    if (!ticker) return;
-    const id = setInterval(() => fetchNews(false), POLL_INTERVAL_MS);
+    const id = setInterval(() => fetchTop(false), POLL_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [ticker]);
+  }, []);
 
-  // AI brief on new data
+  // AI brief
   useEffect(() => {
-    if (!items.length || !ticker) return;
+    if (!items.length) return;
     let cancelled = false;
     setBriefLoading(true);
     const context = items
-      .slice(0, 8)
-      .map((it, i) => `${i + 1}. ${formatTime(it.publishedAt || it.providerPublishTime || it.time)} — ${it.title || ''}`)
+      .slice(0, 10)
+      .map((it, i) => `${i + 1}. ${formatTime(it.publishedAt)} — ${it.title || ''} (${it.source || ''})`)
       .join('\n');
     api
-      .post('/terminal/annotate', { ticker, function: 'CN', context })
+      .post('/terminal/annotate', { ticker: '', function: 'TOP', context })
       .then(({ data }) => {
         if (!cancelled) setBrief(data.brief || '');
       })
@@ -94,19 +84,16 @@ export default function News({ ticker }) {
     return () => {
       cancelled = true;
     };
-  }, [items, ticker]);
+  }, [items]);
 
-  if (!ticker) {
-    return <div className="term-panel"><div className="term-loading">Enter a ticker to load news.</div></div>;
-  }
-  if (loading) return <div className="term-panel"><div className="term-loading">Loading news…</div></div>;
+  if (loading) return <div className="term-panel"><div className="term-loading">Loading top news…</div></div>;
   if (err) return <div className="term-panel"><div className="term-error">Error: {err}</div></div>;
 
   return (
     <div className="term-panel">
       <div className="term-panel-header">
-        <span className="ticker">{ticker.toUpperCase()}</span>
-        <span className="name">Company News</span>
+        <span className="ticker">TOP</span>
+        <span className="name">Market Headlines</span>
         <span className="term-live-badge">● LIVE</span>
         {lastRefresh && (
           <span className="term-refresh-ts">
@@ -122,20 +109,17 @@ export default function News({ ticker }) {
 
       <div>
         {items.length === 0 ? (
-          <div className="term-loading">No recent stories.</div>
+          <div className="term-loading">No headlines available.</div>
         ) : (
           items.map((it, i) => {
-            const href = it.url || it.link;
-            const key = href || it.title || i;
-            const isNew = newIds.has(it.url || it.link || it.title);
+            const isNew = newIds.has(it.url);
             return (
-              <div className={`term-news-row${isNew ? ' term-news-flash' : ''}`} key={key}>
-                <span className="time">
-                  {formatTime(it.publishedAt || it.providerPublishTime || it.time)}
-                </span>
+              <div className={`term-news-row${isNew ? ' term-news-flash' : ''}`} key={it.url || i}>
+                <span className="time">{formatTime(it.publishedAt)}</span>
+                <span className="source">{it.source || ''}</span>
                 <span className="title">
-                  {href ? (
-                    <a href={href} target="_blank" rel="noopener noreferrer">{it.title}</a>
+                  {it.url ? (
+                    <a href={it.url} target="_blank" rel="noopener noreferrer">{it.title}</a>
                   ) : (
                     it.title
                   )}
@@ -151,12 +135,7 @@ export default function News({ ticker }) {
 
 function formatTime(ts) {
   if (!ts) return '—';
-  let d;
-  if (typeof ts === 'number') {
-    d = new Date(ts < 1e12 ? ts * 1000 : ts);
-  } else {
-    d = new Date(ts);
-  }
+  const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return '—';
   const today = new Date();
   const isToday =

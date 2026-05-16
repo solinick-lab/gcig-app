@@ -5,6 +5,7 @@ import { llmChat } from '../services/llm.js';
 import { getHistory } from '../services/priceHistory.js';
 import { getPortfolioMovers } from '../services/sheetPortfolio.js';
 import { getPeers, getPeerSnapshot } from '../services/marketData.js';
+import { getNewsForTicker } from '../services/news.js';
 
 // Terminal — AI-driven endpoints that back the /terminal workstation.
 // Quote/news/fundamentals data is reused from /api/holdings/* (already
@@ -135,6 +136,26 @@ router.get('/peers/:ticker', async (req, res) => {
   } catch (err) {
     console.error(`terminal/peers(${raw}) failed:`, err.message);
     res.status(502).json({ error: 'Peer comparison failed' });
+  }
+});
+
+// TOP — market-wide general news. Uses Finnhub's general category feed
+// via the same news service (which routes broad-market tickers like SPY
+// through the general endpoint). 10-min cache via the service layer.
+router.get('/top-news', async (_req, res) => {
+  try {
+    const data = await getNewsForTicker('SPY', '');
+    const articles = (data?.articles || []).slice(0, 20).map((a) => ({
+      title: a.title,
+      url: a.url,
+      source: a.source,
+      publishedAt: a.publishedAt,
+      score: a.score ?? null,
+    }));
+    res.json({ articles, fetchedAt: data?.fetchedAt || new Date().toISOString() });
+  } catch (err) {
+    console.error('terminal/top-news failed:', err.message);
+    res.status(502).json({ error: 'Top news unavailable' });
   }
 });
 

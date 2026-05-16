@@ -610,3 +610,45 @@
 [data-theme='terminal'] .term-statusbar .sep {
   color: var(--term-border);
 }
+
+/* ── LIVE badge + auto-refresh timestamp ─────────────────────────── */
+
+[data-theme='terminal'] .term-live-badge {
+  margin-left: auto;
+  color: var(--term-positive);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  animation: term-pulse 2s ease-in-out infinite;
+}
+
+[data-theme='terminal'] .term-refresh-ts {
+  margin-left: 8px;
+  color: var(--term-fg-muted);
+  font-size: 10px;
+}
+
+@keyframes term-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* New-headline flash — amber background that fades out */
+
+[data-theme='terminal'] .term-news-flash {
+  animation: term-flash 2s ease-out;
+}
+
+@keyframes term-flash {
+  0% { background: rgba(255, 176, 0, 0.25); }
+  100% { background: transparent; }
+}
+
+/* Source tag in TOP news rows */
+
+[data-theme='terminal'] .term-news-row .source {
+  color: var(--term-fg-dim);
+  font-size: 10px;
+  margin-right: 6px;
+  white-space: nowrap;
+}

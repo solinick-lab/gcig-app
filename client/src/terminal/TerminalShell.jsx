@@ -14,12 +14,13 @@ import { useAuth } from '../context/AuthContext.jsx';
 // paneId -> { ticker, fn } so the same pane keeps its state across layout
 // drags. New panes get a fresh id; closing a pane drops its entry from the map.
 
-const DEFAULT_TICKER = 'AAPL';
-
+// No ticker pre-loaded. The landing layout shows market-wide panels so
+// the terminal is useful the moment it opens. Typing a ticker (e.g.
+// "HD DES") in the command bar takes over the focused pane.
 const DEFAULT_PANES = {
-  a: { ticker: 'AAPL', fn: 'DES' },
-  b: { ticker: 'AAPL', fn: 'GP' },
-  c: { ticker: 'AAPL', fn: 'CN' },
+  a: { ticker: null, fn: 'TOP' },
+  b: { ticker: null, fn: 'MOVR' },
+  c: { ticker: null, fn: 'HELP' },
   d: { ticker: null, fn: 'BI' },
 };
 
@@ -28,16 +29,16 @@ const DEFAULT_LAYOUT = {
   first: {
     direction: 'column',
     first: 'a',
-    second: 'c',
-    splitPercentage: 60,
+    second: 'b',
+    splitPercentage: 55,
   },
   second: {
     direction: 'column',
-    first: 'b',
+    first: 'c',
     second: 'd',
-    splitPercentage: 50,
+    splitPercentage: 40,
   },
-  splitPercentage: 50,
+  splitPercentage: 55,
 };
 
 let paneIdSeq = 100;
