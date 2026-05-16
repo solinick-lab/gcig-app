@@ -1,3 +1,5 @@
+import { getRecentFilings } from './secFilings.js';
+
 // INSDR data — insider Form 4 activity. Finnhub is the primary feed
 // (structured, already wired); SEC EDGAR Form 4 XML is the fallback so
 // a missing/throttled Finnhub ticker still resolves. Best-effort and
@@ -109,4 +111,103 @@ export function normalizeFinnhub(rows) {
     })
     .filter((t) => t.date)
     .sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+
+const CACHE_TTL_MS = 20 * 60 * 1000;
+const cache = new Map(); // TICKER -> { at, payload }
+
+export function _resetInsiderCache() {
+  cache.clear();
+}
+
+const UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
+  '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+// ~24 months back, ISO yyyy-mm-dd, the window Finnhub wants.
+function windowDates() {
+  const to = new Date();
+  const from = new Date(to.getTime() - 730 * 24 * 60 * 60 * 1000);
+  const iso = (d) => d.toISOString().slice(0, 10);
+  return { from: iso(from), to: iso(to) };
+}
+
+async function defaultFinnhubFetch(ticker) {
+  const key = process.env.FINNHUB_API_KEY;
+  if (!key) return [];
+  const { from, to } = windowDates();
+  const url =
+    `https://finnhub.io/api/v1/stock/insider-transactions` +
+    `?symbol=${encodeURIComponent(ticker)}&from=${from}&to=${to}&token=${key}`;
+  const r = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!r.ok) throw new Error(`finnhub ${r.status}`);
+  const j = await r.json();
+  return Array.isArray(j?.data) ? j.data : [];
+}
+
+// Best-effort SEC backfill: list recent filings, keep Form 4s, fetch
+// and parse each ownership doc. Capped by getRecentFilings' own ceiling
+// (25) — fine for a fallback; Finnhub covers depth on the hot path.
+async function defaultSecFetch(ticker) {
+  const filings = await getRecentFilings(ticker, { limit: 25 });
+  const form4 = filings.filter((f) => String(f.form) === '4' && f.url);
+  const all = [];
+  for (const f of form4) {
+    try {
+      const r = await fetch(f.url, { headers: { 'User-Agent': UA, Accept: 'application/xml,text/xml,*/*' } });
+      if (!r.ok) continue;
+      all.push(...parseForm4Xml(await r.text()));
+    } catch {
+      // skip a bad doc; the rest still render
+    }
+  }
+  return all;
+}
+
+// Returns { ticker, transactions: [...desc], _source: 'finnhub'|'sec'|null }.
+// Never throws. `deps` lets tests inject fetchers (no network).
+export async function getInsiderTransactions(ticker, deps = {}) {
+  const sym = String(ticker || '').toUpperCase();
+  if (!sym) return { ticker: sym, transactions: [], _source: null };
+
+  const hit = cache.get(sym);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.payload;
+
+  const finnhubFetch = deps.finnhubFetch || defaultFinnhubFetch;
+  const secFetch = deps.secFetch || defaultSecFetch;
+
+  let transactions = [];
+  let source = null;
+
+  try {
+    const raw = await finnhubFetch(sym);
+    const norm = normalizeFinnhub(raw);
+    if (norm.length > 0) {
+      transactions = norm;
+      source = 'finnhub';
+    }
+  } catch (err) {
+    console.warn(`insiderTx finnhub(${sym}) failed:`, err.message);
+  }
+
+  if (source === null) {
+    try {
+      const sec = await secFetch(sym);
+      const norm = Array.isArray(sec)
+        ? sec
+            .filter((t) => t && t.date)
+            .sort((a, b) => new Date(b.date) - new Date(a.date))
+        : [];
+      if (norm.length > 0) {
+        transactions = norm;
+        source = 'sec';
+      }
+    } catch (err) {
+      console.warn(`insiderTx sec(${sym}) failed:`, err.message);
+    }
+  }
+
+  const payload = { ticker: sym, transactions, _source: source };
+  cache.set(sym, { at: Date.now(), payload });
+  return payload;
 }
