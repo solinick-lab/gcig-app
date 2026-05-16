@@ -138,10 +138,17 @@ test('getInsiderTransactions falls back to SEC when Finnhub empty', async () => 
 
 test('getInsiderTransactions returns empty (never throws) when both fail', async () => {
   _resetInsiderCache();
-  const res = await getInsiderTransactions('NVDA', {
-    finnhubFetch: async () => { throw new Error('finnhub down'); },
-    secFetch: async () => { throw new Error('sec down'); },
-  });
+  const warn = console.warn;
+  console.warn = () => {};
+  let res;
+  try {
+    res = await getInsiderTransactions('NVDA', {
+      finnhubFetch: async () => { throw new Error('finnhub down'); },
+      secFetch: async () => { throw new Error('sec down'); },
+    });
+  } finally {
+    console.warn = warn;
+  }
   assert.equal(res._source, null);
   assert.deepEqual(res.transactions, []);
 });
