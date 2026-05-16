@@ -7,6 +7,7 @@ import { getPortfolioMovers } from '../services/sheetPortfolio.js';
 import { getPeers, getPeerSnapshot } from '../services/marketData.js';
 import { getNewsForTicker } from '../services/news.js';
 import { getWorldIndices, REGION_ORDER } from '../services/worldIndices.js';
+import { getInsiderTransactions } from '../services/insiderTx.js';
 
 // Terminal — AI-driven endpoints that back the /terminal workstation.
 // Quote/news/fundamentals data is reused from /api/holdings/* (already
@@ -38,6 +39,7 @@ const KNOWN_FUNCTIONS = [
   { id: 'CN', label: 'Company News', summary: 'Latest news headlines for the focused ticker.' },
   { id: 'FA', label: 'Financial Analysis', summary: 'Multi-year fundamentals deep dive.' },
   { id: 'PEER', label: 'Peers', summary: 'Sector peer comparison table.' },
+  { id: 'INSDR', label: 'Insider Activity', summary: 'Form 4 insider buys/sells overlaid on the price chart.' },
   { id: 'BI', label: 'Bloomberg Intelligence', summary: 'Free-form research chat with workspace context.' },
   { id: 'WEI', label: 'World Equity Indices', summary: 'Global index snapshot.' },
   { id: 'TOP', label: 'Top News', summary: 'Market-wide top headlines.' },
@@ -71,6 +73,23 @@ router.get('/chart/:ticker', async (req, res) => {
     if (err.status === 404) return res.status(404).json({ error: 'Ticker not found' });
     console.error(`terminal/chart(${raw}) failed:`, err.message);
     res.status(502).json({ error: 'Chart fetch failed' });
+  }
+});
+
+// INSDR — insider Form 4 activity for a ticker. Service is best-effort
+// (Finnhub primary, SEC EDGAR fallback) and never throws; an empty
+// result is a normal 200 so the panel can say "no activity".
+router.get('/insiders/:ticker', async (req, res) => {
+  const raw = String(req.params.ticker || '').trim().toUpperCase();
+  if (!raw || !/^[A-Z0-9.\-]{1,12}$/.test(raw)) {
+    return res.status(400).json({ error: 'Invalid ticker' });
+  }
+  try {
+    const data = await getInsiderTransactions(raw);
+    res.json(data);
+  } catch (err) {
+    console.error(`terminal/insiders(${raw}) failed:`, err.message);
+    res.status(502).json({ error: 'Insider data unavailable' });
   }
 });
 
