@@ -56,6 +56,21 @@ test('getProxyStatement returns stub when no DEF 14A (never throws)', async () =
   assert.deepEqual(r.sections, {});
 });
 
+test('splitSections skips a leading table-of-contents heading', () => {
+  const doc =
+    'TABLE OF CONTENTS ELECTION OF DIRECTORS 12 DIRECTOR COMPENSATION 28 ' +
+    'EXECUTIVE OFFICERS 35 SUMMARY COMPENSATION TABLE 42 ' +
+    'X'.repeat(1000) + ' ' +
+    'ELECTION OF DIRECTORS Jane Real, age 60, director since 2010. ' +
+    'EXECUTIVE OFFICERS John Real President. ' +
+    'SUMMARY COMPENSATION TABLE Salary Bonus Stock Awards.';
+  const s = splitSections(doc);
+  assert.match(s.board, /Jane Real, age 60/);
+  assert.doesNotMatch(s.board, /ELECTION OF DIRECTORS 12 DIRECTOR COMPENSATION/);
+  assert.match(s.execBios, /John Real President/);
+  assert.match(s.comp, /Salary Bonus Stock Awards/);
+});
+
 test('getProxyStatement parses + caches a found proxy', async () => {
   _resetProxyCache();
   let docCalls = 0;
@@ -70,6 +85,8 @@ test('getProxyStatement parses + caches a found proxy', async () => {
   };
   const a = await getProxyStatement('AAA', opts);
   const b = await getProxyStatement('AAA', opts);
+  assert.equal(b._source, 'sec');
+  assert.deepEqual(b, a);
   assert.equal(a._source, 'sec');
   assert.match(a.sections.board, /Jane Doe age 55/);
   assert.equal(docCalls, 1);

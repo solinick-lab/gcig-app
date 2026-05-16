@@ -36,6 +36,7 @@ export function htmlToText(html) {
   return String(html || '')
     .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
+    .replace(/&#x[0-9a-f]+;/gi, ' ')
     .replace(/&#\d+;|&[a-z]+;/gi, (m) => (ENTITIES[m.toLowerCase()] ?? ' '))
     .replace(/\s+/g, ' ')
     .trim();
@@ -56,7 +57,18 @@ export function splitSections(text) {
   const hits = [];
   for (const a of ANCHORS) {
     const m = a.re.exec(t);
-    if (m) hits.push({ key: a.key, at: m.index });
+    if (!m) continue;
+    let at = m.index;
+    // DEF 14As open with a TOC that lists every heading with a page
+    // number. If the first hit is in the leading 15% of the document,
+    // prefer a later occurrence — the body heading carries the real
+    // content; the TOC entry is just "<HEADING> 12".
+    if (m.index < t.length * 0.15) {
+      const rest = t.slice(m.index + m[0].length);
+      const m2 = a.re.exec(rest);
+      if (m2) at = m.index + m[0].length + m2.index;
+    }
+    hits.push({ key: a.key, at });
   }
   hits.sort((x, y) => x.at - y.at);
   const out = {};
