@@ -145,6 +145,13 @@ async function defaultFinnhubFetch(ticker) {
   return Array.isArray(j?.data) ? j.data : [];
 }
 
+// SEC's submissions feed returns the XSL-rendered viewer URL
+// (.../xslF345X06/form4.xml → HTML). The raw ownership XML sits at the
+// same path with that /xsl…/ segment stripped.
+export function toRawForm4Url(url) {
+  return String(url || '').replace(/\/xsl[^/]+\//, '/');
+}
+
 // Best-effort SEC backfill: list recent filings, keep Form 4s, fetch
 // and parse each ownership doc. Capped by getRecentFilings' own ceiling
 // (25) — fine for a fallback; Finnhub covers depth on the hot path.
@@ -154,7 +161,7 @@ async function defaultSecFetch(ticker) {
   const all = [];
   for (const f of form4) {
     try {
-      const r = await fetch(f.url, { headers: { 'User-Agent': UA, Accept: 'application/xml,text/xml,*/*' } });
+      const r = await fetch(toRawForm4Url(f.url), { headers: { 'User-Agent': UA, Accept: 'application/xml,text/xml,*/*' } });
       if (!r.ok) continue;
       all.push(...parseForm4Xml(await r.text()));
     } catch {

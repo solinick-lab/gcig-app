@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyCode, normalizeFinnhub, parseForm4Xml, roleFromRelationship, getInsiderTransactions, _resetInsiderCache } from './insiderTx.js';
+import { classifyCode, normalizeFinnhub, parseForm4Xml, roleFromRelationship, getInsiderTransactions, _resetInsiderCache, toRawForm4Url } from './insiderTx.js';
 
 test('classifyCode flags only open-market P and S', () => {
   assert.deepEqual(classifyCode('P'), { isBuy: true, isSell: false });
@@ -163,4 +163,22 @@ test('getInsiderTransactions caches within TTL', async () => {
   await getInsiderTransactions('AAPL', opts);
   await getInsiderTransactions('AAPL', opts);
   assert.equal(calls, 1);
+});
+
+test('toRawForm4Url strips the SEC xsl viewer segment', () => {
+  assert.equal(
+    toRawForm4Url('https://www.sec.gov/Archives/edgar/data/320193/000114036126020871/xslF345X06/form4.xml'),
+    'https://www.sec.gov/Archives/edgar/data/320193/000114036126020871/form4.xml'
+  );
+  assert.equal(
+    toRawForm4Url('https://www.sec.gov/Archives/edgar/data/320193/000114036126020871/xslF345X05/d123.xml'),
+    'https://www.sec.gov/Archives/edgar/data/320193/000114036126020871/d123.xml'
+  );
+  // already-raw URL is unchanged
+  assert.equal(
+    toRawForm4Url('https://www.sec.gov/Archives/edgar/data/320193/000114036126020871/form4.xml'),
+    'https://www.sec.gov/Archives/edgar/data/320193/000114036126020871/form4.xml'
+  );
+  assert.equal(toRawForm4Url(''), '');
+  assert.equal(toRawForm4Url(null), '');
 });
