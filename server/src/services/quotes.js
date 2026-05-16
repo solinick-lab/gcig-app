@@ -1,6 +1,14 @@
-import yahooFinance from 'yahoo-finance2';
+import YahooFinance from 'yahoo-finance2';
 
-// Suppress the optional survey notice if the installed version supports it.
+// yahoo-finance2 v2.14 ships the class as the default export, not a ready
+// instance. `import yahooFinance` then `yahooFinance.quote()` throws
+// "quote is not a function" — the call site that finally exercised this
+// (terminal WEI) is why it surfaced. Instantiate once, same as
+// routes/holdings.js, which already documents this.
+const yahooFinance = new YahooFinance();
+
+// Older builds exposed suppressNotices on the instance; v2.14 doesn't.
+// Guard it — a harmless no-op when absent, still correct if it returns.
 if (typeof yahooFinance.suppressNotices === 'function') {
   yahooFinance.suppressNotices(['yahooSurvey']);
 }
@@ -52,8 +60,12 @@ export async function getQuotes(tickers) {
 
   if (missing.length > 0) {
     // Fetch each ticker independently so one bad symbol can't poison the batch.
+    // validateResult:false — index and foreign symbols (^VIX, 000001.SS)
+    // routinely fail yahoo-finance2's US-equity-tuned schema; without
+    // this they reject and the whole basket reads blank. Matches the
+    // moduleOptions holdings.js passes.
     const settled = await Promise.allSettled(
-      missing.map((t) => yahooFinance.quote(t))
+      missing.map((t) => yahooFinance.quote(t, {}, { validateResult: false }))
     );
     settled.forEach((s, i) => {
       const t = missing[i];
