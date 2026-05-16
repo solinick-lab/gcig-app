@@ -192,7 +192,7 @@ export function buildNetwork(focusTicker, board, holdings) {
   for (const d of board) {
     for (const ob of d?.otherBoards || []) {
       const tk = holdingFor(ob, holdings);
-      if (tk && tk !== f) {
+      if (tk && tk.toUpperCase() !== f) {
         nodes.add(f);
         nodes.add(tk);
         edges.push({ person: d.name, a: f, b: tk });

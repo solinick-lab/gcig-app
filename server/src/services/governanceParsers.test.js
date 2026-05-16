@@ -184,3 +184,11 @@ test('buildNetwork empty when no overlap / bad input', () => {
   assert.deepEqual(buildNetwork('X', [], []), { nodes: [], edges: [] });
   assert.deepEqual(buildNetwork('X', null, null), { nodes: [], edges: [] });
 });
+
+test('buildNetwork excludes the focus company itself (case-insensitive ticker)', () => {
+  const board = [{ name: 'A', otherBoards: ['Focus Corp'] }];
+  const holdings = [{ ticker: 'focus', name: 'Focus Corp' }];
+  const n = buildNetwork('FOCUS', board, holdings);
+  assert.deepEqual(n.edges, []);
+  assert.deepEqual(n.nodes, []);
+});
