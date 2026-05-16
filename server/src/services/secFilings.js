@@ -21,6 +21,10 @@ const TICKERS_URL = `${EDGAR_BASE}/files/company_tickers.json`;
 // publicly threatened to block requests without one and they enforce
 // it (10 req/sec rate limit per host).
 const UA = 'Griffin Fund (Grace Church School) thegriffinfund.org';
+// Single source of truth: any SEC fetch (incl. the proxyStatement doc
+// fetch) must send this declarative UA. A browser-impersonating UA gets
+// blocked from datacenter IPs — that was the MGMT "no DEF 14A" prod bug.
+export { UA as SEC_UA };
 
 const TICKERS_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 const FILINGS_TTL_MS = 6 * 60 * 60 * 1000; // 6h

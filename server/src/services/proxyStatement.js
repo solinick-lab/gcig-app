@@ -4,7 +4,7 @@
 // flatten to text, and split into the named sections the parsers want.
 // Best-effort and never throws — a missing proxy or section yields
 // null, never an error (same contract as services/worldIndices.js).
-import { getRecentFilings } from './secFilings.js';
+import { getRecentFilings, SEC_UA } from './secFilings.js';
 
 // SEC hands back the XSL viewer URL (.../xslF…/doc.htm → HTML wrapper).
 // The raw primary document sits at the same path without that segment.
@@ -23,9 +23,12 @@ export function pickLatestDef14A(filings) {
   return { ...def[0], url: toRawUrl(def[0].url) };
 }
 
-const UA =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
-  '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+// The DEF 14A document also lives on sec.gov — it must carry the same
+// SEC-compliant declarative UA secFilings.js uses. The old Chrome UA
+// here got the Archives fetch blocked from Render's datacenter IP, so
+// docFetch threw and getProxyStatement collapsed to _source:null
+// ("No DEF 14A on file") for every ticker in production.
+const UA = SEC_UA;
 
 const ENTITIES = { '&nbsp;': ' ', '&amp;': '&', '&lt;': '<', '&gt;': '>', '&#39;': "'", '&quot;': '"', '&apos;': "'" };
 
