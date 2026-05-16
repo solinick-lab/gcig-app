@@ -13,6 +13,7 @@ export default function News({ ticker }) {
   const [brief, setBrief] = useState('');
   const [briefLoading, setBriefLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState(null);
+  const [now, setNow] = useState(() => new Date());
   const [newIds, setNewIds] = useState(new Set());
   const prevUrlsRef = useRef(new Set());
 
@@ -71,12 +72,20 @@ export default function News({ ticker }) {
     return () => clearInterval(id);
   }, [ticker]);
 
+  // Header clock ticks every second so the panel reads as live rather
+  // than frozen at the last 60s poll.
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   // AI brief on new data
   useEffect(() => {
     if (!items.length || !ticker) return;
     let cancelled = false;
     setBriefLoading(true);
-    const context = items
+    const context = [...items]
+      .sort((a, b) => tsOf(b) - tsOf(a))
       .slice(0, 8)
       .map((it, i) => `${i + 1}. ${formatTime(it.publishedAt || it.providerPublishTime || it.time)} — ${it.title || ''}`)
       .join('\n');
@@ -102,6 +111,10 @@ export default function News({ ticker }) {
   if (loading) return <div className="term-panel"><div className="term-loading">Loading news…</div></div>;
   if (err) return <div className="term-panel"><div className="term-error">Error: {err}</div></div>;
 
+  // Provider feeds aren't reliably time-ordered. Sort newest-first so
+  // the list is a single timeline.
+  const ordered = [...items].sort((a, b) => tsOf(b) - tsOf(a));
+
   return (
     <div className="term-panel">
       <div className="term-panel-header">
@@ -121,10 +134,10 @@ export default function News({ ticker }) {
       </div>
 
       <div>
-        {items.length === 0 ? (
+        {ordered.length === 0 ? (
           <div className="term-loading">No recent stories.</div>
         ) : (
-          items.map((it, i) => {
+          ordered.map((it, i) => {
             const href = it.url || it.link;
             const key = href || it.title || i;
             const isNew = newIds.has(it.url || it.link || it.title);
@@ -147,6 +160,17 @@ export default function News({ ticker }) {
       </div>
     </div>
   );
+}
+
+// Comparable epoch ms for sorting, mirroring formatTime's parsing
+// (providerPublishTime is seconds since epoch). Undated stories sink.
+function tsOf(it) {
+  const ts = it?.publishedAt ?? it?.providerPublishTime ?? it?.time;
+  if (ts == null) return -Infinity;
+  const d =
+    typeof ts === 'number' ? new Date(ts < 1e12 ? ts * 1000 : ts) : new Date(ts);
+  const t = d.getTime();
+  return Number.isNaN(t) ? -Infinity : t;
 }
 
 function formatTime(ts) {

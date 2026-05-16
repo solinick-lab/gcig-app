@@ -42,6 +42,63 @@ function normalize(q) {
   };
 }
 
+// Crumb-free price path. Yahoo gates the crumb endpoint behind an
+// aggressive per-IP rate limit that Render's datacenter address trips
+// almost immediately, so yahoo-finance2's quote() comes back empty in
+// production (the WEI panel rendered all dashes for exactly this). The
+// v8 chart endpoint needs no crumb and carries enough in `meta` — last
+// price and prior close — to derive the day move. Same URL and headers
+// routes/holdings.js already leans on for this reason. Best-effort: any
+// failure returns null and the caller stubs the row.
+async function fetchChartQuote(ticker) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+    ticker
+  )}?interval=1d&range=1d`;
+  try {
+    const r = await fetch(url, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        Accept: 'application/json',
+      },
+    });
+    if (!r.ok) return null;
+    const meta = (await r.json())?.chart?.result?.[0]?.meta;
+    if (!meta || meta.regularMarketPrice == null) return null;
+    const price = meta.regularMarketPrice;
+    const prev = meta.chartPreviousClose ?? meta.previousClose ?? null;
+    const change = prev != null ? price - prev : null;
+    return {
+      ticker: meta.symbol ?? ticker,
+      price,
+      change,
+      // Percent units (1.23 == +1.23%) to match yahoo-finance2's
+      // regularMarketChangePercent, so callers treat both sources alike.
+      changePercent: change != null && prev ? (change / prev) * 100 : null,
+      currency: meta.currency ?? 'USD',
+      name: meta.shortName ?? meta.symbol ?? ticker,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// One ticker: chart endpoint first (the path that actually works from
+// Render), yahoo-finance2's quote() only as a backstop for the rare
+// symbol the chart feed misses. Never throws — a bad symbol resolves to
+// null and the caller stubs it, so it can't poison the batch.
+async function resolveQuote(t) {
+  const chart = await fetchChartQuote(t);
+  if (chart && chart.price != null) return chart;
+  try {
+    const n = normalize(await yahooFinance.quote(t, {}, { validateResult: false }));
+    if (n && n.price != null) return n;
+  } catch (err) {
+    console.error(`quotes: ${t} chart+quote both failed:`, err?.message || err);
+  }
+  return null;
+}
+
 /**
  * Fetch quotes for a list of tickers, using per-ticker cache.
  * Returns array in the same order as input.
@@ -59,26 +116,17 @@ export async function getQuotes(tickers) {
   }
 
   if (missing.length > 0) {
-    // Fetch each ticker independently so one bad symbol can't poison the batch.
-    // validateResult:false — index and foreign symbols (^VIX, 000001.SS)
-    // routinely fail yahoo-finance2's US-equity-tuned schema; without
-    // this they reject and the whole basket reads blank. Matches the
-    // moduleOptions holdings.js passes.
-    const settled = await Promise.allSettled(
-      missing.map((t) => yahooFinance.quote(t, {}, { validateResult: false }))
-    );
+    const settled = await Promise.allSettled(missing.map((t) => resolveQuote(t)));
     settled.forEach((s, i) => {
       const t = missing[i];
-      if (s.status === 'fulfilled') {
-        const n = normalize(s.value);
-        if (n) {
-          // Key by the user's original ticker so cache lookups match on retry.
-          results[t] = { ...n, ticker: t };
-          setCached(t, results[t]);
-          return;
-        }
-      } else {
-        console.error(`yahoo-finance2 error for ${t}:`, s.reason?.message || s.reason);
+      const q = s.status === 'fulfilled' ? s.value : null;
+      if (q && q.price != null) {
+        // Key by the caller's ticker so cache hits line up on retry.
+        results[t] = { ...q, ticker: t };
+        // Only cache hits — a null stub must retry on the next 60s
+        // tick, not freeze a blank row in for a minute.
+        setCached(t, results[t]);
+        return;
       }
       results[t] = {
         ticker: t,

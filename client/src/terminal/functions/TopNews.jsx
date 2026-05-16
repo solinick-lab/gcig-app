@@ -13,6 +13,7 @@ export default function TopNews() {
   const [brief, setBrief] = useState('');
   const [briefLoading, setBriefLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState(null);
+  const [now, setNow] = useState(() => new Date());
   const [newIds, setNewIds] = useState(new Set());
   const prevUrlsRef = useRef(new Set());
 
@@ -61,12 +62,20 @@ export default function TopNews() {
     return () => clearInterval(id);
   }, []);
 
+  // Header clock ticks every second so the panel reads as live rather
+  // than frozen at the last 60s poll.
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   // AI brief
   useEffect(() => {
     if (!items.length) return;
     let cancelled = false;
     setBriefLoading(true);
-    const context = items
+    const context = [...items]
+      .sort((a, b) => tsOf(b) - tsOf(a))
       .slice(0, 10)
       .map((it, i) => `${i + 1}. ${formatTime(it.publishedAt)} — ${it.title || ''} (${it.source || ''})`)
       .join('\n');
@@ -89,6 +98,11 @@ export default function TopNews() {
   if (loading) return <div className="term-panel"><div className="term-loading">Loading top news…</div></div>;
   if (err) return <div className="term-panel"><div className="term-error">Error: {err}</div></div>;
 
+  // Headlines arrive batched per source (all Reuters, then all CNBC),
+  // never globally ordered. Sort newest-first so the feed reads as one
+  // timeline instead of interleaved blocks.
+  const ordered = [...items].sort((a, b) => tsOf(b) - tsOf(a));
+
   return (
     <div className="term-panel">
       <div className="term-panel-header">
@@ -97,7 +111,7 @@ export default function TopNews() {
         <span className="term-live-badge">● LIVE</span>
         {lastRefresh && (
           <span className="term-refresh-ts">
-            {lastRefresh.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+            {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
           </span>
         )}
       </div>
@@ -108,10 +122,10 @@ export default function TopNews() {
       </div>
 
       <div>
-        {items.length === 0 ? (
+        {ordered.length === 0 ? (
           <div className="term-loading">No headlines available.</div>
         ) : (
-          items.map((it, i) => {
+          ordered.map((it, i) => {
             const isNew = newIds.has(it.url);
             return (
               <div className={`term-news-row${isNew ? ' term-news-flash' : ''}`} key={it.url || i}>
@@ -131,6 +145,13 @@ export default function TopNews() {
       </div>
     </div>
   );
+}
+
+// Comparable epoch ms for sorting. Undated stories sink to the bottom
+// rather than jumping the feed.
+function tsOf(it) {
+  const t = new Date(it?.publishedAt).getTime();
+  return Number.isNaN(t) ? -Infinity : t;
 }
 
 function formatTime(ts) {
