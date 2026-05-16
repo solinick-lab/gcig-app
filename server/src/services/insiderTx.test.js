@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyCode, normalizeFinnhub } from './insiderTx.js';
+import { parseForm4Xml, roleFromRelationship } from './insiderTx.js';
 
 test('classifyCode flags only open-market P and S', () => {
   assert.deepEqual(classifyCode('P'), { isBuy: true, isSell: false });
@@ -41,8 +42,6 @@ test('normalizeFinnhub falls back to filingDate when transactionDate absent', ()
   ]);
   assert.equal(row.date, '2025-06-01');
 });
-
-import { parseForm4Xml, roleFromRelationship } from './insiderTx.js';
 
 const FORM4_FIXTURE = `<?xml version="1.0"?>
 <ownershipDocument>
