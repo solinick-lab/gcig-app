@@ -99,13 +99,17 @@ test('parseBoard extracts Irish-surname directors and month-form since', () => {
   assert.equal(oc.since, 2020);
 });
 
-test('parseBoard does not capture connector phrases as other boards', () => {
+test('parseBoard excludes lowercase connector fragments from otherBoards', () => {
   const board = parseBoard({
     board:
       'ELECTION OF DIRECTORS Jane Smith, age 55, director since 2017. ' +
-      'Ms. Smith serves on the board of Globex Corporation and also on the ' +
-      'Nominating Committee.',
+      'Jane Smith serves on the board of Globex Corporation and also ' +
+      'advises several private startups.',
   });
   const js = board.find((d) => d.name === 'Jane Smith');
+  assert.ok(js, 'Jane Smith director should be found');
+  // Without the /^[A-Z]/ guard, the post-"and" fragment
+  // "also advises several private startups" (lowercase, no "committee"
+  // keyword) would wrongly be captured as an other board.
   assert.deepEqual(js.otherBoards, ['Globex Corporation']);
 });
