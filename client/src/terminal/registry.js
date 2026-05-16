@@ -10,6 +10,7 @@ import BloombergIntelligence from './functions/BloombergIntelligence.jsx';
 import Help from './functions/Help.jsx';
 import Movers from './functions/Movers.jsx';
 import Peers from './functions/Peers.jsx';
+import InsiderActivity from './functions/InsiderActivity.jsx';
 import TopNews from './functions/TopNews.jsx';
 import WorldIndices from './functions/WorldIndices.jsx';
 import ComingSoon from './functions/ComingSoon.jsx';
@@ -52,6 +53,7 @@ export const FUNCTIONS = [
   },
   { id: 'FA', label: 'Financial Analysis', help: 'Multi-year fundamentals deep dive.', requires: 'ticker', component: ComingSoon },
   { id: 'PEER', label: 'Peers', help: 'Sector peer comparison table.', requires: 'ticker', component: Peers },
+  { id: 'INSDR', label: 'Insider Activity', help: 'Form 4 insider buys/sells on the price chart.', requires: 'ticker', component: InsiderActivity },
   { id: 'WEI', label: 'World Indices', help: 'Global index snapshot.', requires: null, component: WorldIndices },
   { id: 'TOP', label: 'Top News', help: 'Market-wide top headlines.', requires: null, component: TopNews },
   { id: 'MOVR', label: 'Movers', help: 'Day\'s biggest gainers and losers.', requires: null, component: Movers },

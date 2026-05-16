@@ -567,6 +567,11 @@
   text-align: right;
 }
 
+/* INSDR — keep the marker legend tidy; table reuses .term-table */
+[data-theme='terminal'] .term-chart polygon {
+  pointer-events: all;
+}
+
 /* BI (chat) panel */
 [data-theme='terminal'] .term-chat {
   display: flex;
