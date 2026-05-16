@@ -67,3 +67,45 @@ function priorRoles(text, name) {
   }
   return out;
 }
+
+const COMMITTEES = ['Audit', 'Compensation', 'Nominating', 'Governance', 'Risk', 'Finance'];
+
+// One director "record" is the text from their name+age up to the next
+// "<Name>, age NN" or end. We then mine that window for since /
+// committees / other boards.
+const DIR_HEAD_RE = /([A-Z][a-z][a-zA-Z'-]*(?:\s+[A-Z][a-z][a-zA-Z'-]*){1,3}),\s*age\s*(\d{2})/g;
+
+export function parseBoard(sections) {
+  const text = sections?.board || '';
+  const heads = [];
+  let m;
+  DIR_HEAD_RE.lastIndex = 0;
+  while ((m = DIR_HEAD_RE.exec(text)) !== null) {
+    heads.push({ name: m[1].replace(/\s+/g, ' ').trim(), age: Number(m[2]), at: m.index });
+  }
+  return heads.map((h, i) => {
+    const end = i + 1 < heads.length ? heads[i + 1].at : text.length;
+    const w = text.slice(h.at, end);
+    const since = (w.match(/(?:director since|since)\s*(\d{4})/i) || [])[1];
+    const committees = COMMITTEES.filter((c) =>
+      new RegExp(`${c}\\s+Committee`, 'i').test(w)
+    );
+    const otherBoards = [];
+    const ob =
+      /\bboard(?:\sof\sdirectors)?\sof\s+([A-Z][A-Za-z0-9.,&' ]+?)(?:\.|;|\bShe\b|\bHe\b|\bMr\.|\bMs\.|$)/gi;
+    let o;
+    while ((o = ob.exec(w)) !== null) {
+      for (const name of o[1].split(/\band\b|,/)) {
+        const n = name.replace(/\s+/g, ' ').trim().replace(/[.,]$/, '');
+        if (n.length > 2 && !/committee/i.test(n)) otherBoards.push(n);
+      }
+    }
+    return {
+      name: h.name,
+      age: h.age,
+      since: since ? Number(since) : null,
+      committees,
+      otherBoards: [...new Set(otherBoards)],
+    };
+  });
+}

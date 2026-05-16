@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseLeadership } from './governanceParsers.js';
+import { parseLeadership, parseBoard } from './governanceParsers.js';
 
 const SECTIONS = {
   execBios:
@@ -55,4 +55,29 @@ test('parseLeadership extracts priorRoles across an Ms./Mr. honorific', () => {
   assert.ok(Array.isArray(ceo.priorRoles) && ceo.priorRoles.length >= 1,
     'expected at least one prior role parsed across "Ms."');
   assert.match(ceo.priorRoles[0], /President/);
+});
+
+const BOARD_SECTION = {
+  board:
+    'ELECTION OF DIRECTORS ' +
+    'Maria Lopez, age 61, has been a director since 2015. Ms. Lopez also serves ' +
+    'on the board of directors of Globex Corporation and Initech Inc. ' +
+    'She is a member of the Audit Committee and Compensation Committee. ' +
+    'David Chen, age 58, director since 2020. Mr. Chen serves on the board of ' +
+    'Soylent Corp. He chairs the Nominating Committee.',
+};
+
+test('parseBoard extracts directors with age, since, committees, other boards', () => {
+  const board = parseBoard(BOARD_SECTION);
+  const maria = board.find((d) => d.name === 'Maria Lopez');
+  assert.equal(maria.age, 61);
+  assert.equal(maria.since, 2015);
+  assert.deepEqual(maria.otherBoards.sort(), ['Globex Corporation', 'Initech Inc'].sort());
+  assert.ok(maria.committees.includes('Audit'));
+  const david = board.find((d) => d.name === 'David Chen');
+  assert.deepEqual(david.otherBoards, ['Soylent Corp']);
+});
+
+test('parseBoard returns [] on missing section', () => {
+  assert.deepEqual(parseBoard({}), []);
 });
