@@ -22,7 +22,10 @@ test('normalizeFinnhub maps rows, derives value, sorts date-desc', () => {
   assert.equal(rows[0].shares, 50);
   assert.equal(rows[0].value, 1000);
   assert.equal(rows[2].name, 'Old Buyer');
-  assert.equal(rows[1].value, null);
+  assert.equal(rows[2].isBuy, true);
+  const noPrice = rows.find((r) => r.name === 'No Price');
+  assert.equal(noPrice.value, null);
+  assert.equal(noPrice.shares, 5);
   assert.equal(rows[0].role, null);
 });
 
@@ -30,4 +33,11 @@ test('normalizeFinnhub tolerates empty / non-array', () => {
   assert.deepEqual(normalizeFinnhub(null), []);
   assert.deepEqual(normalizeFinnhub(undefined), []);
   assert.deepEqual(normalizeFinnhub([]), []);
+});
+
+test('normalizeFinnhub falls back to filingDate when transactionDate absent', () => {
+  const [row] = normalizeFinnhub([
+    { name: 'X', transactionCode: 'P', change: 1, transactionPrice: 5, filingDate: '2025-06-01' },
+  ]);
+  assert.equal(row.date, '2025-06-01');
 });

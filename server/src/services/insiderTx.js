@@ -25,8 +25,10 @@ export function normalizeFinnhub(rows) {
     .map((r) => {
       const code = String(r?.transactionCode || '').toUpperCase();
       const { isBuy, isSell } = classifyCode(code);
-      const shares = r?.change == null ? null : Math.abs(num(r.change));
-      const price = num(r?.transactionPrice) || null;
+      const rawShares = r?.change == null ? null : num(r.change);
+      const shares = rawShares != null ? Math.abs(rawShares) : null;
+      const rawPrice = num(r?.transactionPrice);
+      const price = rawPrice != null && rawPrice > 0 ? rawPrice : null;
       const value = shares != null && price ? shares * price : null;
       return {
         date: r?.transactionDate || r?.filingDate || null,
