@@ -54,3 +54,56 @@ test('helpers never throw on garbage', () => {
   assert.equal(findTableBySignature(parseHtml('<p>x</p>'), () => true), null);
   assert.equal(locateSectionText(parseHtml('<p>x</p>'), /nope/), '');
 });
+
+// Real SEC proxies wrap the data table in layout table(s). The header/
+// data rows must NOT be contaminated by the outer wrapper, and the
+// SCT we return must be the INNER data table.
+const NESTED = `<html><body>
+<table id="layout"><tr><td>
+  <table id="sct">
+    <tr><th>Name and Principal Position</th><th>Salary ($)</th><th>Total ($)</th></tr>
+    <tr><td>Jane A. Doe</td><td>1,000,000</td><td>10,000,000</td></tr>
+  </table>
+</td></tr></table>
+</body></html>`;
+
+test('findTableBySignature returns the inner data table, not the layout wrapper', () => {
+  const root = parseHtml(NESTED);
+  const t = findTableBySignature(root, (cells) => {
+    const j = cells.join(' | ').toLowerCase();
+    return /salary/.test(j) && /total/.test(j) && /name|principal position/.test(j);
+  });
+  assert.ok(t, 'a table matched');
+  const rows = tableRows(t);
+  // Inner SCT has exactly a header row + one data row, clean cells.
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows[0], ['Name and Principal Position', 'Salary ($)', 'Total ($)']);
+  const hm = headerMap(rows[0]);
+  assert.equal(rows[1][hm.name], 'Jane A. Doe');
+  assert.equal(rows[1][hm.salary], '1,000,000');
+  assert.equal(rows[1][hm.total], '10,000,000');
+  assert.notEqual(hm.name, hm.salary); // distinct columns, not collapsed
+});
+
+test('locateSectionText does not duplicate text across nested ancestors', () => {
+  const root = parseHtml(`<html><body>
+    <h2>Information about our Executive Officers</h2>
+    <div><div><p>Jane A. Doe, 54, has served as Chief Executive Officer since 2018.</p></div></div>
+    <div><p>John B. Smith, 47, has served as Chief Financial Officer since 2021.</p></div>
+    <h2>Corporate Governance</h2><div><p>unrelated text</p></div>
+  </body></html>`);
+  const txt = locateSectionText(root, /executive officers/i);
+  // Each sentence appears exactly once (no ancestor duplication).
+  const occ = (txt.match(/Jane A\. Doe, 54/g) || []).length;
+  assert.equal(occ, 1);
+  assert.match(txt, /John B\. Smith, 47/);
+  assert.doesNotMatch(txt, /unrelated text/);
+});
+
+test('headerMap does not collapse name and since on a "Director Since" header', () => {
+  const hm = headerMap(['Name', 'Age', 'Director Since', 'Committees']);
+  assert.equal(hm.name, 0);
+  assert.equal(hm.age, 1);
+  assert.equal(hm.since, 2);
+  assert.notEqual(hm.name, hm.since);
+});

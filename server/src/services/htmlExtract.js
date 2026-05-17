@@ -20,26 +20,40 @@ export function cellText(node) {
   return String(node.text || '').replace(/\s+/g, ' ').trim();
 }
 
-// All rows of a table as arrays of cell text (th or td).
+// Direct rows/cells only — SEC wraps data tables in layout tables, and
+// querySelectorAll descends into them; nested rows would scramble the
+// header/column mapping.
 export function tableRows(table) {
   if (!table) return [];
-  return table.querySelectorAll('tr').map((tr) =>
-    tr.querySelectorAll('th,td').map((c) => cellText(c))
+  const directTrs = table.querySelectorAll('tr').filter((tr) => {
+    const p = tr.parentNode;
+    if (p === table) return true;
+    const pt = p && String(p.tagName || '').toLowerCase();
+    return !!p && /^(tbody|thead|tfoot)$/.test(pt || '') && p.parentNode === table;
+  });
+  return directTrs.map((tr) =>
+    tr.querySelectorAll('th,td')
+      .filter((c) => c.parentNode === tr)
+      .map((c) => cellText(c))
   );
 }
 
-// First <table> whose ANY row's cell-text array satisfies `predicate`.
-// (SCT/board header rows sometimes use <td>, and may be the 2nd row
-// under a group-header row — so we test every row, not just the first.)
+// Returns the INNERMOST <table> whose any (direct) row satisfies
+// `predicate`. node-html-parser yields tables in document (pre-)order,
+// so a wrapping layout table appears before the real data table; we
+// keep the last match = the deepest. Callers SHOULD include a name/
+// principal-position discriminator in `predicate` so a table-of-
+// contents or narrative table can't false-positive.
 export function findTableBySignature(root, predicate) {
   if (!root) return null;
+  let best = null;
   for (const t of root.querySelectorAll('table')) {
     const rows = tableRows(t);
     if (rows.some((cells) => { try { return predicate(cells); } catch { return false; } })) {
-      return t;
+      best = t;
     }
   }
-  return null;
+  return best;
 }
 
 // Given a header row (array of cell text), map logical column → index by
@@ -47,7 +61,7 @@ export function findTableBySignature(root, predicate) {
 // option, nonequity, total, age, since, committees, otherboards } with
 // any found index (others undefined).
 const COL_PATTERNS = {
-  name: /name|principal position|director|nominee/i,
+  name: /^name$|principal position|^director$|^nominee$/i,
   year: /^year$/i,
   salary: /salary/i,
   bonus: /^bonus/i,
@@ -70,9 +84,11 @@ export function headerMap(headerCells) {
   return out;
 }
 
-// Text content that follows the first heading-ish node matching `re`,
-// up to the next heading-ish node. Heading-ish = h1..h6, or a <b>/
-// <strong>/<p> whose entire text is short and matches. Best-effort.
+const BLOCK_LEAF = /^(p|li|td|th|dt|dd|caption)$/;
+
+// Text after the first heading-ish node matching `re`, up to the next
+// heading-ish node. Emits only block-leaf elements (or a div/span with
+// no block children) so the same text isn't repeated once per ancestor.
 export function locateSectionText(root, re) {
   if (!root) return '';
   const HEAD = /^h[1-6]$/;
@@ -82,7 +98,9 @@ export function locateSectionText(root, re) {
     const n = nodes[i];
     const tag = String(n.tagName || '').toLowerCase();
     const txt = cellText(n);
-    const headish = HEAD.test(tag) || ((tag === 'b' || tag === 'strong' || tag === 'p') && txt.length <= 90);
+    const headish =
+      HEAD.test(tag) ||
+      ((tag === 'b' || tag === 'strong' || tag === 'p') && txt.length <= 90);
     if (headish && re.test(txt)) { startIdx = i; break; }
   }
   if (startIdx < 0) return '';
@@ -91,9 +109,23 @@ export function locateSectionText(root, re) {
     const n = nodes[i];
     const tag = String(n.tagName || '').toLowerCase();
     const txt = cellText(n);
-    const headish = HEAD.test(tag) || ((tag === 'b' || tag === 'strong') && txt.length <= 90 && /officers|directors|compensation|proposal|ownership/i.test(txt));
+    const headish =
+      HEAD.test(tag) ||
+      ((tag === 'b' || tag === 'strong') &&
+        txt.length <= 90 &&
+        /officers|directors|compensation|proposal|ownership/i.test(txt));
     if (headish && i > startIdx + 1) break;
-    if (txt) parts.push(txt);
+    const isLeafBlock = BLOCK_LEAF.test(tag);
+    const isDivLike = /^(div|section|span)$/.test(tag);
+    const hasBlockChild =
+      isDivLike &&
+      n.childNodes &&
+      n.childNodes.some(
+        (c) =>
+          c.nodeType === 1 &&
+          /^(p|div|li|table|h[1-6])$/.test(String(c.tagName || '').toLowerCase())
+      );
+    if ((isLeafBlock || (isDivLike && !hasBlockChild)) && txt) parts.push(txt);
   }
   return parts.join(' ').replace(/\s+/g, ' ').trim();
 }
