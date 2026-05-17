@@ -34,7 +34,11 @@ export function tableRows(table) {
   return directTrs.map((tr) =>
     tr.querySelectorAll('th,td')
       .filter((c) => c.parentNode === tr)
-      .map((c) => cellText(c))
+      .flatMap((c) => {
+        const span = Math.max(1, parseInt(c.getAttribute('colspan') || '1', 10) || 1);
+        const txt = cellText(c);
+        return span === 1 ? [txt] : [txt, ...Array(span - 1).fill('')];
+      })
   );
 }
 

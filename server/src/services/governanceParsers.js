@@ -117,9 +117,42 @@ export function parseBoard(sections) {
 }
 
 const toNum = (s) => {
-  const n = Number(String(s == null ? '' : s).replace(/[^0-9.-]/g, ''));
+  const cleaned = String(s == null ? '' : s)
+    .replace(/\([\w\d.,]+\)/g, '')   // strip footnote refs e.g. (3) (a) (1,234)
+    .replace(/[^0-9.-]/g, '');
+  if (!cleaned || cleaned === '-' || cleaned === '.') return null;
+  const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;
 };
+
+// Real SCT cells are "<Name> <Title>" with the title often containing
+// "President" before the real C-suite title (e.g. "Senior Vice
+// President and Chief Financial Officer"). A lazy regex stops at the
+// FIRST alternative regardless of order, mis-splitting the name and
+// reporting "President". Take the LAST C-suite/GC/Chairman title; only
+// fall back to bare President if none exists.
+function splitNameTitle(cell) {
+  const PRIORITY_RE = /\b(Chief [A-Za-z ]+?Officer|General Counsel|Executive Chairman)\b/g;
+  let best = null, m;
+  while ((m = PRIORITY_RE.exec(cell)) !== null) best = m;
+  if (best) {
+    const name = cell
+      .slice(0, best.index)
+      .replace(/[,;]?\s*(Senior\s+)?(Executive\s+)?Vice\s+President\b.*/i, '')
+      .replace(/[,;]?\s*President\b.*/i, '')
+      .replace(/\s+and\s*$/i, '')
+      .replace(/[,;]+$/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return { name, title: best[1].trim() };
+  }
+  const pres = /(?:^|\W)President\b/.exec(cell);
+  if (pres) {
+    const idx = cell.indexOf('President', pres.index);
+    return { name: cell.slice(0, idx).replace(/\s+/g, ' ').trim().replace(/[,;]$/, ''), title: 'President' };
+  }
+  return { name: cell.replace(/\s+/g, ' ').trim().replace(/[,;]$/, ''), title: '' };
+}
 
 // Summary Compensation Table, found by header signature anywhere in the
 // DOM (TOC-proof). Requires a name column in the signature so a
@@ -154,9 +187,7 @@ export function parseComp(html) {
     if (!nameCell || /^name|director|^total$/i.test(nameCell)) continue;
     const total = toNum(c[h.total]);
     if (!total) continue;
-    const m = nameCell.match(/^(.*?)(Chief Executive Officer|Chief [A-Za-z ]+Officer|President|General Counsel|Executive Chairman)\b.*$/);
-    const name = (m ? m[1] : nameCell).replace(/\s+/g, ' ').trim().replace(/[,;]$/, '');
-    const title = m ? m[2].trim() : '';
+    const { name, title } = splitNameTitle(nameCell);
     if (!name || seen.has(name)) continue; // first (latest year) row per officer
     seen.add(name);
     const salary = h.salary !== undefined ? toNum(c[h.salary]) : null;

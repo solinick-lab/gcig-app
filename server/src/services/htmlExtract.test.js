@@ -119,3 +119,17 @@ test('headerMap recovers the "Name and Principal Executive Officers" variant wit
   assert.equal(b.since, 2);
   assert.notEqual(b.name, b.since);
 });
+
+test('tableRows expands colspan so header/data columns stay aligned', () => {
+  const root = parseHtml(`<table>
+    <tr><th>Name</th><th colspan="2">Stock Awards</th><th>Total</th></tr>
+    <tr><td>Jane</td><td>4,000,000</td><td>1,000,000</td><td>10,000,000</td></tr>
+  </table>`);
+  const rows = tableRows(root.querySelector('table'));
+  // header colspan=2 → 2 slots, so both rows have 4 cells, aligned.
+  assert.equal(rows[0].length, 4);
+  assert.equal(rows[1].length, 4);
+  const hm = headerMap(rows[0]);
+  assert.equal(rows[1][hm.total], '10,000,000'); // total index aligned
+  assert.equal(rows[1][hm.name], 'Jane');
+});

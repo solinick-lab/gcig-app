@@ -177,3 +177,22 @@ test('buildNetwork excludes the focus company itself (case-insensitive ticker)',
   assert.deepEqual(n.edges, []);
   assert.deepEqual(n.nodes, []);
 });
+
+const COMP_REAL = `<html><body><table>
+ <tr><td>Name and Principal Position</td><td>Year</td><td>Salary ($)</td><td>Bonus ($)</td><td>Stock Awards ($)</td><td>Option Awards ($)</td><td>Total ($)</td></tr>
+ <tr><td>Andrew R. Jassy President and Chief Executive Officer</td><td>2025</td><td>1,000,000</td><td>0</td><td>5,000,000</td><td>3,000,000</td><td>10,000,000(3)</td></tr>
+ <tr><td>Brian T. Olsavsky Senior Vice President and Chief Financial Officer</td><td>2025</td><td>800,000</td><td>0</td><td>1,200,000</td><td>0</td><td>2,000,000</td></tr>
+</table></body></html>`;
+
+test('parseComp: real name/title split (VP before C-title) and footnote-safe totals', () => {
+  const { rows } = parseComp(COMP_REAL);
+  const jassy = rows.find((r) => /Jassy/.test(r.name));
+  assert.equal(jassy.name, 'Andrew R. Jassy');
+  assert.match(jassy.title, /Chief Executive Officer/);
+  assert.equal(jassy.total, 10000000); // NOT 100000003 (footnote (3) stripped)
+  assert.equal(jassy.stockPct, 50);
+  const cfo = rows.find((r) => /Olsavsky/.test(r.name));
+  assert.equal(cfo.name, 'Brian T. Olsavsky'); // NOT truncated at "Vice"
+  assert.match(cfo.title, /Chief Financial Officer/); // NOT "President"
+  assert.equal(cfo.total, 2000000);
+});
