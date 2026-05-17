@@ -135,17 +135,25 @@ export function parseBoard(html) {
   while ((m = HEAD.exec(txt)) !== null) {
     heads.push({ name: m[1].trim(), age: Number(m[2] ?? m[3] ?? m[4]), at: m.index });
   }
-  return heads.map((hd, i) => {
-    const w = txt.slice(hd.at, i + 1 < heads.length ? heads[i + 1].at : txt.length);
-    const since = (w.match(/(?:director since|since)\s+(?:[A-Za-z]+\s+){0,2}(?:\d{1,2},?\s*)?((?:19|20)\d{2})/i) || [])[1];
-    return {
-      name: hd.name,
-      age: hd.age,
-      since: since ? Number(since) : null,
-      committees: COMMITTEE_NAMES.filter((cm) => new RegExp(`${cm}\\s+Committee`, 'i').test(w)),
-      otherBoards: [],
-    };
-  });
+  return heads
+    .map((hd, i) => {
+      const w = txt.slice(hd.at, i + 1 < heads.length ? heads[i + 1].at : txt.length);
+      const since = (w.match(/(?:director since|since)\s+(?:[A-Za-z]+\s+){0,2}(?:\d{1,2},?\s*)?((?:19|20)\d{2})/i) || [])[1];
+      return {
+        name: hd.name,
+        age: hd.age,
+        since: since ? Number(since) : null,
+        committees: COMMITTEE_NAMES.filter((cm) => new RegExp(`${cm}\\s+Committee`, 'i').test(w)),
+        otherBoards: [],
+      };
+    })
+    .filter((d) => {
+      const personName = /^[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){1,4}$/.test(d.name)
+        && !/\b(table|date|page|exhibit|item|note|index|contents)\b/i.test(d.name);
+      const ageOk = Number.isFinite(d.age) && d.age >= 18 && d.age <= 100;
+      const sinceOk = Number.isFinite(d.since) && d.since >= 1900 && d.since <= 2100;
+      return personName && (ageOk || sinceOk);
+    });
 }
 
 const toNum = (s) => {
@@ -156,6 +164,20 @@ const toNum = (s) => {
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;
 };
+
+// Some proxies (e.g. AMZN) inject a "$" separator cell between the header
+// column and the numeric value, so the value sits at headerCol+1 or +2.
+// Scan up to 3 positions rightward from the header index to find the first
+// non-null numeric; never skip past the next labelled column.
+function numFromCol(row, colIdx, nextColIdx) {
+  if (colIdx === undefined) return null;
+  const limit = nextColIdx !== undefined ? Math.min(colIdx + 3, nextColIdx) : colIdx + 3;
+  for (let i = colIdx; i <= limit && i < row.length; i++) {
+    const v = toNum(row[i]);
+    if (v != null) return v;
+  }
+  return null;
+}
 
 // Real SCT cells are "<Name> <Title>" with the title often containing
 // "President" before the real C-suite title (e.g. "Senior Vice
@@ -191,40 +213,103 @@ function splitNameTitle(cell) {
 // table-of-contents/narrative table can't false-positive. Columns are
 // read by header index (not position) so blank/extra columns don't
 // misalign the mix.
-const SCT_SIG = (cells) => {
+//
+// Some proxies (e.g. KO) split column labels across 2–3 header rows:
+// one row carries "Salary | Bonus | ... | Total", the adjacent row
+// carries "Name and Principal Position | Year | ($) | ($) | ...".
+// SCT_SIG_SINGLE handles the single-row case (most issuers); the
+// multi-row fallback below merges consecutive rows and maps headers
+// from the merged view.
+const SCT_SIG_SINGLE = (cells) => {
   const j = cells.join(' | ').toLowerCase();
   return (
     /salary/.test(j) &&
     /\btotal\b/.test(j) &&
     /name|principal position/.test(j) &&
-    [/bonus/, /stock award/, /option award/, /non-?equity/].filter((re) => re.test(j)).length >= 2
+    [/bonus/, /stock award/, /option award/, /non-?equity/].filter((re) => re.test(j)).length >= 1
   );
 };
 
+// Sliding-window version: returns the index of the first row in a
+// window of up to `win` rows (default 4) whose UNION satisfies the
+// full SCT signature. Returns { hIdx, merged } where merged is the
+// flattened header array and hIdx is the last header row index
+// (data starts at hIdx+1).
+function findSctHeaderWindow(all, win = 4) {
+  for (let start = 0; start < all.length - 1; start++) {
+    // Build a merged row from start..start+win-1
+    for (let end = start + 1; end < Math.min(start + win, all.length); end++) {
+      const merged = [];
+      for (let r = start; r <= end; r++) {
+        all[r].forEach((v, i) => {
+          if (v && v.trim() && v !== '​') merged[i] = (merged[i] ? merged[i] + ' ' : '') + v;
+        });
+      }
+      const j = merged.join(' | ').toLowerCase();
+      if (
+        /salary/.test(j) &&
+        /\btotal\b/.test(j) &&
+        /name|principal position/.test(j) &&
+        [/bonus/, /stock award/, /option award/, /non-?equity/].filter((re) => re.test(j)).length >= 1
+      ) {
+        return { hIdx: end, merged };
+      }
+    }
+  }
+  return null;
+}
+
 export function parseComp(html) {
   const root = parseHtml(html);
-  const table = findTableBySignature(root, SCT_SIG);
-  if (!table) return { rows: [] };
-  const all = tableRows(table);
-  const hIdx = all.findIndex((cells) => SCT_SIG(cells));
-  if (hIdx < 0) return { rows: [] };
-  const h = headerMap(all[hIdx]);
+
+  // Primary path: single-row header (AAPL, AMZN, most issuers).
+  let table = findTableBySignature(root, SCT_SIG_SINGLE);
+  let all = table ? tableRows(table) : [];
+  let hIdx = table ? all.findIndex((cells) => SCT_SIG_SINGLE(cells)) : -1;
+  let h = hIdx >= 0 ? headerMap(all[hIdx]) : {};
+
+  // Fallback: multi-row header (KO). Try every table; pick the last
+  // one with a valid window match (same deepest-wins logic as
+  // findTableBySignature).
+  if (!table || hIdx < 0 || h.name === undefined || h.total === undefined) {
+    let bestTable = null;
+    let bestResult = null;
+    for (const t of root.querySelectorAll('table')) {
+      const rows = tableRows(t);
+      const result = findSctHeaderWindow(rows);
+      if (result) { bestTable = t; bestResult = result; }
+    }
+    if (bestTable && bestResult) {
+      table = bestTable;
+      all = tableRows(table);
+      hIdx = bestResult.hIdx;
+      h = headerMap(bestResult.merged);
+    }
+  }
+
+  if (!table || hIdx < 0) return { rows: [] };
   if (h.name === undefined || h.total === undefined) return { rows: [] };
+  if (h.name === undefined || h.total === undefined) return { rows: [] };
+
+  // Sorted column positions so numFromCol can bound its rightward scan.
+  const colOrder = Object.values(h).filter(Number.isFinite).sort((a, b) => a - b);
+  const nextCol = (idx) => colOrder.find((pos) => pos > idx);
 
   const rows = [];
   const seen = new Set();
   for (let i = hIdx + 1; i < all.length; i++) {
     const c = all[i];
-    const nameCell = (c[h.name] || '').trim();
-    if (!nameCell || /^name|director|^total$/i.test(nameCell)) continue;
-    const total = toNum(c[h.total]);
+    // Name is always text at h.name directly; numeric scan is for dollar columns.
+    const nameTxt = (c[h.name] || '').trim();
+    if (!nameTxt || /^name|director|^total$/i.test(nameTxt)) continue;
+    const total = numFromCol(c, h.total, nextCol(h.total));
     if (!total) continue;
-    const { name, title } = splitNameTitle(nameCell);
+    const { name, title } = splitNameTitle(nameTxt);
     if (!name || seen.has(name)) continue; // first (latest year) row per officer
     seen.add(name);
-    const salary = h.salary !== undefined ? toNum(c[h.salary]) : null;
-    const stock = h.stock !== undefined ? toNum(c[h.stock]) : null;
-    const option = h.option !== undefined ? toNum(c[h.option]) : null;
+    const salary = h.salary !== undefined ? numFromCol(c, h.salary, nextCol(h.salary)) : null;
+    const stock = h.stock !== undefined ? numFromCol(c, h.stock, nextCol(h.stock)) : null;
+    const option = h.option !== undefined ? numFromCol(c, h.option, nextCol(h.option)) : null;
     const haveCols = [salary, stock, option].filter((v) => v != null).length >= 2;
     const pct = (v) => (haveCols && v != null ? Math.round((v / total) * 100) : null);
     const otherPct = haveCols

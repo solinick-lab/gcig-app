@@ -54,11 +54,14 @@ test('getProxyStatement stub (never throws) when no DEF 14A / on error', async (
 
 test('getProxyStatement caps html size', async () => {
   _resetProxyCache();
-  const big = 'x'.repeat(6 * 1024 * 1024);
+  // MAX_HTML is now 8 MB (raised from 4 MB to accommodate KO 2026 proxy
+  // which is ~5.9 MB with SCT at offset ~2.2 MB). Use a 10 MB input to
+  // confirm the cap fires.
+  const big = 'x'.repeat(10 * 1024 * 1024);
   const r = await getProxyStatement('BIG', {
     filingsFetch: async () => [{ form: 'DEF 14A', filingDate: '2026-01-01', url: 'https://x/p.htm' }],
     docFetch: async () => big,
   });
   assert.equal(r._source, 'sec');
-  assert.ok(r.html.length <= 4 * 1024 * 1024);
+  assert.ok(r.html.length <= 8 * 1024 * 1024);
 });

@@ -23,9 +23,11 @@ export function pickLatestDef14A(filings) {
   return { ...def[0], url: toRawUrl(def[0].url) };
 }
 
-// Real proxies are 0.3–2 MB. Cap defensively so a pathological response
-// can't blow memory; node-html-parser handles a few MB cheaply.
-const MAX_HTML = 4 * 1024 * 1024;
+// KO 2026 proxy is ~5.9 MB; SCT at offset ~2.2 MB, salary at ~2.5 MB —
+// the previous 4 MB cap silently truncated both comp tables. 8 MB gives
+// comfortable headroom for any large-cap while staying bounded; if a
+// future proxy exceeds this the gate will catch it.
+const MAX_HTML = 8 * 1024 * 1024;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const cache = new Map();
 export function _resetProxyCache() {

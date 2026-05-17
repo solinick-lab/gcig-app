@@ -202,3 +202,33 @@ test('parseLeadership matches the "Our Executive Officers" heading variant', () 
   assert.equal(ceo.age, 64);
   assert.equal(ceo.since, 2011);
 });
+
+// Fix 1 regression: AMZN-style lean SCT (Salary + Stock Awards + All Other only,
+// no Bonus/Option/NonEquity) must be accepted — the >=1 alt-col rule handles it.
+test('parseComp accepts a lean SCT (Salary+Stock+AllOther, no Bonus/Option/NonEquity)', () => {
+  const { rows } = parseComp(`<html><body><table>
+   <tr><td>Name and Principal Position</td><td>Year</td><td>Salary ($)</td><td>Stock Awards ($)</td><td>All Other Compensation ($)</td><td>Total ($)</td></tr>
+   <tr><td>Andrew R. Jassy Chief Executive Officer</td><td>2025</td><td>365,000</td><td>0</td><td>1,700,000</td><td>2,065,000</td></tr>
+  </table></body></html>`);
+  const j = rows.find((r) => /Jassy/.test(r.name));
+  assert.ok(j, 'lean SCT parsed'); assert.equal(j.total, 2065000); assert.match(j.title, /Chief Executive Officer/);
+});
+
+// Fix 1 regression: Director Compensation tables (Fees Earned, no Salary column) must
+// still be rejected — the salary+total+name discriminators hold.
+test('parseComp still rejects a Director Compensation table (no Salary column)', () => {
+  assert.deepEqual(parseComp(`<html><body><table>
+   <tr><td>Director</td><td>Fees Earned ($)</td><td>Stock Awards ($)</td><td>Total ($)</td></tr>
+   <tr><td>Jane Doe</td><td>100,000</td><td>200,000</td><td>300,000</td></tr></table></body></html>`), { rows: [] });
+});
+
+// Fix 2 regression: parseBoard fallback must drop non-person rows matched by the HEAD
+// regex (e.g. "Table Date, 14" from a shareholder-ownership table footnote) while
+// keeping real directors that have a valid age or since-year.
+test('parseBoard fallback drops non-person/implausible rows (e.g. "Table Date, 14")', () => {
+  const b = parseBoard(`<html><body><h2>Election of Directors</h2>
+   <p>Cover Table, 14, dated as filed.</p>
+   <p>Maria Lopez, 61, has been a director since 2015.</p></body></html>`);
+  assert.ok(!b.some((d) => /Table/.test(d.name)), 'junk "Table Date"-type row dropped');
+  assert.ok(b.some((d) => d.name === 'Maria Lopez' && d.age === 61), 'real director kept');
+});
