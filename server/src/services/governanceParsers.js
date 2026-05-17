@@ -1,7 +1,9 @@
-// MGMT parsers. Each takes proxyStatement sections (plain text) and
-// returns structured, per-field-nullable data. Pure, never throws.
-// DEF 14A prose is irregular; these favor recall and return null for
-// anything they can't confidently extract — the panel shows "—".
+// MGMT parsers. Each takes the raw DEF 14A html string and walks it
+// structurally with node-html-parser — tables found by header
+// signature, not by flattening to text and regexing (the old
+// approach the table-of-contents kept defeating). Per-field-nullable,
+// pure, never throws; recall over precision, "—" for anything not
+// confidently extractable.
 import { parseHtml, cellText, tableRows, findTableBySignature, headerMap, locateSectionText } from './htmlExtract.js';
 
 // One name-token rule for the leadership parser. The first alternative
@@ -179,33 +181,52 @@ function numFromCol(row, colIdx, nextColIdx) {
   return null;
 }
 
-// Real SCT cells are "<Name> <Title>" with the title often containing
-// "President" before the real C-suite title (e.g. "Senior Vice
-// President and Chief Financial Officer"). A lazy regex stops at the
-// FIRST alternative regardless of order, mis-splitting the name and
-// reporting "President". Take the LAST C-suite/GC/Chairman title; only
-// fall back to bare President if none exists.
+// The "Name and Principal Position" cell is the single most irregular
+// field in the whole table. Issuers pack it three different ways: name
+// then C-suite title (AAPL "Tim Cook Chief Executive Officer"); name
+// then a *non*-"Chief" title the old C-suite regex never saw, like
+// "Founder and Executive Chair", "CEO Amazon Web Services", "SVP and
+// Chief Financial Officer" (AMZN); or name and title split across
+// sibling <tr>s so the title arrives as its own cell with no name at
+// all (KO "Chairman of the Board and" on the row below "James
+// Quincey"). The footnote marker rides along glued to the surname via
+// a <sup> ("James Quincey(2)"). So don't hunt for a known title and
+// keep the prefix — that's what mis-cut "Deirdre O'Brien Senior Vice"
+// and surfaced title fragments as people. Instead read the *name*: it
+// is the leading run of capitalized word/initial tokens, and it ends
+// the moment a role word starts (or after four tokens — no executive
+// has a five-token name). A cell that opens with a role word or a
+// "(a)" column letter has no name at all; we return an empty name so
+// the caller skips it as a continuation row rather than minting a
+// phantom officer.
+const ROLE_START =
+  /^(chief|president|vice|senior|executive|chairman|chair|founder|co-?founder|ceo|cfo|coo|cto|cio|svp|evp|vp|general|former|director|head|group|global|principal|treasurer|secretary|managing|interim|deputy|corporate|operating)\b/i;
+const NAME_PIECE = /^(?:[A-Z]\.?|[A-Z][A-Za-z'’.-]*)$/;
+
 function splitNameTitle(cell) {
-  const PRIORITY_RE = /\b(Chief [A-Za-z ]+?Officer|General Counsel|Executive Chairman)\b/g;
-  let best = null, m;
-  while ((m = PRIORITY_RE.exec(cell)) !== null) best = m;
-  if (best) {
-    const name = cell
-      .slice(0, best.index)
-      .replace(/[,;]?\s*(Senior\s+)?(Executive\s+)?Vice\s+President\b.*/i, '')
-      .replace(/[,;]?\s*President\b.*/i, '')
-      .replace(/\s+and\s*$/i, '')
-      .replace(/[,;]+$/, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    return { name, title: best[1].trim() };
+  // Strip footnote markers ("(2)", "(a)", "(3)(4)") wherever they sit;
+  // keeps the surname clean and never affects the dollar columns,
+  // which are read separately.
+  const clean = String(cell || '')
+    .replace(/\(\s*[\w.,]{1,6}\s*\)/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!clean) return { name: '', title: '' };
+
+  const tokens = clean.split(' ');
+  const name = [];
+  let i = 0;
+  for (; i < tokens.length && name.length < 4; i++) {
+    const t = tokens[i];
+    if (ROLE_START.test(t) || !NAME_PIECE.test(t)) break;
+    name.push(t);
   }
-  const pres = /(?:^|\W)President\b/.exec(cell);
-  if (pres) {
-    const idx = cell.indexOf('President', pres.index);
-    return { name: cell.slice(0, idx).replace(/\s+/g, ' ').trim().replace(/[,;]$/, ''), title: 'President' };
-  }
-  return { name: cell.replace(/\s+/g, ' ').trim().replace(/[,;]$/, ''), title: '' };
+  const title = tokens.slice(i).join(' ').replace(/^[,;]\s*/, '').trim();
+  // No leading name → this is a title-only continuation cell (KO's
+  // second/third <tr> per officer) or a column-letter row; signal the
+  // caller to skip by returning an empty name, but hand back the text
+  // as title so it can be stitched onto the officer above.
+  return { name: name.join(' '), title };
 }
 
 // Summary Compensation Table, found by header signature anywhere in the
@@ -289,7 +310,6 @@ export function parseComp(html) {
 
   if (!table || hIdx < 0) return { rows: [] };
   if (h.name === undefined || h.total === undefined) return { rows: [] };
-  if (h.name === undefined || h.total === undefined) return { rows: [] };
 
   // Sorted column positions so numFromCol can bound its rightward scan.
   const colOrder = Object.values(h).filter(Number.isFinite).sort((a, b) => a - b);
@@ -307,6 +327,24 @@ export function parseComp(html) {
     const { name, title } = splitNameTitle(nameTxt);
     if (!name || seen.has(name)) continue; // first (latest year) row per officer
     seen.add(name);
+    // KO and its ilk keep only the name on the officer's first <tr>
+    // and spill the title onto the next one or two prior-year rows
+    // (their name-cell parses to no person, by construction). When
+    // the packed cell gave us nothing, stitch those fragments back
+    // on — stop at the next person, a column-letter "(a)" row, or a
+    // blank, so we never swallow the following officer's title.
+    let fullTitle = title;
+    if (!fullTitle) {
+      const parts = [];
+      for (let k = i + 1; k < all.length && parts.length < 3; k++) {
+        const txt = (all[k][h.name] || '').trim();
+        if (!txt || /^\(?[a-z]\)?$/i.test(txt)) break;
+        const split = splitNameTitle(txt);
+        if (split.name) break; // reached the next real officer
+        if (split.title) parts.push(split.title);
+      }
+      fullTitle = parts.join(' ').replace(/\s+/g, ' ').trim();
+    }
     const salary = h.salary !== undefined ? numFromCol(c, h.salary, nextCol(h.salary)) : null;
     const stock = h.stock !== undefined ? numFromCol(c, h.stock, nextCol(h.stock)) : null;
     const option = h.option !== undefined ? numFromCol(c, h.option, nextCol(h.option)) : null;
@@ -315,7 +353,7 @@ export function parseComp(html) {
     const otherPct = haveCols
       ? Math.max(0, Math.round(((total - (salary || 0) - (stock || 0) - (option || 0)) / total) * 100))
       : null;
-    rows.push({ name, title, total, salaryPct: pct(salary), stockPct: pct(stock), optionPct: pct(option), otherPct });
+    rows.push({ name, title: fullTitle, total, salaryPct: pct(salary), stockPct: pct(stock), optionPct: pct(option), otherPct });
   }
   return { rows };
 }

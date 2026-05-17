@@ -26,5 +26,31 @@ for (const f of files) {
     );
     assert.ok(Array.isArray(lead.execs) && Array.isArray(board));
     assert.ok(lead.ceo === null || typeof lead.ceo.name === 'string');
+
+    // Name quality: this is the tier we ship as the working SCT
+    // panel, so the name column must read as a real person — not a
+    // title fragment, not a footnote-tagged blob. 1–4 capitalized
+    // tokens (initials like "R." allowed), and none of the role/
+    // footnote contamination we saw leak from AMZN/KO multi-row
+    // name cells. The apostrophe class admits the typographic ’
+    // (U+2019) as well as the ASCII ' — Apple's source spells
+    // "O’Brien" with the curly form; that's a real surname, not
+    // contamination, and the digit/paren/role-word checks below are
+    // what actually fence out the garbage.
+    const NAME_OK = /^[A-Z][A-Za-z.'’-]+(?:\s+[A-Z][A-Za-z.'’-]+){1,3}$/;
+    const CONTAM =
+      /[0-9()]|\b(Chair|Chairman|Chief|Officer|President|Executive|Vice|Founder|Director|and)\b/i;
+    for (const r of comp.rows) {
+      assert.match(
+        r.name,
+        NAME_OK,
+        `${f}: comp row name "${r.name}" is not a clean 1–4 token person name`
+      );
+      assert.doesNotMatch(
+        r.name,
+        CONTAM,
+        `${f}: comp row name "${r.name}" carries title/footnote contamination`
+      );
+    }
   });
 }
