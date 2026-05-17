@@ -57,61 +57,42 @@ test('parseLeadership extracts priorRoles across an Ms./Mr. honorific', () => {
   assert.match(ceo.priorRoles[0], /President/);
 });
 
-const BOARD_SECTION = {
-  board:
-    'ELECTION OF DIRECTORS ' +
-    'Maria Lopez, age 61, has been a director since 2015. Ms. Lopez also serves ' +
-    'on the board of directors of Globex Corporation and Initech Inc. ' +
-    'She is a member of the Audit Committee and Compensation Committee. ' +
-    'David Chen, age 58, director since 2020. Mr. Chen serves on the board of ' +
-    'Soylent Corp. He chairs the Nominating Committee.',
-};
+const BOARD_HTML = `<html><body>
+<div>TABLE OF CONTENTS Election of Directors .... 10</div>
+<table><tr><td><table>
+ <tr><th>Name</th><th>Age</th><th>Director Since</th><th>Committees</th><th>Other Public Company Directorships</th></tr>
+ <tr><td>Maria Lopez</td><td>61</td><td>2015</td><td>Audit; Compensation</td><td>Globex Corporation; Initech Inc</td></tr>
+ <tr><td>Patrick O'Brien</td><td>58</td><td>2019</td><td>Nominating</td><td>Soylent Corp</td></tr>
+</table></td></tr></table></body></html>`;
 
-test('parseBoard extracts directors with age, since, committees, other boards', () => {
-  const board = parseBoard(BOARD_SECTION);
-  const maria = board.find((d) => d.name === 'Maria Lopez');
-  assert.equal(maria.age, 61);
-  assert.equal(maria.since, 2015);
-  assert.deepEqual(maria.otherBoards.sort(), ['Globex Corporation', 'Initech Inc'].sort());
-  assert.ok(maria.committees.includes('Audit'));
-  const david = board.find((d) => d.name === 'David Chen');
-  assert.deepEqual(david.otherBoards, ['Soylent Corp']);
+test('parseBoard reads the director table (age, since, committees, other boards)', () => {
+  const b = parseBoard(BOARD_HTML);
+  const m = b.find((d) => d.name === 'Maria Lopez');
+  assert.ok(m);
+  assert.equal(m.age, 61);
+  assert.equal(m.since, 2015);
+  assert.deepEqual(m.committees.sort(), ['Audit', 'Compensation'].sort());
+  assert.deepEqual(m.otherBoards.sort(), ['Globex Corporation', 'Initech Inc'].sort());
+  const o = b.find((d) => d.name === "Patrick O'Brien");
+  assert.ok(o, "Irish surname row parsed");
+  assert.equal(o.since, 2019);
 });
 
-test('parseBoard returns [] on missing section', () => {
-  assert.deepEqual(parseBoard({}), []);
+test('parseBoard text-record fallback when no director table', () => {
+  const b = parseBoard(`<html><body><h2>Election of Directors</h2>
+   <p>Maria Lopez, age 61, has been a director since June 2015. She serves on the Audit Committee.</p>
+   <p>Patrick O'Brien, age 58, director since 2019.</p></body></html>`);
+  const m = b.find((d) => d.name === 'Maria Lopez');
+  assert.ok(m, 'fallback parsed Maria');
+  assert.equal(m.age, 61);
+  assert.equal(m.since, 2015);
+  assert.ok(b.some((d) => d.name === "Patrick O'Brien" && d.since === 2019));
 });
 
-test('parseBoard extracts Irish-surname directors and month-form since', () => {
-  const board = parseBoard({
-    board:
-      "ELECTION OF DIRECTORS Seamus O'Brien, age 58, has been a director " +
-      'since June 2019. He serves on the Audit Committee. ' +
-      "Mary O'Connor, age 62, director since January 1, 2020.",
-  });
-  const ob = board.find((d) => d.name === "Seamus O'Brien");
-  assert.ok(ob, "O'Brien director should be found");
-  assert.equal(ob.age, 58);
-  assert.equal(ob.since, 2019);
-  assert.ok(ob.committees.includes('Audit'));
-  const oc = board.find((d) => d.name === "Mary O'Connor");
-  assert.ok(oc, "O'Connor director should be found");
-  assert.equal(oc.since, 2020);
-});
-
-test('parseBoard excludes lowercase connector fragments from otherBoards', () => {
-  const board = parseBoard({
-    board:
-      'ELECTION OF DIRECTORS Jane Smith, age 55, director since 2017. ' +
-      'Jane Smith serves on the board of Globex Corporation and also ' +
-      'advises several private startups.',
-  });
-  const js = board.find((d) => d.name === 'Jane Smith');
-  assert.ok(js, 'Jane Smith director should be found');
-  // Without the /^[A-Z]/ guard, the post-"and" fragment
-  // "also advises several private startups" (lowercase, no "committee"
-  // keyword) would wrongly be captured as an other board.
-  assert.deepEqual(js.otherBoards, ['Globex Corporation']);
+test('parseBoard empty/garbage → [] (never throws)', () => {
+  assert.deepEqual(parseBoard(''), []);
+  assert.deepEqual(parseBoard('<p>no table</p>'), []);
+  assert.deepEqual(parseBoard(null), []);
 });
 
 const COMP_HTML = `<html><body>
