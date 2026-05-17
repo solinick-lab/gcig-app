@@ -162,3 +162,4 @@ report). One consolidated push at the end.
   with no real tables → those legitimately stay empty (honest tier).
 - Leadership prose extraction recall is inherently limited even with
   DOM; spec/UI already say so — not a regression, an honest bound.
+- VERIFIED (recall gate, AAPL/AMZN/KO 2026): Comp tab WORKS on real large-caps (SCT parsed — incl. lean-column, $-separator, and split 2-row-header variants found+fixed during build). Board/Network/Leadership return empty for these filers: modern large-cap proxies present directors/officers as bespoke per-director "cards" with labeled fields ("Age: 58", "Director since: July 2021"), which is neither a standard director table nor inline "Name, age NN" prose. A labeled-field director-card extractor is the required follow-up sub-project (its own brainstorm→spec→build); it was deliberately NOT bolted on here as an unscoped in-loop patch.

@@ -193,7 +193,7 @@ export default function Governance({ ticker }) {
       )}
 
       <div style={{ color: 'var(--term-fg-muted)', fontSize: 11 }}>
-        Best-effort DEF 14A parsing. Large multi-section proxies (common for big-cap names) may show empty Leadership/Board/Comp tabs — structure-aware parsing is a planned follow-up.
+        Compensation is parsed from the latest DEF 14A. Board, Network, and Leadership use a structure-aware parser that does not yet handle the bespoke per-director 'card' layouts many large-cap proxies use — those tabs may be empty pending a planned follow-up.
       </div>
     </div>
   );
