@@ -34,7 +34,7 @@ export function parseLeadership(html) {
   const text =
     locateSectionText(
       root,
-      /information about (?:our )?executive officers|executive officers of the (?:company|registrant)|^executive officers$/i
+      /information about (?:our )?executive officers|(?:our )?executive officers of the (?:company|registrant)|^(?:our )?executive officers$/i
     ) || '';
   const execs = [];
   EXEC_RE.lastIndex = 0;

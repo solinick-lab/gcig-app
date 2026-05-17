@@ -190,3 +190,15 @@ test('parseBoard fallback handles middle-initial names ("Jane A. Doe, age 60,")'
   assert.equal(r.age, 58);
   assert.equal(r.since, 2019);
 });
+
+test('parseLeadership matches the "Our Executive Officers" heading variant', () => {
+  const { ceo } = parseLeadership(`<html><body>
+   <h2>Our Executive Officers</h2>
+   <p>Tim Cook, 64, has served as Chief Executive Officer since 2011.</p>
+   <h2>Corporate Governance</h2><p>unrelated</p></body></html>`);
+  assert.ok(ceo, 'CEO parsed under "Our Executive Officers" heading');
+  assert.equal(ceo.name, 'Tim Cook');
+  assert.match(ceo.title, /Chief Executive Officer/);
+  assert.equal(ceo.age, 64);
+  assert.equal(ceo.since, 2011);
+});
