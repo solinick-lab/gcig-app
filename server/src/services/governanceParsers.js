@@ -71,9 +71,13 @@ function priorRoles(text, name) {
 
 const COMMITTEE_NAMES = ['Audit', 'Compensation', 'Nominating', 'Governance', 'Risk', 'Finance'];
 
+// name + a since/tenure column is enough — many large-cap director
+// tables have no Age column (age is in bio prose). Age stays optional.
 const BOARD_SIG = (cells) => {
   const j = cells.join(' | ').toLowerCase();
-  return /\bage\b/.test(j) && /(director since|\bsince\b)/.test(j) && /name|director|nominee/.test(j);
+  const hasSince = /(director since|\bsince\b|tenure|year.*elected|first elected)/.test(j);
+  const hasName = /name|director|nominee/.test(j);
+  return hasName && hasSince;
 };
 
 // Director roster. Prefer the nominee/director table (header has Age +
@@ -91,12 +95,19 @@ export function parseBoard(html) {
     const hIdx = all.findIndex((cells) => BOARD_SIG(cells));
     if (hIdx >= 0) {
       const h = headerMap(all[hIdx]);
-      if (h.name !== undefined && h.age !== undefined) {
+      if (h.name !== undefined) {
         for (let i = hIdx + 1; i < all.length; i++) {
           const c = all[i];
           const name = (c[h.name] || '').replace(/\s+/g, ' ').trim();
-          const age = Number(String(c[h.age] || '').replace(/[^0-9]/g, ''));
-          if (!name || /^name$|^director$/i.test(name) || !Number.isFinite(age) || age < 18 || age > 100) continue;
+          // Age optional (no Age column on many large-caps); strip
+          // footnote refs by taking the first digit run.
+          const age =
+            h.age !== undefined
+              ? Number((String(c[h.age] || '').match(/\d+/) || [''])[0])
+              : null;
+          const ageValid =
+            age === null || (Number.isFinite(age) && age >= 18 && age <= 100);
+          if (!name || /^name$|^director$/i.test(name) || !ageValid) continue;
           const since =
             h.since !== undefined
               ? Number((String(c[h.since] || '').match(/\b(19|20)\d{2}\b/) || [])[0]) || null
@@ -108,11 +119,17 @@ export function parseBoard(html) {
           const otherBoards =
             h.otherboards !== undefined
               ? (c[h.otherboards] || '')
-                  .split(/;|\band\b|,(?![^()]*\))/)
+                  .split(/;|,(?![^()]*\))/)
                   .map((s) => s.replace(/\s+/g, ' ').trim().replace(/[.;]$/, ''))
                   .filter((s) => s.length > 2 && /^[A-Z]/.test(s) && !/committee|none\b/i.test(s))
               : [];
-          out.push({ name, age, since, committees, otherBoards: [...new Set(otherBoards)] });
+          out.push({
+            name,
+            age: Number.isFinite(age) ? age : null,
+            since,
+            committees,
+            otherBoards: [...new Set(otherBoards)],
+          });
         }
       }
     }
@@ -123,10 +140,16 @@ export function parseBoard(html) {
     locateSectionText(root, /election of directors|nominees? for director|board of directors/i) ||
     cellText(root);
   const TOKEN = "[A-Z](?:[a-z][A-Za-z'-]*|'[A-Z][a-z][A-Za-z'-]*)";
-  const HEAD = new RegExp(`(${TOKEN}(?:\\s+${TOKEN}){1,3}),\\s*age\\s*(\\d{2})`, 'g');
+  const HEAD = new RegExp(
+    `(${TOKEN}(?:\\s+${TOKEN}){1,3})` +
+      `(?:,\\s*age\\s*(\\d{2})|,\\s*(\\d{2})(?=\\s*,)|\\s*\\(age\\s*(\\d{2})\\))`,
+    'g'
+  );
   const heads = [];
   let m;
-  while ((m = HEAD.exec(txt)) !== null) heads.push({ name: m[1].trim(), age: Number(m[2]), at: m.index });
+  while ((m = HEAD.exec(txt)) !== null) {
+    heads.push({ name: m[1].trim(), age: Number(m[2] ?? m[3] ?? m[4]), at: m.index });
+  }
   return heads.map((hd, i) => {
     const w = txt.slice(hd.at, i + 1 < heads.length ? heads[i + 1].at : txt.length);
     const since = (w.match(/(?:director since|since)\s+(?:[A-Za-z]+\s+){0,2}(?:\d{1,2},?\s*)?((?:19|20)\d{2})/i) || [])[1];

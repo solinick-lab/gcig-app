@@ -74,9 +74,9 @@ const COL_PATTERNS = {
   nonequity: /non-?equity/i,
   total: /^total/i,
   age: /^age$/i,
-  since: /director since|^since$|since\b/i,
+  since: /director since|^since$|since\b|^tenure$|year.*elected|first elected/i,
   committees: /committee/i,
-  otherboards: /other.*(public|director|board)|public.*director/i,
+  otherboards: /other.*(public|director|board)|public.*director|public.*board/i,
 };
 export function headerMap(headerCells) {
   const out = {};

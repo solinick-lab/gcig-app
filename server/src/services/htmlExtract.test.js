@@ -133,3 +133,13 @@ test('tableRows expands colspan so header/data columns stay aligned', () => {
   assert.equal(rows[1][hm.total], '10,000,000'); // total index aligned
   assert.equal(rows[1][hm.name], 'Jane');
 });
+
+test('headerMap: since covers Tenure / Year First Elected; otherboards covers Public Company Boards', () => {
+  const a = headerMap(['Name', 'Tenure', 'Public Company Boards']);
+  assert.equal(a.name, 0);
+  assert.equal(a.since, 1);
+  assert.equal(a.otherboards, 2);
+  const b = headerMap(['Director', 'Age', 'Year First Elected', 'Other Public Company Directorships']);
+  assert.equal(b.since, 2);
+  assert.equal(b.otherboards, 3);
+});

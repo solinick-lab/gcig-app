@@ -159,6 +159,35 @@ test('buildNetwork excludes the focus company itself (case-insensitive ticker)',
   assert.deepEqual(n.nodes, []);
 });
 
+test('parseBoard: table WITHOUT an Age column (age in prose) still populates via table path', () => {
+  const b = parseBoard(`<html><body><table>
+   <tr><th>Name</th><th>Independent</th><th>Committees</th><th>Director Since</th><th>Other Public Company Directorships</th></tr>
+   <tr><td>Maria Lopez</td><td>Yes</td><td>Audit; Compensation</td><td>2015</td><td>Globex Corporation; Procter and Gamble Company</td></tr>
+  </table></body></html>`);
+  const m = b.find((d) => d.name === 'Maria Lopez');
+  assert.ok(m, 'director populated with no Age column');
+  assert.equal(m.since, 2015);
+  assert.equal(m.age, null); // honest: no age column
+  assert.deepEqual(m.committees.sort(), ['Audit', 'Compensation'].sort());
+  // "Procter and Gamble Company" must NOT be split at "and":
+  assert.deepEqual(m.otherBoards.sort(), ['Globex Corporation', 'Procter and Gamble Company'].sort());
+});
+
+test('parseBoard fallback matches the dominant "Name, NN," bio form (no "age" word) + footnote age in table', () => {
+  const f = parseBoard(`<html><body><h2>Election of Directors</h2>
+   <p>Maria Lopez, 61, has been a director since 2015. Ms. Lopez serves on the Audit Committee.</p>
+   <p>Patrick O'Brien (age 58) has served as a director since June 2019.</p></body></html>`);
+  const m = f.find((d) => d.name === 'Maria Lopez');
+  assert.ok(m, 'matched "Name, NN," bio'); assert.equal(m.age, 61); assert.equal(m.since, 2015);
+  const o = f.find((d) => d.name === "Patrick O'Brien");
+  assert.ok(o, 'matched "Name (age NN)"'); assert.equal(o.age, 58); assert.equal(o.since, 2019);
+
+  const t = parseBoard(`<html><body><table>
+   <tr><th>Name</th><th>Age</th><th>Director Since</th></tr>
+   <tr><td>Jane Doe</td><td>61(1)</td><td>2015</td></tr></table></body></html>`);
+  assert.equal(t.find((d) => d.name === 'Jane Doe').age, 61); // footnote (1) not 611
+});
+
 const COMP_REAL = `<html><body><table>
  <tr><td>Name and Principal Position</td><td>Year</td><td>Salary ($)</td><td>Bonus ($)</td><td>Stock Awards ($)</td><td>Option Awards ($)</td><td>Total ($)</td></tr>
  <tr><td>Andrew R. Jassy President and Chief Executive Officer</td><td>2025</td><td>1,000,000</td><td>0</td><td>5,000,000</td><td>3,000,000</td><td>10,000,000(3)</td></tr>
