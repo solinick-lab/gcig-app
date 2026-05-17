@@ -8,6 +8,21 @@ import { parseComp, parseBoard, parseLeadership } from './governanceParsers.js';
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '__fixtures__');
 const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('-def14a.html')) : [];
 
+// A name column reads as a person, not a title fragment, when it is
+// 1–4 capitalized tokens (initials like "R." allowed) and carries none
+// of the role/footnote words a packed Name cell glues on. The same
+// NAME_OK shape backs both the SCT panel and the board roster — they
+// fail for the same reason (a title or designation riding the name),
+// so the check is shared; only the contamination vocabulary differs
+// per call site. The apostrophe class admits the typographic ’ (U+2019)
+// as well as ASCII ' — Apple spells "O’Brien" with the curly form, a
+// real surname, not contamination.
+const NAME_OK = /^[A-Z][A-Za-z.'’-]+(?:\s+[A-Z][A-Za-z.'’-]+){1,3}$/;
+function assertCleanPersonName(name, contamRe, label) {
+  assert.match(name, NAME_OK, `${label}: "${name}" is not a clean 1–4 token person name`);
+  assert.doesNotMatch(name, contamRe, `${label}: "${name}" carries title/role contamination`);
+}
+
 test('real fixtures exist (>=1 large-cap)', () => {
   assert.ok(files.length >= 1, 'capture >=1 real DEF 14A fixture (Task 7 Step 1)');
 });
@@ -29,28 +44,27 @@ for (const f of files) {
 
     // Name quality: this is the tier we ship as the working SCT
     // panel, so the name column must read as a real person — not a
-    // title fragment, not a footnote-tagged blob. 1–4 capitalized
-    // tokens (initials like "R." allowed), and none of the role/
-    // footnote contamination we saw leak from AMZN/KO multi-row
-    // name cells. The apostrophe class admits the typographic ’
-    // (U+2019) as well as the ASCII ' — Apple's source spells
-    // "O’Brien" with the curly form; that's a real surname, not
-    // contamination, and the digit/paren/role-word checks below are
-    // what actually fence out the garbage.
-    const NAME_OK = /^[A-Z][A-Za-z.'’-]+(?:\s+[A-Z][A-Za-z.'’-]+){1,3}$/;
-    const CONTAM =
+    // title fragment, not a footnote-tagged blob. The role/footnote
+    // contamination we saw leak from AMZN/KO multi-row name cells.
+    const COMP_CONTAM =
       /[0-9()]|\b(Chair|Chairman|Chief|Officer|President|Executive|Vice|Founder|Director|and)\b/i;
     for (const r of comp.rows) {
-      assert.match(
-        r.name,
-        NAME_OK,
-        `${f}: comp row name "${r.name}" is not a clean 1–4 token person name`
-      );
-      assert.doesNotMatch(
-        r.name,
-        CONTAM,
-        `${f}: comp row name "${r.name}" carries title/footnote contamination`
-      );
+      assertCleanPersonName(r.name, COMP_CONTAM, `${f}: comp row name`);
+    }
+
+    // Same standard for the director roster. parseBoard's
+    // conventional-table fix surfaced AAPL's matrix, but its Name
+    // cell glues a trailing role designation onto the chairman
+    // ("Art Levinson Board Chair") — the same name-vs-title
+    // contamination class the SCT split already solves. For every
+    // fixture that yields board rows (MLAB and AAPL today), every
+    // director.name must read as a person, with the designation
+    // vocabulary a roster cell can trail (Board/Lead/Independent/
+    // Member/Nominee/Chairperson on top of the C-suite set).
+    const BOARD_CONTAM =
+      /[0-9()]|\b(Chair|Chairman|Chairperson|Chief|Officer|President|Vice|Founder|Director|Lead|Independent|Member|Nominee|and)\b/i;
+    for (const d of board) {
+      assertCleanPersonName(d.name, BOARD_CONTAM, `${f}: board director name`);
     }
 
     // The conventional small/mid-cap recall floor. MLAB is a

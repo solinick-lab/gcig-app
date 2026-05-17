@@ -118,7 +118,17 @@ export function parseBoard(html) {
     if (h.name !== undefined) {
       for (let i = hIdx + 1; i < all.length; i++) {
         const c = all[i];
-        const name = (c[h.name] || '').replace(/\s+/g, ' ').trim();
+        // The Name cell is mostly just a name here, but a matrix-style
+        // roster (AAPL) glues the chairman's designation onto it —
+        // "Art Levinson Board Chair". Run it through the same name/
+        // title split the SCT uses so the column reads as people, not
+        // titles. The roster carries no title field, so the remainder
+        // is dropped; if the split can't find a name (a legend or
+        // continuation row that opens with a role word) keep the raw
+        // cell and let the age/label guards below reject it — recall
+        // over precision, never drop a real director.
+        const raw = (c[h.name] || '').replace(/\s+/g, ' ').trim();
+        const name = splitNameTitle(raw).name || raw;
         // Age optional (no Age column on many large-caps); strip
         // footnote refs by taking the first digit run.
         const age =
@@ -231,8 +241,18 @@ function numFromCol(row, colIdx, nextColIdx) {
 // "(a)" column letter has no name at all; we return an empty name so
 // the caller skips it as a continuation row rather than minting a
 // phantom officer.
+//
+// The same boundary now also fences the board roster's Name column,
+// where the chairman's cell trails a role *designation* rather than a
+// C-suite title — AAPL's "Art Levinson Board Chair", or the
+// "Chairperson of the Board" / "Lead Independent Director" forms other
+// issuers use. "Board", "Lead", "Independent" and "Nominee" are the
+// words those designations open with; "Chairperson" is the longer
+// chair form the bare chairman|chair pair never matched. They're title
+// words, never the first token of a person's name — the same bet the
+// list already makes on "Director", "Head" and "Principal".
 const ROLE_START =
-  /^(chief|president|vice|senior|executive|chairman|chair|founder|co-?founder|ceo|cfo|coo|cto|cio|svp|evp|vp|general|former|director|head|group|global|principal|treasurer|secretary|managing|interim|deputy|corporate|operating)\b/i;
+  /^(chief|president|vice|senior|executive|chair(?:man|person)?|founder|co-?founder|ceo|cfo|coo|cto|cio|svp|evp|vp|general|former|director|head|group|global|principal|treasurer|secretary|managing|interim|deputy|corporate|operating|board|lead|independent|nominee)\b/i;
 const NAME_PIECE = /^(?:[A-Z]\.?|[A-Z][A-Za-z'’.-]*)$/;
 
 function splitNameTitle(cell) {
