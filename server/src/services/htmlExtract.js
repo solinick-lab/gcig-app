@@ -61,7 +61,7 @@ export function findTableBySignature(root, predicate) {
 // option, nonequity, total, age, since, committees, otherboards } with
 // any found index (others undefined).
 const COL_PATTERNS = {
-  name: /^name$|principal position|^director$|^nominee$/i,
+  name: /^name\b|principal position|^director$|^nominee$/i,
   year: /^year$/i,
   salary: /salary/i,
   bonus: /^bonus/i,

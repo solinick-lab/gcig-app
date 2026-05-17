@@ -107,3 +107,15 @@ test('headerMap does not collapse name and since on a "Director Since" header', 
   assert.equal(hm.since, 2);
   assert.notEqual(hm.name, hm.since);
 });
+
+test('headerMap recovers the "Name and Principal Executive Officers" variant without re-colliding', () => {
+  const a = headerMap(['Name and Principal Executive Officers', 'Year', 'Salary ($)', 'Total ($)']);
+  assert.equal(a.name, 0);
+  assert.equal(a.salary, 2);
+  assert.equal(a.total, 3);
+  // Director Since collision must STILL be fixed:
+  const b = headerMap(['Name', 'Age', 'Director Since', 'Committees']);
+  assert.equal(b.name, 0);
+  assert.equal(b.since, 2);
+  assert.notEqual(b.name, b.since);
+});
