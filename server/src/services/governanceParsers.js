@@ -139,6 +139,60 @@ function looksLikeHeaderRow(cells) {
 const ZW = /[​﻿]/g;
 const flat = (s) => String(s == null ? '' : s).replace(ZW, '').replace(/\s+/g, ' ').trim();
 
+// A director's biography rides on the very card/row parseBoard
+// already matched — no second fetch, no schema beyond this field.
+// It is best-effort prose: a long single string when the filer
+// publishes narrative qualifications (the AMZN/KO bio cards), the
+// terse occupation line when the filer only tabulates one (AAPL's
+// "Occupation", MLAB's "Position(s) with the Company"), and `null`
+// when the card/row carries nothing worth surfacing. A defensive
+// cap keeps a pathological card from ballooning the payload; real
+// disclosures sit well under it (KO's densest qualifications card
+// is ~2,800 chars, comfortably inside).
+const BIO_CAP = 4000;
+const tidyBio = (s) => {
+  const t = flat(s);
+  if (!t || t.length < 2) return null;
+  return t.length > BIO_CAP ? t.slice(0, BIO_CAP).trim() : t;
+};
+
+// The card families bury the same thing — the person's filed
+// qualifications/background prose — behind different scaffolding,
+// so each gets its own slice of the already-collapsed card text
+// (cellText has done the tag-strip and whitespace work; we only
+// trim the parts that aren't bio).
+//
+// AMZN prints the name first, then the role line, then the skills/
+// expertise/background narrative, and closes with the labelled
+// strip ("Age:", "Director since:", "Board committees:", "Other
+// current public company boards:"). Drop the leading name and
+// everything from that labelled tail onward; what remains is the
+// title plus the substantive prose. Anchoring the tail on "Age:"
+// is safe — it is the first label and never appears in the prose
+// above it.
+function amznCardBio(t, name) {
+  let body = flat(cellText(t));
+  if (name && body.startsWith(name)) body = body.slice(name.length).trim();
+  const cut = body.search(/\bAge:\s*\d{2}\b/i);
+  if (cut > 0) body = body.slice(0, cut).trim();
+  return tidyBio(body);
+}
+
+// KO front-loads the name and the labelled fields ("AGE: … |",
+// "DIRECTOR SINCE:", "COMMITTEES:") and only then the prose, which
+// opens at the "CAREER HIGHLIGHTS" section bar and runs through the
+// board memberships and "KEY QUALIFICATIONS AND EXPERIENCES" to the
+// end of the card. Take from that bar onward; if a card somehow
+// lacks it, fall back to the qualifications bar so a reshuffled
+// card still yields something.
+function koCardBio(t) {
+  const body = flat(cellText(t));
+  const m = body.match(
+    /(CAREER HIGHLIGHTS|KEY QUALIFICATIONS AND EXPERIENCES)[\s\S]*$/i
+  );
+  return tidyBio(m ? m[0] : '');
+}
+
 // A text node's OWN text (not its descendants'), so a label like
 // "Director since:" can be located by the element that literally
 // contains it rather than any ancestor that also contains the value.
@@ -264,6 +318,7 @@ function extractAmznCard(t) {
     since: sinceM ? Number(sinceM[1]) : null,
     committees,
     otherBoards: [...new Set(otherBoards)],
+    bio: amznCardBio(t, name),
   };
 }
 
@@ -315,6 +370,7 @@ function extractKoCard(t) {
     since,
     committees,
     otherBoards: [...new Set(otherBoards)],
+    bio: koCardBio(t),
   };
 }
 
@@ -375,6 +431,19 @@ export function parseBoard(html) {
     const all = picked.rows;
     const hIdx = picked.hIdx;
     const h = picked.h;
+    // The conventional roster carries no narrative; the one column
+    // that reads as a bio is the occupation/position cell — AAPL
+    // labels it "Occupation", MLAB "Position(s) with the Company".
+    // headerMap deliberately doesn't claim it (it would collide with
+    // the SCT's "Name and Principal Position"), so resolve the index
+    // here, off the picked header row only. The parenthesised and
+    // anchored forms keep "Name and Principal Position" from
+    // matching, so no other column is mistaken for it.
+    const occIdx = (all[hIdx] || []).findIndex((cell) =>
+      /occupation|principal occupation|position\(s\)|^position\b|present principal/i.test(
+        String(cell || '')
+      )
+    );
     if (h.name !== undefined) {
       for (let i = hIdx + 1; i < all.length; i++) {
         const c = all[i];
@@ -419,6 +488,7 @@ export function parseBoard(html) {
           since,
           committees,
           otherBoards: [...new Set(otherBoards)],
+          bio: occIdx >= 0 ? tidyBio(c[occIdx]) : null,
         });
       }
     }
@@ -449,6 +519,11 @@ export function parseBoard(html) {
         since: since ? Number(since) : null,
         committees: COMMITTEE_NAMES.filter((cm) => new RegExp(`${cm}\\s+Committee`, 'i').test(w)),
         otherBoards: [],
+        // This tier's per-director window IS the bio — the record
+        // block between one director header and the next. Keep it
+        // whole (capped); it's already the narrative the section
+        // carries for that person.
+        bio: tidyBio(w),
       };
     })
     .filter((d) => {

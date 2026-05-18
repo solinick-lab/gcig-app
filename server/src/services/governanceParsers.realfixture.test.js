@@ -99,6 +99,28 @@ for (const f of files) {
       assert.equal(sinceOf('John Sullivan'), 2009, 'MLAB: John Sullivan since');
       assert.equal(sinceOf('Gary Owens'), 2017, 'MLAB: Gary Owens since');
       assert.equal(sinceOf('Mark Capone'), 2024, 'MLAB: Mark Capone since');
+
+      // A conventional roster's only per-director prose is the
+      // "Position(s) with the Company" cell; bio is exactly that
+      // text. Gary Owens's row carries the full officer line, so it
+      // is the stable, unambiguous ground truth.
+      const bioOf = (nm) =>
+        board.find((d) => d.name.replace(/\s+/g, ' ').trim() === nm)?.bio;
+      assert.equal(
+        typeof bioOf('Gary Owens'),
+        'string',
+        `MLAB: Gary Owens bio should be a string (got ${JSON.stringify(bioOf('Gary Owens'))})`
+      );
+      assert.equal(
+        bioOf('Gary Owens'),
+        'Director, President, and Chief Executive Officer',
+        `MLAB: Gary Owens bio should equal the position cell (got ${JSON.stringify(bioOf('Gary Owens'))})`
+      );
+      assert.ok(
+        typeof bioOf('John Sullivan') === 'string' &&
+          bioOf('John Sullivan').includes('Chairperson of the Board'),
+        `MLAB: John Sullivan bio should carry the position text (got ${JSON.stringify(bioOf('John Sullivan'))})`
+      );
     }
 
     // AMZN and KO ship no conventional roster — each director is a
@@ -138,6 +160,43 @@ for (const f of files) {
         !names.includes('Keith B. Alexander'),
         `AMZN: non-nominee Keith B. Alexander leaked into the roster (${JSON.stringify(names)})`
       );
+
+      // AMZN bio = the card's role line plus its qualifications /
+      // background prose, drawn from the same card already parsed.
+      // The ground-truth phrases are sentences from the SEC-filed
+      // "Background" / "Expertise" disclosure, not layout text, so
+      // they survive a card restyle.
+      const jassy = findBy('Andrew R. Jassy');
+      assert.equal(
+        typeof jassy.bio,
+        'string',
+        `AMZN: Jassy bio should be a string (got ${JSON.stringify(jassy.bio)})`
+      );
+      assert.ok(
+        jassy.bio.length > 40,
+        `AMZN: Jassy bio should be substantive (len=${jassy.bio.length})`
+      );
+      assert.ok(
+        jassy.bio.includes(
+          'the first Chief Executive Officer and leader of Amazon Web Services'
+        ),
+        `AMZN: Jassy bio missing the AWS-history phrase (got ${JSON.stringify(jassy.bio)})`
+      );
+      assert.ok(
+        jassy.bio.includes(
+          'He founded and led Amazon Web Services since its inception in 2006'
+        ),
+        `AMZN: Jassy bio missing the AWS-founding phrase (got ${JSON.stringify(jassy.bio)})`
+      );
+      const nooyi = findBy('Indra K. Nooyi');
+      assert.ok(
+        typeof nooyi.bio === 'string' && nooyi.bio.length > 40,
+        `AMZN: Nooyi bio should be a substantive string (got ${JSON.stringify(nooyi.bio)})`
+      );
+      assert.ok(
+        nooyi.bio.includes('architect of Performance with Purpose'),
+        `AMZN: Nooyi bio missing the PepsiCo-strategy phrase (got ${JSON.stringify(nooyi.bio)})`
+      );
     }
     if (/^KO-/.test(f)) {
       const names = board.map((d) => d.name.replace(/\s+/g, ' ').trim());
@@ -160,6 +219,69 @@ for (const f of files) {
       assert.ok(
         !names.includes('Maria Elena Lagomasino'),
         `KO: montage-only Maria Elena Lagomasino leaked into the roster (${JSON.stringify(names)})`
+      );
+
+      // KO bio = the Career Highlights + Key Qualifications prose the
+      // same card already carries. Quincey's is anchored on the
+      // verbatim qualifications sentence; the phrases are filed
+      // disclosure, stable across a layout refresh.
+      const quincey = findBy('James Quincey');
+      assert.equal(
+        typeof quincey.bio,
+        'string',
+        `KO: Quincey bio should be a string (got ${JSON.stringify(quincey.bio)})`
+      );
+      assert.ok(
+        quincey.bio.length > 40,
+        `KO: Quincey bio should be substantive (len=${quincey.bio.length})`
+      );
+      assert.ok(
+        quincey.bio.includes(
+          'Chief Executive Officer of the Company since May 2017 and Chairman of the Board since April 2019'
+        ),
+        `KO: Quincey bio missing the role-history phrase (got ${JSON.stringify(quincey.bio)})`
+      );
+      assert.ok(
+        quincey.bio.includes('Over 25 years of Coca-Cola system experience'),
+        `KO: Quincey bio missing the tenure phrase (got ${JSON.stringify(quincey.bio)})`
+      );
+      const allen = findBy('Herb Allen');
+      assert.ok(
+        typeof allen.bio === 'string' && allen.bio.length > 40,
+        `KO: Allen bio should be a substantive string (got ${JSON.stringify(allen.bio)})`
+      );
+      assert.ok(
+        allen.bio.includes(
+          'President of Allen & Company LLC, a privately held investment banking firm'
+        ),
+        `KO: Allen bio missing the qualifications phrase (got ${JSON.stringify(allen.bio)})`
+      );
+    }
+
+    // AAPL is the matrix-style conventional roster: the only bio
+    // text the document carries in that table is the "Occupation"
+    // column. Tim Cook's "CEO, Apple" is the canonical short form;
+    // Levinson exercises the chairman row whose Name cell trails a
+    // designation, proving the occupation read is independent of the
+    // name split.
+    if (/^AAPL-/.test(f)) {
+      const cook = findBy('Tim Cook');
+      assert.ok(cook, `AAPL: roster missing Tim Cook (${JSON.stringify(board.map((d) => d.name))})`);
+      assert.equal(
+        typeof cook.bio,
+        'string',
+        `AAPL: Cook bio should be a string (got ${JSON.stringify(cook.bio)})`
+      );
+      assert.equal(
+        cook.bio,
+        'CEO, Apple',
+        `AAPL: Cook bio should equal the occupation cell (got ${JSON.stringify(cook.bio)})`
+      );
+      const levinson = findBy('Art Levinson');
+      assert.ok(
+        typeof levinson.bio === 'string' &&
+          levinson.bio.includes('Founder and CEO, Calico'),
+        `AAPL: Levinson bio should carry the occupation text (got ${JSON.stringify(levinson.bio)})`
       );
     }
 
