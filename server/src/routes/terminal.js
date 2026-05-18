@@ -11,6 +11,7 @@ import { getPeers, getPeerSnapshot } from '../services/marketData.js';
 import { getNewsForTicker } from '../services/news.js';
 import { getWorldIndices, REGION_ORDER } from '../services/worldIndices.js';
 import { getInsiderTransactions } from '../services/insiderTx.js';
+import { getLiveQuotes } from '../services/liveQuotes.js';
 
 // Terminal — AI-driven endpoints that back the /terminal workstation.
 // Quote/news/fundamentals data is reused from /api/holdings/* (already
@@ -161,6 +162,46 @@ export async function execBiosHandler(req, res, deps = {}) {
 router.get('/governance/:ticker/exec-bios', (req, res) =>
   execBiosHandler(req, res)
 );
+
+// GET /quotes?tickers=A,B,C — the only live-price tap the terminal's
+// quote panels (DES, Peers, MOVR) draw on. Thin by design: it owns the
+// abuse net, not the cache. liveQuotes.js already de-dupes/upper-cases
+// and deliberately does not cap (a caller passes only its on-screen
+// set); the route caps at 40 so a hand-crafted ?tickers= can't fan a
+// single request into a Finnhub burst — on-screen sets are an order of
+// magnitude smaller, so a legitimate panel never trips it. A simply-
+// empty list is not an error: unlike the single-path-param governance
+// routes (which 400 a malformed ticker), this takes a free-form list
+// and the service itself degrades empty/junk to {}, so the lenient,
+// honest answer is a 200 {} — the same never-error posture as exec-bios
+// rather than a 4xx.
+//
+// Handler extracted with an injectable service (the shape
+// terminal.quotes.test.js uses to stay off the network) and wrapped in
+// its own try/catch: liveQuotes.js is contractually never-throws, but
+// the route does not lean on that — any unexpected rejection still
+// degrades to a 200 {} with a warn, so this endpoint can never 5xx and
+// a failed poll just leaves the panel on its last good values.
+export async function quotesHandler(req, res, deps = {}) {
+  const fetchQuotes = deps.getLiveQuotes || getLiveQuotes;
+  const list = Array.from(
+    new Set(
+      String(req.query?.tickers || '')
+        .split(',')
+        .map((t) => t.trim().toUpperCase())
+        .filter(Boolean)
+    )
+  ).slice(0, 40);
+  if (list.length === 0) return res.json({});
+  try {
+    res.json(await fetchQuotes(list));
+  } catch (err) {
+    console.warn('terminal/quotes degraded:', err.message);
+    res.json({});
+  }
+}
+
+router.get('/quotes', (req, res) => quotesHandler(req, res));
 
 // MOVR — every holding and how much it's up or down today, read live
 // from the positions sheet (same source as the dashboard). Not the
