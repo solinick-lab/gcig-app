@@ -140,6 +140,9 @@ export default function CashInterestCard({
                 <div className="mt-0.5 font-serif text-base font-semibold text-navy tabular-nums">
                   {fmtMoney(q.avgCash)}
                 </div>
+                <div className="text-[10px] font-semibold text-gold-700">
+                  in FGTXX · GS Gov MMF
+                </div>
                 <div className="text-[10px] text-navy-300">
                   avg over {q.days} {q.days === 1 ? 'day' : 'days'}
                 </div>
