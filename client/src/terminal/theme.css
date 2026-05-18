@@ -806,3 +806,67 @@
   margin-right: 6px;
   white-space: nowrap;
 }
+
+/* ── Price tick flash ────────────────────────────────────────────────
+ *
+ * The Bloomberg cue: when a live-refreshed LAST/level changes, its
+ * cell briefly washes green (uptick) or red (downtick) and fades back
+ * to nothing over ~0.9s, so the eye catches the move on an otherwise
+ * silently-changing number. Same shape as the news flash above —
+ * background-only, single pass, ease-out — just two-toned and on the
+ * price cell. usePriceFlash adds .tick-up / .tick-down for ~900ms and
+ * then removes it (freeing the cell to flash again on the next tick);
+ * the animation is one-shot so re-adding the class re-fires it.
+ *
+ * The span FlashPrice renders is inline and sits *inside* the existing
+ * cell (a <td> in MOVR/PEER, the grid cell itself in WEI, the
+ * term-stat-value span in DES), so the wash hugs the number without
+ * touching column widths or the formatted text. The alpha is low
+ * enough that the white/amber digits stay readable through the pulse —
+ * this is a highlight behind the value, never a text-color swap. The
+ * inline padding/radius only shapes that highlight into a tidy pill
+ * around the digits; on an inline span it adds a few px of content
+ * advance, not a column-geometry change, and the right-aligned num
+ * cells already carry their own 6px cell padding so nothing clips. */
+
+[data-theme='terminal'] .tick-up,
+[data-theme='terminal'] .tick-down {
+  border-radius: 2px;
+  padding: 1px 3px;
+}
+
+[data-theme='terminal'] .tick-up {
+  animation: term-tick-up 0.9s ease-out 1;
+}
+
+[data-theme='terminal'] .tick-down {
+  animation: term-tick-down 0.9s ease-out 1;
+}
+
+@keyframes term-tick-up {
+  0% {
+    background-color: rgba(0, 216, 96, 0.42);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes term-tick-down {
+  0% {
+    background-color: rgba(255, 64, 64, 0.42);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+/* Decorative only: when the reader asks for less motion, drop the
+   animation entirely. The value still updates in place — only the
+   pulse goes away — so no information is lost. */
+@media (prefers-reduced-motion: reduce) {
+  [data-theme='terminal'] .tick-up,
+  [data-theme='terminal'] .tick-down {
+    animation: none;
+  }
+}

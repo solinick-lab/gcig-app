@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client.js';
 import useLiveRefresh from '../hooks/useLiveRefresh.js';
+import FlashPrice from '../components/FlashPrice.jsx';
 
 // DES — company description: live quote + fundamentals + business summary + AI brief.
 // Reuses /api/holdings/info/:ticker (already exists, finnhub-shaped).
@@ -139,7 +140,7 @@ export default function Description({ ticker }) {
       </div>
 
       <div className="term-stat-grid">
-        <Stat label="Last" value={fmt.price(last)} cls="" />
+        <Stat label="Last" value={fmt.price(last)} cls="" flashValue={last} />
         <Stat label="Chg" value={fmt.abs(chg)} cls={chgClass} />
         <Stat label="Chg %" value={fmt.pct(chgPct)} cls={chgClass} />
         <Stat label="Prev Close" value={fmt.price(prev)} />
@@ -167,11 +168,25 @@ export default function Description({ ticker }) {
   );
 }
 
-function Stat({ label, value, cls = '' }) {
+// `flashValue`, when passed, is the live numeric this stat should
+// tick-flash on (only the Last stat opts in — the rest render exactly
+// as before). The flash wraps the already-formatted value *inside* the
+// term-stat-value span, so the label/value layout, the pos/neg color
+// class and the text itself are all undisturbed; it just adds the
+// transient background pulse around the same number. `flashValue ===
+// undefined` is the no-flash path, distinct from a real but null price
+// (FlashPrice/usePriceFlash treat non-finite as "no tick" anyway).
+function Stat({ label, value, cls = '', flashValue }) {
   return (
     <div className="term-stat">
       <span className="term-stat-label">{label}</span>
-      <span className={`term-stat-value ${cls}`}>{value}</span>
+      <span className={`term-stat-value ${cls}`}>
+        {flashValue === undefined ? (
+          value
+        ) : (
+          <FlashPrice value={flashValue}>{value}</FlashPrice>
+        )}
+      </span>
     </div>
   );
 }

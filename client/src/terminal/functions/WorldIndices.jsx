@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../../api/client.js';
 import useLiveRefresh from '../hooks/useLiveRefresh.js';
+import FlashPrice from '../components/FlashPrice.jsx';
 
 // WEI — world equity indices. No ticker; the basket is fixed server-side
 // (GET /api/terminal/indices) and grouped by region. Same shape as the
@@ -178,7 +179,9 @@ export default function WorldIndices() {
                         {r.symbol}
                       </span>
                     </span>
-                    <span className="num">{fmt.level(r.last)}</span>
+                    <FlashPrice value={r.last} className="num">
+                      {fmt.level(r.last)}
+                    </FlashPrice>
                     <span className={`num ${cls}`}>{fmt.chg(r.change)}</span>
                     <span className={`num ${cls}`}>
                       {fmt.pct(r.changePercent)}

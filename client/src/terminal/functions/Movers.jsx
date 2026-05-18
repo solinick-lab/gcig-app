@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../../api/client.js';
 import useLiveRefresh from '../hooks/useLiveRefresh.js';
+import FlashPrice from '../components/FlashPrice.jsx';
 
 // MOVR — every holding in the book and how much it's up or down today.
 // The holdings *list* (which tickers, the order, cash-exclusion, the
@@ -192,7 +193,9 @@ export default function Movers({ onOpen }) {
               >
                 <td className="rank">{i + 1}</td>
                 <td className="sym" title={m.name}>{m.ticker}</td>
-                <td className="num">{fmt.px(m.last)}</td>
+                <td className="num">
+                  <FlashPrice value={m.last}>{fmt.px(m.last)}</FlashPrice>
+                </td>
                 <td className={`num ${m.changePct >= 0 ? 'pos' : 'neg'}`}>
                   {fmt.pct(m.changePct)}
                 </td>

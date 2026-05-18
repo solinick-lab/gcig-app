@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../../api/client.js';
 import useLiveRefresh from '../hooks/useLiveRefresh.js';
+import FlashPrice from '../components/FlashPrice.jsx';
 
 // PEER — sector peer comparison. Finnhub's peer set for the focused
 // ticker plus a compact fundamentals snapshot per name, with the
@@ -201,7 +202,9 @@ export default function Peers({ ticker, onOpen }) {
                   {r.ticker}
                   {r.name ? <span className="peer-name">{r.name}</span> : null}
                 </td>
-                <td className="num">{fmt.px(r.price)}</td>
+                <td className="num">
+                  <FlashPrice value={r.price}>{fmt.px(r.price)}</FlashPrice>
+                </td>
                 <td className={`num ${r.changePct == null ? '' : r.changePct >= 0 ? 'pos' : 'neg'}`}>
                   {fmt.pct(r.changePct)}
                 </td>
