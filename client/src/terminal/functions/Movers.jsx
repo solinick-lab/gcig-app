@@ -13,7 +13,7 @@ const fmt = {
     v == null || Number.isNaN(v) ? '—' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`,
 };
 
-export default function Movers() {
+export default function Movers({ onOpen }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
@@ -83,6 +83,16 @@ export default function Movers() {
 
   const rows = data.rows || [];
 
+  // Enter/Space activate a clickable row, matching the app's existing
+  // role="button" rows (see AiChat). Space is preventDefault'd so the
+  // panel doesn't scroll out from under the opening DES pane.
+  const rowKey = (fn) => (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      fn();
+    }
+  };
+
   return (
     <div className="term-panel">
       <div className="term-panel-header">
@@ -115,7 +125,15 @@ export default function Movers() {
           </thead>
           <tbody>
             {rows.map((m, i) => (
-              <tr key={m.ticker}>
+              <tr
+                key={m.ticker}
+                className="term-row-link"
+                role="button"
+                tabIndex={0}
+                onClick={() => onOpen?.({ ticker: m.ticker, fn: 'DES' })}
+                onKeyDown={rowKey(() => onOpen?.({ ticker: m.ticker, fn: 'DES' }))}
+                title={`Open ${m.ticker} DES`}
+              >
                 <td className="rank">{i + 1}</td>
                 <td className="sym" title={m.name}>{m.ticker}</td>
                 <td className="num">{fmt.px(m.last)}</td>
@@ -130,7 +148,7 @@ export default function Movers() {
 
       <div style={{ color: 'var(--term-fg-muted)', fontSize: 11 }}>
         GCIG holdings · today's move, live from the positions sheet. Cash
-        excluded.
+        excluded · click any row to open its DES.
       </div>
     </div>
   );
