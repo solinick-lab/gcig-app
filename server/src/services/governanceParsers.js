@@ -52,8 +52,34 @@ export function parseLeadership(html) {
       totalComp: null,
     });
   }
-  const ceo = execs.find((e) => /chief executive officer/i.test(e.title)) || execs[0] || null;
-  return { ceo: ceo || null, execs };
+  if (execs.length) {
+    const ceo = execs.find((e) => /chief executive officer/i.test(e.title)) || execs[0];
+    return { ceo: ceo || null, execs };
+  }
+
+  // Large-cap proxies (AMZN, KO) carry no executive-officer bio
+  // section at all — by SEC rule it lives in the 10-K, and the
+  // heading regex above finds nothing in either. Rather than report
+  // an empty leadership tab, fall back to the one place the proxy
+  // does name the officers: the Summary Compensation Table the comp
+  // tier already parses. Age and tenure are genuinely not disclosed
+  // for execs there; null is the honest value, not a parse miss. The
+  // prose path stays first and untouched, so any filer that *does*
+  // publish a real exec section is unaffected.
+  const compRows = parseComp(html).rows;
+  const sctExecs = compRows.map((r) => ({
+    name: r.name,
+    title: r.title,
+    age: null,
+    since: null,
+    priorRoles: [],
+    totalComp: r.total ?? null,
+  }));
+  const sctCeo =
+    sctExecs.find((e) => /chief executive officer/i.test(e.title)) ||
+    sctExecs[0] ||
+    null;
+  return { ceo: sctCeo, execs: sctExecs };
 }
 
 const COMMITTEE_NAMES = ['Audit', 'Compensation', 'Nominating', 'Governance', 'Risk', 'Finance'];
@@ -93,6 +119,240 @@ function looksLikeHeaderRow(cells) {
   return cells.every((c) => {
     const t = String(c || '');
     return t.length <= 60 && !/[✓✔�]/.test(t);
+  });
+}
+
+// The bio-card tier. Some large-caps (AMZN, KO) don't publish a
+// director roster table or inline bio prose at all — every director
+// is a self-contained styled "card" laid out as its own one-off
+// <table>: a headshot, a name in the house display face, an
+// age/tenure strip, committee and board lines. There is no header
+// row to signature-match and no narrative to regex; the only stable
+// hook is the card's own typography. This tier runs ONLY when the
+// conventional table and prose tiers came up empty, so the working
+// filers (MLAB's roster, AAPL's matrix) never reach it.
+//
+// Whitespace-collapsed text, with the zero-width space (U+200B) the
+// card layouts pack between cells stripped — it otherwise wedges
+// itself into the middle of "Royal␣Philips" and breaks every label
+// boundary. cellText already collapses runs; we only add the U+200B.
+const ZW = /[​﻿]/g;
+const flat = (s) => String(s == null ? '' : s).replace(ZW, '').replace(/\s+/g, ' ').trim();
+
+// A text node's OWN text (not its descendants'), so a label like
+// "Director since:" can be located by the element that literally
+// contains it rather than any ancestor that also contains the value.
+function ownText(el) {
+  if (!el || !el.childNodes) return '';
+  return flat(
+    el.childNodes
+      .filter((c) => c.nodeType === 3)
+      .map((c) => String(c.text || ''))
+      .join('')
+  );
+}
+
+// The two card families differ only in which typed node carries the
+// name and how the fields are labelled; detection is one shape. AMZN
+// prints the name in a bold amber 10pt <div>; KO in a 24pt bold <b>.
+// A card always shows a "since" label too — that label, present in
+// the SAME table as the styled name, is what separates a real card
+// from every look-alike the document also contains (proxy-summary
+// nominee bullets, the skills/committee matrices, the photo montage,
+// the ownership and compensation tables): those carry names but no
+// per-director age/tenure label, or a label with no styled name.
+function amznNameNodes(t) {
+  return t.querySelectorAll('div').filter((d) => {
+    const s = String(d.getAttribute('style') || '').toLowerCase();
+    return (
+      s.includes('font-weight:bold') &&
+      s.includes('color:#ff9e15') &&
+      s.includes('font-size:10pt')
+    );
+  });
+}
+function koNameNodes(t) {
+  return t.querySelectorAll('b').filter((b) => {
+    const s = String(b.getAttribute('style') || '').toLowerCase();
+    return s.includes('font-size:24pt') && s.includes('font-weight:bold');
+  });
+}
+// KO runs the label and the year as separate <b> nodes inside one
+// <p> ("DIRECTOR SINCE:" then the value), and the very same card
+// carries "CHAIRMAN SINCE:" / "LEAD INDEPENDENT DIRECTOR SINCE:" for
+// the chair and lead director. A regex over the card's collapsed
+// text picks the wrong year there (Weinberg's lead-director 2024
+// instead of his board 2015, because "INDEPENDENT DIRECTOR" feeds a
+// false word boundary). Anchor on the <b> whose own text is exactly
+// the bare "DIRECTOR SINCE:" label and read the year off that node's
+// own <p>, so the sibling SINCE lines can't bleed in.
+function koHasDirectorSinceLabel(t) {
+  return t
+    .querySelectorAll('b')
+    .some((b) => /^DIRECTOR SINCE:\s*$/i.test(ownText(b)));
+}
+
+// Uppercase → Title Case, KO only (its cards print names all-caps;
+// every other filer is already mixed-case and must not be touched).
+// A single-letter initial keeps its dot ("C." stays "C."); diacritic
+// letters are preserved because toLowerCase/charAt handle them
+// natively ("ANA BOTÍN" → "Ana Botín", "CHRISTOPHER C. DAVIS" →
+// "Christopher C. Davis").
+function titleCaseName(s) {
+  return flat(s)
+    .toLowerCase()
+    .split(' ')
+    .map((w) => {
+      if (!w) return w;
+      if (/^[a-z]\.$/.test(w)) return w[0].toUpperCase() + '.';
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    })
+    .join(' ');
+}
+
+const isNoneVal = (s) => !s || /^none$/i.test(flat(s));
+
+// AMZN labels each field in its own node whose parent cell holds
+// "Label: value" ("Board committees: Audit (Chair)"). Find the node
+// whose own text is the label, read the parent's collapsed text,
+// strip the label prefix. More reliable than slicing the whole card
+// on label order — the order isn't fixed across cards.
+function amznFieldValue(t, labelRe) {
+  for (const e of t.querySelectorAll('*')) {
+    const ot = ownText(e);
+    if (ot.length < 240 && labelRe.test(ot)) {
+      const ptxt = flat(cellText(e.parentNode));
+      const m = ptxt.match(new RegExp(labelRe.source + '\\s*(.*)', 'i'));
+      if (m && m[1]) return flat(m[1]);
+    }
+  }
+  return '';
+}
+
+function extractAmznCard(t) {
+  const nameNode = amznNameNodes(t)[0];
+  const card = flat(cellText(t));
+  const name = flat(cellText(nameNode));
+  const ageM = card.match(/Age:\s*(\d{2})/i);
+  // Tenure prints as "Director since: July 1994" — keep only the
+  // year (the spec stores `since` as a Number, matching the
+  // conventional path's MLAB/AAPL output).
+  const sinceM = card.match(/Director since:\s*(?:[A-Za-z]+\s+)?((?:19|20)\d{2})/i);
+  const commRaw = amznFieldValue(t, /Board committees?:/i);
+  const obRaw = amznFieldValue(t, /Other current public company boards?:/i);
+  // No reliable inter-item delimiter on AMZN cards: committees are
+  // run together with only "(Chair)" as punctuation and boards are
+  // space-joined company names. Split on ";" where present (future-
+  // proofing other AMZN-family filers); otherwise keep the value as
+  // a single best-effort entry. Recall over precision — the gate
+  // asserts name/age/since, and over-fitting company-name splits to
+  // this one fixture would be dishonest.
+  const committees = isNoneVal(commRaw)
+    ? []
+    : commRaw
+        .split(';')
+        .map((x) => flat(x).replace(/\s*\(Chair\)\s*$/i, ''))
+        .filter((x) => x && !isNoneVal(x));
+  const otherBoards = isNoneVal(obRaw)
+    ? []
+    : (obRaw.includes(';') ? obRaw.split(';') : [obRaw])
+        .map((x) => flat(x).replace(/[.;]+$/, ''))
+        .filter((x) => x.length > 2 && !isNoneVal(x));
+  return {
+    name: splitNameTitle(name).name || name,
+    age: ageM ? Number(ageM[1]) : null,
+    since: sinceM ? Number(sinceM[1]) : null,
+    committees,
+    otherBoards: [...new Set(otherBoards)],
+  };
+}
+
+function extractKoCard(t) {
+  const nameNode = koNameNodes(t)[0];
+  const card = flat(cellText(t));
+  const name = titleCaseName(cellText(nameNode));
+  const ageM = card.match(/AGE:\s*(\d{2})/);
+  let since = null;
+  const sinceB = t
+    .querySelectorAll('b')
+    .find((b) => /^DIRECTOR SINCE:\s*$/i.test(ownText(b)));
+  if (sinceB) {
+    const pTxt = flat(cellText(sinceB.parentNode));
+    const ym = pTxt.match(/DIRECTOR SINCE:\s*((?:19|20)\d{2})/i);
+    if (ym) since = Number(ym[1]);
+  }
+  // Committees are ";"-delimited up to the next section bar.
+  const cm = card.match(
+    /COMMITTEES:\s*(.*?)(?:CAREER HIGHLIGHTS|PUBLIC BOARD MEMBERSHIPS|$)/
+  );
+  const committees = cm && cm[1]
+    ? cm[1]
+        .split(';')
+        .map((x) => flat(x).replace(/\s*\(Chair\)\s*$/i, ''))
+        .filter(Boolean)
+    : [];
+  // Boards are "●"-bulleted under "Current Public Company Boards:".
+  // Stop at "Previous ..." (do not merge past boards) and at the
+  // registered-funds sub-list some directors carry. Strip the
+  // "(since YYYY)" / "(Alternate)" trailers. Best-effort, not gated.
+  const seg = card.match(
+    /Current Public Company Boards:(.*?)(?:Previous Public Company Boards|Current Boards for Registered|CAREER HIGHLIGHTS|$)/i
+  );
+  const otherBoards = seg && seg[1]
+    ? seg[1]
+        .split('●')
+        .map((x) =>
+          flat(x)
+            .replace(/\s*\((?:since[^)]*|Alternate)\)\s*/gi, ' ')
+            .replace(/[.;,]+$/, '')
+            .trim()
+        )
+        .filter((x) => x.length > 2 && !isNoneVal(x))
+    : [];
+  return {
+    name,
+    age: ageM ? Number(ageM[1]) : null,
+    since,
+    committees,
+    otherBoards: [...new Set(otherBoards)],
+  };
+}
+
+// Walk every table in document order (NOT deepest-wins — each card
+// is its own table and they're siblings, so all eleven must be
+// collected, exactly the rationale behind findTablesBySignature).
+// A table is a director card iff it has exactly one styled name node
+// of a known family AND that family's since-label in the same table,
+// and its collapsed text is bounded (< 4000 chars excludes the
+// wrapper/summary/montage tables, which are far larger or carry many
+// names). One styled name per table is an invariant of both filers.
+function parseBoardCards(root) {
+  const out = [];
+  for (const t of root.querySelectorAll('table')) {
+    const card = flat(cellText(t));
+    if (!card || card.length >= 4000) continue;
+
+    const amznNames = amznNameNodes(t);
+    if (amznNames.length === 1 && /director since:/i.test(card)) {
+      const d = extractAmznCard(t);
+      if (d.name) out.push(d);
+      continue;
+    }
+    const koNames = koNameNodes(t);
+    if (koNames.length === 1 && koHasDirectorSinceLabel(t)) {
+      const d = extractKoCard(t);
+      if (d.name) out.push(d);
+      continue;
+    }
+  }
+  // Same numeric net the other tiers use as a last guard: a real
+  // director has a plausible age or tenure year (or genuinely
+  // neither — never drop a real name on that alone).
+  return out.filter((d) => {
+    const ageOk = d.age === null || (Number.isFinite(d.age) && d.age >= 18 && d.age <= 100);
+    const sinceOk =
+      d.since === null || (Number.isFinite(d.since) && d.since >= 1900 && d.since <= 2100);
+    return d.name && ageOk && sinceOk;
   });
 }
 
@@ -179,7 +439,7 @@ export function parseBoard(html) {
   while ((m = HEAD.exec(txt)) !== null) {
     heads.push({ name: m[1].trim(), age: Number(m[2] ?? m[3] ?? m[4]), at: m.index });
   }
-  return heads
+  const prose = heads
     .map((hd, i) => {
       const w = txt.slice(hd.at, i + 1 < heads.length ? heads[i + 1].at : txt.length);
       const since = (w.match(/(?:director since|since)\s+(?:[A-Za-z]+\s+){0,2}(?:\d{1,2},?\s*)?((?:19|20)\d{2})/i) || [])[1];
@@ -198,6 +458,14 @@ export function parseBoard(html) {
       const sinceOk = Number.isFinite(d.since) && d.since >= 1900 && d.since <= 2100;
       return personName && (ageOk || sinceOk);
     });
+  if (prose.length) return prose;
+
+  // Last tier: the bespoke per-director bio cards (AMZN, KO). Only
+  // reached when neither the conventional roster table nor the
+  // section prose yielded a single director, so MLAB and AAPL —
+  // which resolve on the table path above — never enter here and
+  // stay byte-identical.
+  return parseBoardCards(root);
 }
 
 const toNum = (s) => {
