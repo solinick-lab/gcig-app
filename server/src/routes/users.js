@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import prisma from '../db.js';
 import {
   verifyJwt,
-  requireAdmin,
+  requirePresidentOrSuperAdmin,
   requireExecutive,
   requireSuperAdmin,
   requireRole,
@@ -746,9 +746,9 @@ export async function stepDownHandler(req, res, deps = {}) {
   res.json(updated);
 }
 
-// President-only. A former president is, by definition, a former
-// *President*, so only a sitting President can perform the step-down.
-router.post('/:id/step-down', requireAdmin, (req, res) =>
+// A sitting President OR the owner/super-admin. The owner must be able to
+// perform a handover even without holding the President role themselves.
+router.post('/:id/step-down', requirePresidentOrSuperAdmin, (req, res) =>
   stepDownHandler(req, res)
 );
 

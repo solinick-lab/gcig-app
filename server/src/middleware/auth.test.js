@@ -6,6 +6,7 @@ import {
   requireRole,
   requireExecutive,
   requireAdmin,
+  requirePresidentOrSuperAdmin,
 } from './auth.js';
 
 // Minimal Express test doubles, matching the dependency-injection /
@@ -101,6 +102,39 @@ test('requireAdmin denies a FormerPresident', () => {
   const { res, nextCalled } = runGate(requireAdmin, {
     role: 'FormerPresident',
   });
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 403);
+});
+
+// ─── requirePresidentOrSuperAdmin (step-down gate) ─────────────────────
+// A sitting President OR the owner/super-admin may perform the
+// presidential step-down. The owner must not need the President role.
+
+test('requirePresidentOrSuperAdmin allows a sitting President', () => {
+  const { nextCalled } = runGate(requirePresidentOrSuperAdmin, {
+    role: 'President',
+  });
+  assert.equal(nextCalled, true);
+});
+
+test('requirePresidentOrSuperAdmin allows the owner/super-admin regardless of role', () => {
+  const { nextCalled } = runGate(requirePresidentOrSuperAdmin, {
+    role: 'JuniorAnalyst',
+    isSuperAdmin: true,
+  });
+  assert.equal(nextCalled, true);
+});
+
+test('requirePresidentOrSuperAdmin denies a non-President, non-owner', () => {
+  const { res, nextCalled } = runGate(requirePresidentOrSuperAdmin, {
+    role: 'Analyst',
+  });
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 403);
+});
+
+test('requirePresidentOrSuperAdmin denies when unauthenticated', () => {
+  const { res, nextCalled } = runGate(requirePresidentOrSuperAdmin, undefined);
   assert.equal(nextCalled, false);
   assert.equal(res.statusCode, 403);
 });

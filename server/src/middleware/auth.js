@@ -97,6 +97,17 @@ export function requireAdmin(req, res, next) {
   next();
 }
 
+// A sitting President OR the owner/super-admin. Used for the presidential
+// step-down: the owner must be able to perform a handover even without
+// holding the President role themselves. (isSuperAdmin is set in verifyJwt
+// from an email match — see isSuperAdminEmail below.)
+export function requirePresidentOrSuperAdmin(req, res, next) {
+  if (req.user && (req.user.role === 'President' || req.user.isSuperAdmin)) {
+    return next();
+  }
+  return res.status(403).json({ error: 'President or owner required' });
+}
+
 // Super admin = owner of the app. Identified by email match against the
 // SUPER_ADMIN_EMAIL env var (comma-separated list supported for future
 // flexibility). Sits above President and is the ONLY tier that can touch a

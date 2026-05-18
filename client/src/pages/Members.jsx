@@ -213,7 +213,7 @@ export default function Members({ embedded = false } = {}) {
               <div className="mt-2">
                 <ExtraRoleEditor user={u} onChange={load} />
               </div>
-              {isAdmin && u.role === 'President' && (
+              {(isAdmin || isSuperAdmin) && u.role === 'President' && (
                 <div className="mt-2">
                   <button
                     onClick={() => handleStepDown(u.id, u.name)}
@@ -311,7 +311,7 @@ export default function Members({ embedded = false } = {}) {
                     )}
                   </td>
                   <td className="py-3 pr-4 text-right">
-                    {isAdmin && u.role === 'President' && (
+                    {(isAdmin || isSuperAdmin) && u.role === 'President' && (
                       <button
                         onClick={() => handleStepDown(u.id, u.name)}
                         className="mr-2 inline-flex items-center gap-1 text-xs font-semibold text-gold-700 underline"
