@@ -137,13 +137,20 @@ export default function Peers({ ticker, onOpen }) {
   // tick yet, or a Finnhub miss → null for that name) so a cell never
   // blanks out something it was already showing. Everything else on
   // the row is left exactly as the fundamentals snapshot loaded it.
+  //
+  // Units: /terminal/quotes' changePct is Finnhub's `dp`, already a
+  // percent (1.23 == +1.23%), while getPeerSnapshot's changePct and
+  // fmt.pct here speak the fraction convention ((c-prev)/prev, fmt.pct
+  // does the ×100). We divide the live changePct by 100 to land in
+  // that convention so the cell shows the true percent; the snapshot
+  // fallback is already a fraction and is left untouched. Mirrors MOVR.
   const rows = (data.rows || []).map((r) => {
     const q = liveQuotes ? liveQuotes[String(r.ticker).toUpperCase()] : null;
     if (!q) return r;
     return {
       ...r,
       price: q.last != null ? q.last : r.price,
-      changePct: q.changePct != null ? q.changePct : r.changePct,
+      changePct: q.changePct != null ? q.changePct / 100 : r.changePct,
     };
   });
 
