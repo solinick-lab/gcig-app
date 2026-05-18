@@ -256,6 +256,55 @@ for (const f of files) {
         ),
         `KO: Allen bio missing the qualifications phrase (got ${JSON.stringify(allen.bio)})`
       );
+
+      // The bio capture used to weld the card's all-caps section
+      // bars ("CAREER HIGHLIGHTS", "PUBLIC BOARD MEMBERSHIPS", "KEY
+      // QUALIFICATIONS AND EXPERIENCES") straight onto the prose, so
+      // every KO director opened with run-together gibberish — Herb
+      // Allen read "CAREER HIGHLIGHTSPUBLIC BOARD MEMBERSHIPSAllen &
+      // Company LLC…". The bars are layout chrome, never content:
+      // for every KO director that has a bio it must read as prose,
+      // not start with a bar label, and never contain the welded
+      // "CAREER HIGHLIGHTSPUBLIC BOARD MEMBERSHIPS" run. Asserted for
+      // the whole roster, not one director, so the cleanup can't be
+      // a per-card patch.
+      for (const d of board) {
+        if (d.bio == null) continue;
+        assert.equal(
+          typeof d.bio,
+          'string',
+          `KO: ${d.name} bio should be a string or null (got ${JSON.stringify(d.bio)})`
+        );
+        assert.ok(
+          !d.bio.includes('CAREER HIGHLIGHTSPUBLIC BOARD MEMBERSHIPS'),
+          `KO: ${d.name} bio still welds the section bars (got ${JSON.stringify(d.bio.slice(0, 160))})`
+        );
+        assert.doesNotMatch(
+          d.bio,
+          /^\s*(CAREER HIGHLIGHTS|PUBLIC BOARD MEMBERSHIPS|KEY QUALIFICATIONS)/,
+          `KO: ${d.name} bio still opens with an all-caps section bar (got ${JSON.stringify(d.bio.slice(0, 160))})`
+        );
+      }
+      // The cleanup must drop bars, not content: re-assert the
+      // verbatim phrases the fix is forbidden to lose. Redundant with
+      // the per-director checks above by design — a fix that strips
+      // text to satisfy the bar assertions would fail here.
+      assert.ok(
+        quincey.bio.includes(
+          'Chief Executive Officer of the Company since May 2017 and Chairman of the Board since April 2019'
+        ),
+        `KO: Quincey bio lost the role-history phrase after cleanup (got ${JSON.stringify(quincey.bio)})`
+      );
+      assert.ok(
+        quincey.bio.includes('Over 25 years of Coca-Cola system experience'),
+        `KO: Quincey bio lost the tenure phrase after cleanup (got ${JSON.stringify(quincey.bio)})`
+      );
+      assert.ok(
+        allen.bio.includes(
+          'President of Allen & Company LLC, a privately held investment banking firm'
+        ),
+        `KO: Allen bio lost the qualifications phrase after cleanup (got ${JSON.stringify(allen.bio)})`
+      );
     }
 
     // AAPL is the matrix-style conventional roster: the only bio

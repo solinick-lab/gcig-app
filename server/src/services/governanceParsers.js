@@ -182,10 +182,76 @@ function amznCardBio(t, name) {
 // "DIRECTOR SINCE:", "COMMITTEES:") and only then the prose, which
 // opens at the "CAREER HIGHLIGHTS" section bar and runs through the
 // board memberships and "KEY QUALIFICATIONS AND EXPERIENCES" to the
-// end of the card. Take from that bar onward; if a card somehow
-// lacks it, fall back to the qualifications bar so a reshuffled
-// card still yields something.
+// end of the card.
+//
+// Those three bars are layout chrome — coloured header strips the
+// card paints between its prose blocks, each a 9pt-bold <b> whose
+// own text is the bare all-caps label. cellText flattens the card
+// with no separators, so the bars cement themselves onto the
+// sentence that follows: every director used to open with the run
+// "CAREER HIGHLIGHTSPUBLIC BOARD MEMBERSHIPSAllen & Company LLC…"
+// before a word of real biography. The labels carry no information
+// the prose doesn't, so the honest rendering drops them and lets
+// the boundary they marked become an ordinary sentence break.
+//
+// Find the bar nodes by the card's own typography (the same hook
+// the rest of this family uses for the name and the SINCE labels),
+// not by matching the label strings in the flattened text — a DOM
+// node can be excised exactly, where a string strip would also
+// catch the words should they ever appear in a sentence. Walk the
+// card collecting text, but emit a sentinel in place of each bar
+// and don't descend into it; take from the first bar onward, then
+// fold runs of the sentinel into a single ". " so the sections
+// read as consecutive prose. Every real sentence survives verbatim
+// — only the bare bar labels are removed. If a restyled card
+// carries no recognisable bar, fall back to the old slice so it
+// still yields something rather than nothing.
+const KO_SECTION_BAR =
+  /^(CAREER HIGHLIGHTS|PUBLIC BOARD MEMBERSHIPS|KEY QUALIFICATIONS AND EXPERIENCES)$/;
+function koSectionBarNodes(t) {
+  return t.querySelectorAll('b').filter((b) => {
+    const s = String(b.getAttribute('style') || '').toLowerCase();
+    return (
+      s.includes('font-size:9pt') &&
+      s.includes('font-weight:bold') &&
+      KO_SECTION_BAR.test(ownText(b))
+    );
+  });
+}
+// A control character no SEC prose can contain, so splitting on it
+// can never bisect real text the way an empty/zero-width marker
+// would.
+const KO_BAR_SEP = '';
+function koCollectText(node, barSet, out) {
+  if (!node) return;
+  if (node.nodeType === 3) {
+    out.push(String(node.text || ''));
+    return;
+  }
+  if (node.nodeType === 1 && barSet.has(node)) {
+    out.push(KO_BAR_SEP);
+    return;
+  }
+  for (const c of node.childNodes || []) koCollectText(c, barSet, out);
+}
 function koCardBio(t) {
+  const bars = koSectionBarNodes(t);
+  if (bars.length) {
+    const barSet = new Set(bars);
+    const acc = [];
+    koCollectText(t, barSet, acc);
+    const joined = acc.join('');
+    const start = joined.indexOf(KO_BAR_SEP);
+    if (start >= 0) {
+      const prose = joined
+        .slice(start)
+        .split(KO_BAR_SEP)
+        .map((seg) => flat(seg))
+        .filter(Boolean)
+        .join('. ');
+      return tidyBio(prose);
+    }
+  }
   const body = flat(cellText(t));
   const m = body.match(
     /(CAREER HIGHLIGHTS|KEY QUALIFICATIONS AND EXPERIENCES)[\s\S]*$/i
