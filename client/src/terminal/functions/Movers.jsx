@@ -1,11 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import api from '../../api/client.js';
+import useLiveRefresh from '../hooks/useLiveRefresh.js';
 
-// MOVR — every holding in the book and how much it's up or down today,
-// read live from the positions sheet (the same source as the
-// dashboard), not the tickers people charted in the terminal. One
-// flat list, sorted best-to-worst. No ticker input. Mirrors DES/CN:
-// fetch, then hand the list to the shared /annotate AI brief.
+// MOVR — every holding in the book and how much it's up or down today.
+// The holdings *list* (which tickers, the order, cash-exclusion, the
+// "N holdings" header) is the positions sheet's call and stays that
+// way — it's the system of record. Only the price columns go live:
+// LAST and DAY % refresh off Finnhub's real-time /quote while the
+// panel is open, so the prices aren't the sheet's 20–40m-stale
+// GOOGLEFINANCE read. No ticker input. Mirrors DES/CN: fetch, then
+// hand the list to the shared /annotate AI brief.
 
 const fmt = {
   px: (v) => (v == null || Number.isNaN(v) ? '—' : Number(v).toFixed(2)),
@@ -65,6 +69,37 @@ export default function Movers({ onOpen }) {
     };
   }, [data]);
 
+  // The held set: every ticker the sheet returned, upper-cased and
+  // de-duped into a stable comma list so the poll only re-keys when
+  // the book actually changes, not on every parent re-render. This is
+  // strictly the price tap — it does not touch which names are in the
+  // list or their order; that stays the sheet's.
+  const liveTickers = useMemo(
+    () => [
+      ...new Set(
+        (data?.rows || []).map((m) => String(m.ticker).toUpperCase())
+      ),
+    ],
+    [data]
+  );
+  const liveKey = liveTickers.join(',');
+
+  // LAST and DAY % go live for the held names while MOVR is open.
+  // Disabled until the sheet has handed us a non-empty book, and (via
+  // the hook) only polling while the pane is mounted and the tab is
+  // visible. A failed poll keeps the last good quotes rather than
+  // wiping the panel back to nothing.
+  const { data: liveQuotes } = useLiveRefresh(
+    async () => {
+      if (!liveKey) return {};
+      const { data: q } = await api.get('/terminal/quotes', {
+        params: { tickers: liveKey },
+      });
+      return q;
+    },
+    { enabled: liveTickers.length > 0 }
+  );
+
   if (loading) {
     return (
       <div className="term-panel">
@@ -81,7 +116,28 @@ export default function Movers({ onOpen }) {
   }
   if (!data) return null;
 
-  const rows = data.rows || [];
+  // Overlay the live tap onto the sheet rows in place — the array
+  // order, the rank/# column, and cash-exclusion are all the sheet's
+  // and are left exactly as they came. For each held name, the live
+  // LAST and DAY % win when we have a quote; the sheet's value stands
+  // in when there's no live tick yet or Finnhub missed the symbol, so
+  // a price cell never blanks something it was already showing.
+  //
+  // Units: /terminal/quotes' changePct is Finnhub's `dp`, already a
+  // percent (1.23 == +1.23%), while the row model and fmt.pct here
+  // speak the sheet's fraction convention (0.0123 == +1.23%, fmt.pct
+  // does the ×100). We use the live changePct directly — just divided
+  // by 100 to land in that convention — never recomputed from the
+  // stale sheet move.
+  const rows = (data.rows || []).map((m) => {
+    const q = liveQuotes ? liveQuotes[String(m.ticker).toUpperCase()] : null;
+    if (!q) return m;
+    return {
+      ...m,
+      last: q.last != null ? q.last : m.last,
+      changePct: q.changePct != null ? q.changePct / 100 : m.changePct,
+    };
+  });
 
   // Enter/Space activate a clickable row, matching the app's existing
   // role="button" rows (see AiChat). Space is preventDefault'd so the
@@ -147,8 +203,9 @@ export default function Movers({ onOpen }) {
       )}
 
       <div style={{ color: 'var(--term-fg-muted)', fontSize: 11 }}>
-        GCIG holdings · today's move, live from the positions sheet. Cash
-        excluded · click any row to open its DES.
+        GCIG holdings · list from the positions sheet, prices live (~20s)
+        while this panel is open. Cash excluded · click any row to open
+        its DES.
       </div>
     </div>
   );
