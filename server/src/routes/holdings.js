@@ -113,6 +113,7 @@ import prisma from '../db.js';
 import { verifyJwt, requireSuperAdmin, requireRole } from '../middleware/auth.js';
 import { getSheetPortfolio } from '../services/sheetPortfolio.js';
 import { getNewsForTicker, extractArticle } from '../services/news.js';
+import { getBusinessSummary } from '../services/secBusinessSummary.js';
 import {
   generateRiskCommentary,
   detectThesisDrift,
@@ -229,31 +230,14 @@ router.get('/info/:ticker', async (req, res) => {
     if (process.env.FINNHUB_API_KEY) {
       const finnhubData = await fetchFinnhub(raw);
       if (finnhubData) {
-        // Finnhub's free tier has no long business summary, so DES would
-        // render quote + brief with no prose. Backfill the description (and
-        // any profile fields Finnhub leaves thin) from Yahoo's
-        // summaryProfile. Best-effort: Yahoo 401s without a crumb often
-        // enough that we never let it block the quote we already have.
+        // Finnhub's free tier has no business summary, so DES would
+        // render quote + brief with no prose. Yahoo's profile endpoint is
+        // the obvious source but it's 429/401-blocked from datacenter IPs
+        // (the same wall as the GSAM scraper). EDGAR's 10-K Item 1 is
+        // reachable from Render; use it. Best-effort and cached a week —
+        // never let it block the live quote we already have.
         if (!finnhubData.summary) {
-          const yp = await fetchQuoteSummary(raw).catch(() => null);
-          const profile = yp?.summaryProfile;
-          if (profile) {
-            finnhubData.summary = profile.longBusinessSummary || null;
-            finnhubData.sector = finnhubData.sector || profile.sector || null;
-            finnhubData.industry =
-              finnhubData.industry || profile.industry || null;
-            finnhubData.website =
-              finnhubData.website || profile.website || null;
-            finnhubData.country =
-              finnhubData.country || profile.country || null;
-            const fte = profile.fullTimeEmployees;
-            finnhubData.employees =
-              finnhubData.employees ??
-              (fte && typeof fte === 'object' && 'raw' in fte
-                ? fte.raw
-                : fte) ??
-              null;
-          }
+          finnhubData.summary = await getBusinessSummary(raw);
         }
         tickerCache.set(raw, { at: Date.now(), data: finnhubData });
         return res.json(finnhubData);
@@ -342,6 +326,11 @@ router.get('/info/:ticker', async (req, res) => {
       avgVolume:
         quote?.averageDailyVolume3Month ?? r(detail?.averageVolume) ?? null,
     };
+
+    // Yahoo's longBusinessSummary is usually empty from datacenter IPs;
+    // fall back to EDGAR so the description still loads when Finnhub is
+    // down and we're on this path.
+    if (!data.summary) data.summary = await getBusinessSummary(raw);
 
     tickerCache.set(raw, { at: Date.now(), data });
     res.json(data);

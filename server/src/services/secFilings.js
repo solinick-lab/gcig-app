@@ -82,6 +82,69 @@ export async function getCikForTicker(ticker) {
   return map.get(String(ticker).toUpperCase()) || null;
 }
 
+// SEC's ticker map uses the hyphen convention for share classes
+// (BRK-B), while quote vendors hand us the dotted form (BRK.B). Try the
+// symbol as given, then both punctuation variants, before giving up.
+async function resolveCik(ticker) {
+  const t = String(ticker || '').toUpperCase();
+  for (const v of [t, t.replace(/\./g, '-'), t.replace(/-/g, '.')]) {
+    const hit = await getCikForTicker(v);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+// Find the single most recent filing of a given form (e.g. /^10-K$/).
+// Unlike getRecentFilings this scans the *entire* submissions feed, not
+// a fixed recency window: a prolific filer like JPMorgan buries its
+// annual 10-K ~7,000 rows deep behind a torrent of 424B note
+// prospectuses, so any windowed approach is a guessing game. The feed is
+// one JSON fetch regardless of size; a linear scan over it is cheap.
+const latestFormCache = new Map(); // `${TICKER}#${form}` → { at, data }
+
+export async function getLatestFilingByForm(ticker, formRe) {
+  const upper = String(ticker || '').toUpperCase();
+  if (!upper) return null;
+  const cacheKey = `${upper}#${formRe.source}`;
+
+  const cached = latestFormCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < FILINGS_TTL_MS) return cached.data;
+
+  let result = null;
+  try {
+    const info = await resolveCik(upper);
+    if (info) {
+      const data = await fetchJson(
+        `${SUBMISSIONS_BASE}/submissions/CIK${info.cik}.json`
+      );
+      const r = data?.filings?.recent;
+      if (r && Array.isArray(r.form)) {
+        // The feed is newest-first, so the first hit is the latest.
+        for (let i = 0; i < r.form.length; i++) {
+          if (!formRe.test(r.form[i] || '')) continue;
+          const accession = r.accessionNumber[i] || '';
+          const primaryDocument = r.primaryDocument[i] || '';
+          result = {
+            accessionNumber: accession,
+            form: r.form[i],
+            filingDate: r.filingDate[i] || '',
+            description: r.primaryDocDescription?.[i] || r.form[i],
+            url: primaryDocument
+              ? `${EDGAR_BASE}/Archives/edgar/data/${info.cikInt}/${accession.replace(/-/g, '')}/${primaryDocument}`
+              : `${EDGAR_BASE}/cgi-bin/browse-edgar?action=getcompany&CIK=${info.cikInt}`,
+          };
+          break;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`SEC latest ${formRe.source}(${upper}) failed:`, err.message);
+  }
+
+  latestFormCache.set(cacheKey, { at: Date.now(), data: result });
+  return result;
+}
+
 // Fetch the most recent filings for a ticker. Returns up to `limit`
 // rows ordered newest-first, each shaped { form, filingDate,
 // description, accessionNumber, url } where `url` is the canonical

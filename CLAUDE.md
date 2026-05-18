@@ -109,7 +109,19 @@ If something feels weird with auth on Safari, check that order in
   the live portfolio. Fall through gracefully if unreachable.
 - `server/src/services/secFilings.js` — SEC EDGAR. company_tickers
   → CIK, then submissions feed. 24h ticker-map cache, 6h per-ticker
-  filings cache. UA header is required by SEC.
+  filings cache. UA header is required by SEC. `getLatestFilingByForm`
+  scans the *entire* submissions feed (not a recency window) for the
+  newest filing of a form — JPMorgan buries its 10-K ~7,000 rows deep
+  behind 424B note prospectuses, so any windowed lookup is a guess. It
+  also resolves share-class tickers across the dot/dash convention
+  (vendors say `BRK.B`, EDGAR says `BRK-B`).
+- `server/src/services/secBusinessSummary.js` — DES company
+  description. Pulls the latest 10-K's "Item 1. Business" and
+  strips it to prose. The extractor picks the start that stands at a
+  line boundary (real header, not a TOC row or a mid-sentence
+  cross-reference) and the longest span to a title-form "Item 1A.
+  Risk Factors" / "Item 2. Properties". Best-effort, null when there's
+  no US 10-K, 7-day cache. Fully unit-tested (`*.test.js`).
 - `server/src/services/fredMacro.js` — 5 FRED series (10Y yield,
   VIX, USD, oil, CPI YoY). 1h cache. Hidden if `FRED_API_KEY` unset.
 - `server/src/routes/dashboard.js` — main dashboard payload, plus
@@ -362,6 +374,16 @@ Hit-rate stats count `Approved` toward Voted Yes too.
 
 ## Recent fixes / playbook notes
 
+- **DES had no company description (May '26)**: Finnhub free tier
+  carries no business summary and Yahoo's profile endpoint is
+  429/401-blocked from Render datacenter IPs (same wall as the GSAM
+  scraper — don't reach for Yahoo profile data from the API). Now
+  sourced from EDGAR's 10-K Item 1 via `secBusinessSummary.js`. The
+  first cut at this used a windowed `getRecentFilings` lookup that
+  silently missed the 10-K for prolific filers; the fix was a
+  full-feed scan by form type. Lesson: to find an *annual* filing,
+  never scan a fixed recency window — filers like JPM file tens of
+  thousands of interim documents between 10-Ks.
 - **Safari "click anywhere kicks me out" (May '26)**: root cause was
   Express's auto-ETag on `/auth/me` + axios's 304-as-success →
   `setUser(undefined)`. Fixed with `Cache-Control: no-store` +
