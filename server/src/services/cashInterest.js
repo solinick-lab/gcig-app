@@ -1,184 +1,157 @@
 import prisma from '../db.js';
+import { getSheetPortfolio } from './sheetPortfolio.js';
 
-// Forward-simulation accounting for the club's two cash accounts.
-// State is derived from a known starting point + a deposit schedule
-// rather than from the brokerage sheet's daily cashValue — the sheet
-// gives us *combined* cash, which is too lossy to distinguish the
-// BDA sleeve from the FGTXX sleeve.
+// Real accounting for the club's two cash sleeves — no simulation.
 //
-// Per the operations spec (Oct 17 2025 reset):
-//   BDA (Goldman Sachs Bank USA Deposit) starts at $60,000 and pays a
-//   flat 3.00% APY, daily compounding. One $25,000 deposit on Jan 29,
-//   2026 (matches CASH_FLOWS in the client). No withdrawals to date.
+// History of what actually happened (per the treasurer): at inception
+// in October 2025 the club placed $40,000 into FGTXX (the GS Financial
+// Square Government money-market fund) and $60,000 into BDA (the GS
+// Bank USA deposit). As the club bought stocks it drew the cash down —
+// BDA first, until it was emptied, then FGTXX. Today BDA is closed
+// ($0) and FGTXX holds only what's left after the buys.
 //
-//   FGTXX (GS Financial Square Government Fund, Institutional Shares)
-//   starts at $40,000. Daily 7-day net yield is read from the
-//   MmfYieldSnapshot table — backfilled from SEC N-MFP3 filings for
-//   historical days, kept current by the daily GSAM PDF scrape going
-//   forward. Dividends reinvest daily into the share balance. No
-//   withdrawals or additional contributions.
+// Crucially that remaining FGTXX cash IS the brokerage sheet's CASH
+// line, and every dollar that was drawn down became a stock position
+// that the sheet already prices. So the club's entire economic
+// position — cash sleeves included — is already inside the sheet's
+// total. There is nothing to add on top: the old "forward simulation"
+// that compounded a no-withdrawals $125k balance was inventing money
+// the club had actually spent, and double-counting it against the
+// equities the cash had turned into.
 //
-// The simulation runs from BDA_START_DATE through `endDate` (default
-// today) one calendar day at a time, compounding daily on the
-// end-of-day balance. Weekends and holidays use the most recent
-// observed FGTXX yield (forward-fill), matching how a real MMF accrues
-// over non-business days.
+// What this module now reports:
+//   * the real sleeve balances — BDA $0, FGTXX = the live sheet cash;
+//   * a rough ESTIMATE of the interest those sleeves threw off while
+//     the money sat idle, for context only. It is informational and is
+//     NEVER added to portfolio totals or returns (those dividends
+//     reinvested into the balances, or were spent on stock — either
+//     way the sheet already carries them).
 
-export const FGTXX_TICKER = 'FGTXX';
-export const FGTXX_PRINCIPAL = 40_000;
-export const BDA_PRINCIPAL = 60_000;
+// Inception: the seed split landed in October 2025.
+export const INCEPTION = new Date(Date.UTC(2025, 9, 17));
+// Seed principal.
+const BDA_SEED = 60_000;
+const FGTXX_SEED = 40_000;
+// The $25k capital infusion went into BDA on Jan 29, 2026 (mirrors
+// CASH_FLOWS in the client).
+const BDA_INFUSION = { date: new Date(Date.UTC(2026, 0, 29)), amount: 25_000 };
+// Flat APY the bank deposit paid.
 export const BDA_APY = 0.03;
-// 2025-10-17 (UTC midnight). Day-zero of the simulation: the $40k seed
-// has just landed in FGTXX, BDA stands at $60k.
-export const SIMULATION_START = new Date(Date.UTC(2025, 9, 17));
-// Scheduled deposits into BDA. Add new tuples in chronological order
-// — the loop assumes a tiny list so we don't bother building an index.
-export const BDA_DEPOSITS = [
-  { date: new Date(Date.UTC(2026, 0, 29)), amount: 25_000 },
-];
-// Last-resort yield if MmfYieldSnapshot is completely empty (e.g. the
-// scraper hasn't run and the N-MFP backfill hasn't been kicked off
-// yet). Matches the low end of the FGTXX yield range over the period.
-const FGTXX_FALLBACK_APY = 0.035;
+// Reasonable blended yield for the FGTXX sleeve over the period when no
+// observed 7-day yield is available. The fund ran roughly 3.5% net.
+const FGTXX_ASSUMED_APY = 0.035;
 
-function startOfUtcDay(d) {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+function yearsBetween(a, b) {
+  return Math.max(0, (b - a) / (365.25 * 24 * 60 * 60 * 1000));
 }
 
-function addDays(d, n) {
-  const copy = new Date(d.getTime());
-  copy.setUTCDate(copy.getUTCDate() + n);
-  return copy;
+// Estimate the interest a sleeve threw off while it was being drawn
+// down. We don't have the per-purchase drawdown schedule, so we assume
+// each tranche declined roughly linearly from when it landed to its
+// ending balance today. The time-average of a linear glide from P0 to
+// P1 is simply (P0 + P1) / 2, so interest ≈ avg balance × rate × years.
+// This is deliberately a back-of-envelope figure — it's labelled an
+// estimate everywhere it surfaces.
+function estimateInterest({ tranches, endBalance, rate, end }) {
+  // Distribute the (small) ending balance across tranches by weight so
+  // the averages don't double-count it.
+  const totalSeed = tranches.reduce((s, t) => s + t.amount, 0);
+  let total = 0;
+  for (const t of tranches) {
+    const share = totalSeed > 0 ? (t.amount / totalSeed) * endBalance : 0;
+    const avg = (t.amount + share) / 2;
+    total += avg * rate * yearsBetween(t.date, end);
+  }
+  return total;
 }
 
-function sameUtcDay(a, b) {
-  return (
-    a.getUTCFullYear() === b.getUTCFullYear() &&
-    a.getUTCMonth() === b.getUTCMonth() &&
-    a.getUTCDate() === b.getUTCDate()
-  );
-}
-
-// Build a forward-fill yield lookup: for any calendar day, returns
-// the APY (as a decimal — 0.0352 for 3.52%) from the most recent stored
-// snapshot whose date is <= the lookup date. Binary search keeps the
-// per-day cost O(log N).
-function buildYieldLookup(yieldRows) {
-  const rows = yieldRows
-    .filter((r) => typeof r.sevenDayCurrentYield === 'number')
-    .map((r) => ({ date: r.date, apy: r.sevenDayCurrentYield / 100 }))
-    .sort((a, b) => a.date - b.date);
-  return function lookup(date) {
-    if (rows.length === 0) return { apy: FGTXX_FALLBACK_APY, source: 'fallback' };
-    let lo = 0;
-    let hi = rows.length - 1;
-    let best = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (rows[mid].date <= date) {
-        best = mid;
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    if (best === -1) {
-      // Date precedes anything we've stored. Use the earliest known
-      // value as a backward-fill — better than the fallback constant
-      // because it at least reflects the rate regime.
-      return { apy: rows[0].apy, source: 'backward-fill' };
-    }
-    return { apy: rows[best].apy, source: 'observed' };
-  };
+// Latest observed FGTXX 7-day net yield, if we have one — purely so the
+// card can show the real headline rate. Falls back to the assumed APY.
+async function latestFgtxxYield() {
+  try {
+    const row = await prisma.mmfYieldSnapshot.findFirst({
+      where: { ticker: 'FGTXX', sevenDayCurrentYield: { not: null } },
+      orderBy: { date: 'desc' },
+      select: { date: true, sevenDayCurrentYield: true },
+    });
+    return row || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function computeCashInterest({ endDate } = {}) {
-  const end = startOfUtcDay(endDate || new Date());
+  const end = endDate ? new Date(endDate) : new Date();
 
-  const yieldRows = await prisma.mmfYieldSnapshot.findMany({
-    where: { ticker: FGTXX_TICKER },
-    orderBy: { date: 'asc' },
-    select: { date: true, sevenDayCurrentYield: true },
-  });
-  const lookupYield = buildYieldLookup(yieldRows);
-
-  // Day-zero state. The BDA $60k and FGTXX $40k are end-of-day-Oct-16
-  // balances; the loop accrues interest *for* Oct 17 on day one.
-  let bda = BDA_PRINCIPAL;
-  let fgtxx = FGTXX_PRINCIPAL;
-  let bdaInterestTotal = 0;
-  let fgtxxInterestTotal = 0;
-  const series = [];
-
-  let day = new Date(SIMULATION_START.getTime());
-  while (day <= end) {
-    // Deposits land at start-of-day, so they earn that day's interest
-    // too. The actual cash hit in real life is at the close — but the
-    // difference is one day of interest on $25k at 3%, about $2 — well
-    // inside the noise of the model.
-    let depositToday = 0;
-    for (const d of BDA_DEPOSITS) {
-      if (sameUtcDay(d.date, day)) {
-        bda += d.amount;
-        depositToday += d.amount;
-      }
-    }
-
-    const { apy: fgtxxApy, source: yieldSource } = lookupYield(day);
-    const bdaInterest = (bda * BDA_APY) / 365;
-    const fgtxxInterest = (fgtxx * fgtxxApy) / 365;
-
-    bda += bdaInterest;
-    fgtxx += fgtxxInterest;
-    bdaInterestTotal += bdaInterest;
-    fgtxxInterestTotal += fgtxxInterest;
-
-    series.push({
-      date: new Date(day.getTime()),
-      bdaBalance: bda,
-      fgtxxBalance: fgtxx,
-      bdaInterest,
-      fgtxxInterest,
-      fgtxxYieldApy: fgtxxApy,
-      yieldSource,
-      deposit: depositToday || null,
-    });
-
-    day = addDays(day, 1);
+  // Real balances. BDA was emptied buying stocks; FGTXX is whatever the
+  // brokerage sheet's cash line says it is right now. If the sheet read
+  // fails we still return BDA $0 and a null FGTXX rather than guessing.
+  let fgtxxBalance = null;
+  try {
+    const sheet = await getSheetPortfolio();
+    fgtxxBalance = Number(sheet?.totals?.cashValue) || 0;
+  } catch {
+    fgtxxBalance = null;
   }
+  const bdaBalance = 0;
 
-  const latestStored = yieldRows[yieldRows.length - 1] || null;
+  const yieldRow = await latestFgtxxYield();
+  const fgtxxApy = yieldRow?.sevenDayCurrentYield != null
+    ? yieldRow.sevenDayCurrentYield / 100
+    : FGTXX_ASSUMED_APY;
+
+  // Informational estimate of interest earned while the sleeves were
+  // funded. Not added to anything.
+  const bdaEstimatedInterest = estimateInterest({
+    tranches: [
+      { date: INCEPTION, amount: BDA_SEED },
+      { date: BDA_INFUSION.date, amount: BDA_INFUSION.amount },
+    ],
+    endBalance: bdaBalance,
+    rate: BDA_APY,
+    end,
+  });
+  const fgtxxEstimatedInterest = estimateInterest({
+    tranches: [{ date: INCEPTION, amount: FGTXX_SEED }],
+    endBalance: fgtxxBalance ?? 0,
+    rate: fgtxxApy,
+    end,
+  });
+  const estimatedInterestEarned = bdaEstimatedInterest + fgtxxEstimatedInterest;
 
   return {
-    // New canonical field names from the spec
-    bdaTotalInterest: bdaInterestTotal,
-    fgtxxTotalInterest: fgtxxInterestTotal,
-    totalInterest: bdaInterestTotal + fgtxxInterestTotal,
-    bdaEndingBalance: bda,
-    fgtxxEndingBalance: fgtxx,
-    combinedEndingValue: bda + fgtxx,
-    daysSimulated: series.length,
-    asOf: series[series.length - 1]?.date ?? end,
-    fgtxxLatestYield: latestStored?.sevenDayCurrentYield ?? null,
-    fgtxxLatestYieldDate: latestStored?.date ?? null,
+    // Real, current state.
+    bdaBalance,
+    fgtxxBalance,
+    combinedBalance: (fgtxxBalance ?? 0) + bdaBalance,
+    asOf: end,
     bdaApy: BDA_APY,
-    simulationStart: SIMULATION_START,
-    bdaPrincipal: BDA_PRINCIPAL,
-    fgtxxPrincipal: FGTXX_PRINCIPAL,
-    deposits: BDA_DEPOSITS,
-    // Back-compat aliases so the existing Dashboard card keeps
-    // rendering without churn. Remove these when the card is rewritten
-    // to the new field names.
-    ytdBankInterest: bdaInterestTotal,
-    ytdFgtxxInterest: fgtxxInterestTotal,
-    ytdTotalInterest: bdaInterestTotal + fgtxxInterestTotal,
-    currentFgtxxBalance: fgtxx,
-    currentBankBalance: bda,
-    latestFgtxxYield: latestStored?.sevenDayCurrentYield ?? null,
-    latestFgtxxYieldDate: latestStored?.date ?? null,
-    bankApy: BDA_APY,
-    fgtxxStartDate: SIMULATION_START,
-    daysCounted: series.length,
-    series,
+    fgtxxYieldApy: fgtxxApy,
+    fgtxxLatestYield: yieldRow?.sevenDayCurrentYield ?? null,
+    fgtxxLatestYieldDate: yieldRow?.date ?? null,
+    inception: INCEPTION,
+
+    // Rough, informational-only estimate. NEVER fold into totals — the
+    // sheet already carries every dollar of this (reinvested into the
+    // FGTXX balance or spent on stock the sheet prices).
+    estimatedInterestEarned,
+    bdaEstimatedInterest,
+    fgtxxEstimatedInterest,
+    isEstimate: true,
+
+    // Back-compat aliases for older callers. `totalInterest` is forced
+    // to 0 so any lingering `totalValue + totalInterest` adder is a
+    // no-op rather than a silent double-count; the real (estimate)
+    // figure lives in `estimatedInterestEarned`.
+    totalInterest: 0,
+    bdaTotalInterest: bdaEstimatedInterest,
+    fgtxxTotalInterest: fgtxxEstimatedInterest,
+    bdaEndingBalance: bdaBalance,
+    fgtxxEndingBalance: fgtxxBalance,
+    combinedEndingValue: (fgtxxBalance ?? 0) + bdaBalance,
+    bdaPrincipal: BDA_SEED + BDA_INFUSION.amount,
+    fgtxxPrincipal: FGTXX_SEED,
+    daysSimulated: Math.max(1, Math.round((end - INCEPTION) / 86_400_000)),
+    series: [],
   };
 }

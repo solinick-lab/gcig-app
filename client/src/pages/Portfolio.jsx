@@ -130,20 +130,21 @@ export default function Portfolio() {
   const totals = data?.totals || {};
   const holdings = data?.holdings || [];
 
-  // YTD cash interest earned on the BDA + FGTXX sleeves. Held in
-  // accounts outside the brokerage, so it isn't reflected in the
-  // sheet's totalValue — but it's real money the club earned, so we
-  // fold it into the lifetime return number below.
-  const cashInterestEarned = Number(cashYield?.totalInterest) || 0;
+  // Rough, informational-only estimate of the interest the BDA + FGTXX
+  // sleeves threw off while they were funded. It is NOT added to any
+  // total: the leftover FGTXX cash is the sheet's CASH line, and the
+  // rest was drawn down to buy stocks the sheet already prices — so the
+  // sheet's totalValue already carries every dollar of it. Surfacing it
+  // here is context, not an adjustment.
+  const estimatedCashInterest = Number(cashYield?.estimatedInterestEarned) || 0;
 
-  // Recompute Total Gain/Loss against the actual capital invested (starting
-  // $100k + every infusion) so per-position cost-basis rounding in the sheet
-  // doesn't throw off the top-line number. Adds the off-sheet cash interest
-  // on top so the headline number reflects all earnings, not just equity P/L.
+  // Total Gain/Loss against the actual capital invested (starting $100k
+  // + every infusion) so per-position cost-basis rounding in the sheet
+  // doesn't throw off the top-line number. The sheet total already
+  // includes the cash sleeves, so there's nothing to add on top.
   const equityGainLoss =
     totals.totalValue != null ? totals.totalValue - TOTAL_INVESTED : null;
-  const lifetimeGainLoss =
-    equityGainLoss != null ? equityGainLoss + cashInterestEarned : null;
+  const lifetimeGainLoss = equityGainLoss;
   const lifetimeGainLossPct =
     lifetimeGainLoss != null ? (lifetimeGainLoss / TOTAL_INVESTED) * 100 : null;
   const isUp = (lifetimeGainLoss ?? 0) >= 0;
@@ -300,16 +301,14 @@ export default function Portfolio() {
   // Dollar change = total change (cash contributes ~0 to day-over-day movement).
   // Percent = dollar change / yesterday's equity base.
   //
-  // The server lifts each historical snapshot by cumulative BDA + FGTXX
-  // interest, so snap.value carries interest-through-yesterday. The live
-  // total from /quotes is the raw sheet, so we lift it the same way before
-  // diffing — otherwise the daily delta would absorb a full day of
-  // back-dated cash interest and look badly negative.
+  // Both the historical snapshots and the live /quotes total are raw
+  // sheet totals now (the server no longer overlays simulated cash
+  // interest), so they're directly comparable day-over-day.
   const dailyChange = useMemo(() => {
     if (!data || fullHistory.length < 2) return null;
     const liveTotal = data.totals?.totalValue;
     if (liveTotal == null) return null;
-    const todayTotal = liveTotal + cashInterestEarned;
+    const todayTotal = liveTotal;
     const todayIso = new Date().toISOString().slice(0, 10);
     for (let i = fullHistory.length - 1; i >= 0; i--) {
       const snap = fullHistory[i];
@@ -323,7 +322,7 @@ export default function Portfolio() {
       return { diff, pct };
     }
     return null;
-  }, [data, fullHistory, cashInterestEarned]);
+  }, [data, fullHistory]);
 
   // Annualized Sharpe. Numerator comes from the Adjusted Return tile's
   // lifetime % (annualized by trading days in the sample) so the headline
@@ -432,11 +431,7 @@ export default function Portfolio() {
       {/* Full-width editorial hero — big AUM + since-inception in a navy
           gradient card, same vibe as the Dashboard hero but page-scoped. */}
       <PortfolioHero
-        totalValue={
-          totals.totalValue != null
-            ? totals.totalValue + cashInterestEarned
-            : totals.totalValue
-        }
+        totalValue={totals.totalValue}
         lifetimeGainLoss={lifetimeGainLoss}
         lifetimeGainLossPct={lifetimeGainLossPct}
         cashValue={totals.cashValue}
@@ -759,11 +754,7 @@ export default function Portfolio() {
                 </span>
                 <div className="text-right">
                   <div className="font-bold text-navy tabular-nums">
-                    {fmtMoney(
-                      totals.totalValue != null
-                        ? totals.totalValue + cashInterestEarned
-                        : totals.totalValue
-                    )}
+                    {fmtMoney(totals.totalValue)}
                   </div>
                   <div
                     className={`text-xs font-semibold ${isUp ? 'text-emerald-600' : 'text-red-600'}`}
@@ -851,19 +842,13 @@ export default function Portfolio() {
                           <td
                             className={`py-3 pr-4 text-right tabular-nums font-semibold ${
                               h.isCash
-                                ? cashInterestEarned > 0
-                                  ? 'text-emerald-600'
-                                  : 'text-navy-400'
+                                ? 'text-navy-400'
                                 : up
                                 ? 'text-emerald-600'
                                 : 'text-red-600'
                             }`}
                           >
-                            {h.isCash
-                              ? cashInterestEarned > 0
-                                ? fmtMoney(cashInterestEarned, { cents: true })
-                                : '—'
-                              : fmtMoney(h.dollarReturn)}
+                            {h.isCash ? '—' : fmtMoney(h.dollarReturn)}
                           </td>
                           <td
                             className={`py-3 pr-4 text-right tabular-nums font-semibold ${
@@ -915,11 +900,7 @@ export default function Portfolio() {
                       Total ({holdings.length} positions)
                     </td>
                     <td className="py-3 pr-4 text-right font-bold text-navy tabular-nums">
-                      {fmtMoney(
-                        totals.totalValue != null
-                          ? totals.totalValue + cashInterestEarned
-                          : totals.totalValue
-                      )}
+                      {fmtMoney(totals.totalValue)}
                     </td>
                     <td />
                     <td
@@ -945,14 +926,18 @@ export default function Portfolio() {
           <div className="mt-4 text-xs text-navy-400">
             Positions and prices are read live from the club's Google Sheet. To
             add or remove a position, edit the sheet directly. Tap any
-            holding to see company details.
-            {cashInterestEarned > 0 && (
+            holding to see company details. The sheet's CASH line is the
+            leftover FGTXX money-market balance; BDA was drawn down to
+            zero buying the positions above, so it's already reflected in
+            the total.
+            {estimatedCashInterest > 0 && (
               <>
-                {' '}Total return includes{' '}
+                {' '}The cash sleeves are estimated to have earned{' '}
                 <span className="font-semibold text-navy">
-                  {fmtMoney(cashInterestEarned, { cents: true })}
+                  ≈{fmtMoney(estimatedCashInterest, { cents: true })}
                 </span>{' '}
-                of off-sheet cash interest (BDA + FGTXX, see card below).
+                in interest while idle (already included in the total —
+                see card below).
               </>
             )}
           </div>
@@ -996,7 +981,7 @@ function CashSubRow({ ticker, name, sector, balance, interest, rate }) {
       </td>
       <td className="py-2 pr-4 text-right tabular-nums text-navy-400">—</td>
       <td className="py-2 pr-4 text-right tabular-nums text-navy-400">
-        {fmtMoney(interest, { cents: true })}
+        {interest != null ? `≈${fmtMoney(interest, { cents: true })}` : '—'}
       </td>
       <td className="py-2 pr-4 text-right tabular-nums text-navy-400">{rate}</td>
     </tr>
@@ -1021,7 +1006,7 @@ function CashSubCard({ ticker, name, balance, interest, rate }) {
         </div>
       </div>
       <div className="mt-1 text-[11px] text-navy-400">
-        interest YTD {fmtMoney(interest, { cents: true })}
+        est. interest ≈{fmtMoney(interest, { cents: true })}
       </div>
     </div>
   );

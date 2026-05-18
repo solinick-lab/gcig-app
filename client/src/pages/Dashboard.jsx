@@ -75,11 +75,6 @@ export default function Dashboard() {
   // FRED macro snapshot. Cheap (1h server cache). Hidden when
   // FRED_API_KEY isn't configured — endpoint returns configured: false.
   const [macro, setMacro] = useState(null);
-  // YTD cash-interest simulation (BDA + FGTXX). The brokerage sheet
-  // doesn't know about the off-platform cash sleeves, so we layer this
-  // on top of totalValue for the headline number, the same way the
-  // Portfolio page does.
-  const [cashYield, setCashYield] = useState(null);
 
   useEffect(() => {
     api.get('/dashboard').then((r) => setDashboard(r.data)).catch(() => setDashboard({}));
@@ -87,10 +82,6 @@ export default function Dashboard() {
     api.get('/holdings/history').then((r) => setHistory(r.data || [])).catch(() => setHistory([]));
     api.get('/holdings/earnings').then((r) => setEarnings(r.data)).catch(() => setEarnings(null));
     api.get('/dashboard/macro').then((r) => setMacro(r.data)).catch(() => setMacro(null));
-    api
-      .get('/holdings/cash-yield')
-      .then((r) => setCashYield(r.data))
-      .catch(() => setCashYield(null));
     // DIR runs in parallel with the dashboard request. On cache miss
     // it can take 10-30s; on cache hit it's instant. The page
     // renders without waiting either way.
@@ -119,11 +110,9 @@ export default function Dashboard() {
 
   const firstName = user?.name?.split(' ')[0] || '';
 
-  // History in JS dates. The server-side /holdings/history endpoint
-  // already lifts each snapshot's totalValue (and cashValue) by the
-  // cumulative BDA + FGTXX interest earned through that date, so the
-  // sparkline carries the off-sheet cash sleeves automatically — no
-  // client-side overlay needed.
+  // History in JS dates. /holdings/history returns raw sheet snapshots,
+  // which already carry the cash sleeves (leftover FGTXX cash is the
+  // sheet's CASH line; the rest became stocks the sheet prices).
   const normalizedHistory = useMemo(
     () =>
       (history || []).map((s) => ({
@@ -142,7 +131,6 @@ export default function Dashboard() {
         totals={quotes?.totals}
         holdings={quotes?.holdings}
         history={normalizedHistory}
-        cashInterestEarned={Number(cashYield?.totalInterest) || 0}
       />
 
       {macro?.configured && macro.indicators?.length > 0 && (
@@ -208,22 +196,19 @@ function Masthead({ user }) {
 
 // ─── Portfolio hero ─────────────────────────────────────────────────────
 
-function PortfolioHero({ totals, holdings, history, cashInterestEarned = 0 }) {
+function PortfolioHero({ totals, holdings, history }) {
   const totalValue = totals?.totalValue;
   const cashValue = totals?.cashValue;
   const nonCashHoldings = (holdings || []).filter((h) => !h.isCash);
 
-  // Headline fund value folds in the YTD cash interest earned on the
-  // off-sheet BDA + FGTXX sleeves — same convention as Portfolio.jsx.
-  // History snapshots are also lifted by interest-through-date upstream,
-  // so WoW / YTD compare interest-lifted now against interest-lifted
-  // then (apples-to-apples).
-  const displayedValue =
-    totalValue != null ? totalValue + cashInterestEarned : null;
+  // The sheet total already carries the cash sleeves (the leftover
+  // FGTXX cash IS the sheet's CASH line; the rest was drawn down to buy
+  // the stocks the sheet prices), so there's nothing to add on top —
+  // the old `+ cashInterestEarned` was double-counting.
+  const displayedValue = totalValue != null ? totalValue : null;
 
-  // Return metrics. Lifetime goes against total invested capital (100k start
-  // + infusions) and includes cash interest. Daily / weekly / YTD use
-  // history snapshots which already carry the accumulated interest.
+  // Return metrics. Lifetime goes against total invested capital (100k
+  // start + infusions). Daily / weekly / YTD use raw sheet snapshots.
   const lifetimeDelta =
     displayedValue != null ? displayedValue - TOTAL_INVESTED : null;
   const lifetimePct =

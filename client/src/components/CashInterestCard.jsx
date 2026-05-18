@@ -2,12 +2,17 @@ import { useState } from 'react';
 import { format } from 'date-fns';
 import api from '../api/client.js';
 
-// Standalone tile for the cash-interest simulation. Renders the YTD
-// totals plus per-sleeve principal/balance/rate, and (when the caller
-// passes `canRefresh` / `canBackfill`) the two admin buttons that
-// trigger the daily PDF re-scrape and the SEC N-MFP backfill. Moved
-// out of Dashboard so it can live wherever it fits best — currently
-// under the Holdings table on the Portfolio page.
+// Standalone tile for the club's two cash sleeves. Shows the REAL
+// current balances — BDA was drawn down to $0 buying stocks, FGTXX is
+// whatever cash is left (the same dollars the brokerage sheet's CASH
+// line reports) — plus a rough, clearly-labelled estimate of the
+// interest the sleeves threw off while they were funded.
+//
+// That interest is context only. It is NOT added to the portfolio
+// total or return anywhere: every dollar of it either reinvested into
+// the FGTXX balance or was spent on stock the sheet already prices, so
+// the sheet's total already carries it. Lives under the Holdings table
+// on the Portfolio page.
 function fmtMoney(n, opts = {}) {
   if (n == null || !Number.isFinite(n)) return '—';
   return n.toLocaleString('en-US', {
@@ -24,18 +29,14 @@ export default function CashInterestCard({
   onReload,
 }) {
   const {
-    fgtxxTotalInterest,
-    bdaTotalInterest,
-    totalInterest,
-    fgtxxEndingBalance,
-    bdaEndingBalance,
-    combinedEndingValue,
+    estimatedInterestEarned,
+    bdaEstimatedInterest,
+    fgtxxEstimatedInterest,
+    fgtxxBalance,
+    bdaBalance,
     fgtxxLatestYield,
     fgtxxLatestYieldDate,
     bdaApy,
-    daysSimulated,
-    fgtxxPrincipal,
-    bdaPrincipal,
   } = data || {};
 
   const [busy, setBusy] = useState(null);
@@ -68,31 +69,28 @@ export default function CashInterestCard({
     ? format(new Date(fgtxxLatestYieldDate), 'MMM d')
     : null;
 
-  const fgtxxStartingPrincipal = fgtxxPrincipal ?? 40_000;
-  const bdaStartingPrincipal = bdaPrincipal ?? 60_000;
-  // Match the deposit schedule baked into the server.
-  const bdaTotalPrincipal = bdaStartingPrincipal + 25_000;
-
   return (
     <div className="rounded-2xl border border-navy-100 bg-white p-5 shadow-card md:p-7">
       <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-[0.25em] text-gold-700">
-            Cash position
+            Cash sleeves
           </div>
           <div className="mt-1 font-serif text-2xl font-semibold text-navy">
-            Interest earned · YTD
+            Interest earned · estimated
           </div>
           <div className="mt-1 text-[11px] text-navy-300">
-            Two-account simulation, daily compounding from Oct 17, 2025.
+            $40k seeded FGTXX, $60k seeded BDA in Oct 2025. BDA was drawn
+            down to zero buying stocks, then FGTXX. Already inside the
+            portfolio total — shown here for context.
           </div>
         </div>
         <div className="text-right">
           <div className="font-serif text-3xl font-semibold text-navy tabular-nums">
-            {fmtMoney(totalInterest, { cents: true })}
+            ≈{fmtMoney(estimatedInterestEarned, { cents: true })}
           </div>
           <div className="mt-1 text-[10px] uppercase tracking-wider text-navy-300">
-            {daysSimulated} {daysSimulated === 1 ? 'day' : 'days'}
+            estimate · not additive
           </div>
         </div>
       </div>
@@ -101,24 +99,26 @@ export default function CashInterestCard({
         <SleeveTile
           accent="gold"
           label="FGTXX · GS Government MMF"
-          interest={fgtxxTotalInterest}
-          balance={fgtxxEndingBalance}
-          principal={fgtxxStartingPrincipal}
+          interest={fgtxxEstimatedInterest}
+          balance={fgtxxBalance}
           rate={
             fgtxxLatestYield != null
               ? `${fgtxxLatestYield.toFixed(2)}% · 7-day net`
               : '—'
           }
-          asOf={yieldDateLabel ? `as of ${yieldDateLabel}` : null}
+          asOf={
+            yieldDateLabel
+              ? `current balance · yield as of ${yieldDateLabel}`
+              : 'current balance (= sheet cash)'
+          }
         />
         <SleeveTile
           accent="navy"
           label="BDA · GS Bank USA Deposit"
-          interest={bdaTotalInterest}
-          balance={bdaEndingBalance}
-          principal={bdaTotalPrincipal}
+          interest={bdaEstimatedInterest}
+          balance={bdaBalance}
           rate={bdaApy != null ? `${(bdaApy * 100).toFixed(2)}% · APY` : '—'}
-          asOf="$60k seed + $25k Jan 29 add"
+          asOf="drawn down to $0 — funded the positions above"
         />
       </div>
 
@@ -173,7 +173,7 @@ export default function CashInterestCard({
   );
 }
 
-function SleeveTile({ accent, label, interest, balance, principal, rate, asOf }) {
+function SleeveTile({ accent, label, interest, balance, rate, asOf }) {
   const dot = accent === 'gold' ? 'bg-gold' : 'bg-navy';
   return (
     <div className="rounded-xl border border-navy-100 bg-[#FAFBFE] px-4 py-3">
@@ -183,18 +183,14 @@ function SleeveTile({ accent, label, interest, balance, principal, rate, asOf })
       </div>
       <div className="mt-2 flex items-baseline justify-between gap-3">
         <div className="font-serif text-xl font-semibold text-navy tabular-nums">
-          {fmtMoney(interest, { cents: true })}
+          {fmtMoney(balance, { cents: true })}
         </div>
         <div className="text-right text-[11px] tabular-nums text-navy-400">
-          <div>bal {fmtMoney(balance, { cents: true })}</div>
+          <div>est. interest ≈{fmtMoney(interest, { cents: true })}</div>
           <div>{rate}</div>
         </div>
       </div>
-      {principal != null && (
-        <div className="mt-1 text-[10px] text-navy-300">
-          principal {fmtMoney(principal)} · {asOf}
-        </div>
-      )}
+      <div className="mt-1 text-[10px] text-navy-300">{asOf}</div>
     </div>
   );
 }
