@@ -229,6 +229,32 @@ router.get('/info/:ticker', async (req, res) => {
     if (process.env.FINNHUB_API_KEY) {
       const finnhubData = await fetchFinnhub(raw);
       if (finnhubData) {
+        // Finnhub's free tier has no long business summary, so DES would
+        // render quote + brief with no prose. Backfill the description (and
+        // any profile fields Finnhub leaves thin) from Yahoo's
+        // summaryProfile. Best-effort: Yahoo 401s without a crumb often
+        // enough that we never let it block the quote we already have.
+        if (!finnhubData.summary) {
+          const yp = await fetchQuoteSummary(raw).catch(() => null);
+          const profile = yp?.summaryProfile;
+          if (profile) {
+            finnhubData.summary = profile.longBusinessSummary || null;
+            finnhubData.sector = finnhubData.sector || profile.sector || null;
+            finnhubData.industry =
+              finnhubData.industry || profile.industry || null;
+            finnhubData.website =
+              finnhubData.website || profile.website || null;
+            finnhubData.country =
+              finnhubData.country || profile.country || null;
+            const fte = profile.fullTimeEmployees;
+            finnhubData.employees =
+              finnhubData.employees ??
+              (fte && typeof fte === 'object' && 'raw' in fte
+                ? fte.raw
+                : fte) ??
+              null;
+          }
+        }
         tickerCache.set(raw, { at: Date.now(), data: finnhubData });
         return res.json(finnhubData);
       }
