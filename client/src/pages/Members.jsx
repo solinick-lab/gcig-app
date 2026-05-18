@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, KeyRound, Trash2, ShieldCheck, ShieldOff } from 'lucide-react';
+import { Plus, KeyRound, Trash2, ShieldCheck, ShieldOff, LogOut } from 'lucide-react';
 import api from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
@@ -56,6 +56,24 @@ export default function Members({ embedded = false } = {}) {
       load();
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to change role');
+      load();
+    }
+  }
+
+  // President-only. Strips a sitting President of all power (primary role
+  // → Junior Analyst) while keeping the "Former President" honorific badge.
+  async function handleStepDown(id, name) {
+    if (
+      !confirm(
+        `${name} will become a Junior Analyst and keep the "Former President" title. This removes all presidential powers and cannot be undone from this screen. Continue?`
+      )
+    )
+      return;
+    try {
+      await api.post(`/users/${id}/step-down`);
+      load();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to step down President');
       load();
     }
   }
@@ -195,6 +213,17 @@ export default function Members({ embedded = false } = {}) {
               <div className="mt-2">
                 <ExtraRoleEditor user={u} onChange={load} />
               </div>
+              {isAdmin && u.role === 'President' && (
+                <div className="mt-2">
+                  <button
+                    onClick={() => handleStepDown(u.id, u.name)}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-gold-700 underline"
+                  >
+                    <LogOut className="h-3 w-3" />
+                    Step down as President
+                  </button>
+                </div>
+              )}
               {isSuperAdmin && (
                 <div className="mt-2 flex flex-wrap gap-3 border-t border-navy-50 pt-2">
                   <button
@@ -282,6 +311,15 @@ export default function Members({ embedded = false } = {}) {
                     )}
                   </td>
                   <td className="py-3 pr-4 text-right">
+                    {isAdmin && u.role === 'President' && (
+                      <button
+                        onClick={() => handleStepDown(u.id, u.name)}
+                        className="mr-2 inline-flex items-center gap-1 text-xs font-semibold text-gold-700 underline"
+                      >
+                        <LogOut className="h-3 w-3" />
+                        Step down
+                      </button>
+                    )}
                     {isSuperAdmin ? (
                       <>
                         {u.twoFactorEnabled && (

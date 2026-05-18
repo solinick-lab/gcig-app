@@ -29,7 +29,15 @@ const ROLES = [
   'JuniorAnalyst',
   'AdvisoryBoardMember',
   'FacultyAdvisory',
+  // Honorific badge only — valid in extraRoles, never as a primary role.
+  'FormerPresident',
 ];
+
+// Roles that may be set as a member's *primary* role. FormerPresident is
+// excluded: it is granted exclusively as an extraRoles badge by the
+// step-down action, never picked from a role list. This is the
+// server-side guarantee that "Former President" can only ever be a badge.
+const ASSIGNABLE_ROLES = ROLES.filter((r) => r !== 'FormerPresident');
 
 function generateTempPassword() {
   return crypto.randomBytes(6).toString('base64url') + '!A1';
@@ -469,7 +477,7 @@ router.post('/', requireExecutive, async (req, res) => {
   if (!name || !email || !role) {
     return res.status(400).json({ error: 'name, email, role required' });
   }
-  if (!ROLES.includes(role)) {
+  if (!ASSIGNABLE_ROLES.includes(role)) {
     return res.status(400).json({ error: 'Invalid role' });
   }
   const normalized = String(email).trim().toLowerCase();
@@ -509,6 +517,7 @@ router.post('/', requireExecutive, async (req, res) => {
     JuniorAnalyst: 'Junior Analyst',
     AdvisoryBoardMember: 'Advisory Board Member',
     FacultyAdvisory: 'Faculty Advisor',
+    FormerPresident: 'Former President',
   };
 
   let emailSent = false;
@@ -540,7 +549,7 @@ router.post('/', requireExecutive, async (req, res) => {
 router.put('/:id', requireExecutive, async (req, res) => {
   const id = Number(req.params.id);
   const { name, email, role } = req.body || {};
-  if (role && !ROLES.includes(role)) {
+  if (role && !ASSIGNABLE_ROLES.includes(role)) {
     return res.status(400).json({ error: 'Invalid role' });
   }
   const user = await prisma.user.update({
@@ -570,7 +579,7 @@ const PRESIDENT_ONLY_ROLES = new Set(['AdvisoryBoardMember', 'FacultyAdvisory'])
 router.put('/:id/role', async (req, res) => {
   const targetId = Number(req.params.id);
   const { role: newRole } = req.body || {};
-  if (!newRole || !ROLES.includes(newRole)) {
+  if (!newRole || !ASSIGNABLE_ROLES.includes(newRole)) {
     return res.status(400).json({ error: 'Invalid role' });
   }
 
@@ -693,5 +702,54 @@ router.delete('/:id', requireSuperAdmin, async (req, res) => {
   await auditReq(req, 'user.deleted', 'user', id);
   res.json({ ok: true });
 });
+
+// Step down a sitting President. Strips all power by setting the primary
+// role to JuniorAnalyst, while preserving the title via a no-power
+// "FormerPresident" badge in extraRoles (ROLE_RANK[FormerPresident] === 0;
+// no permission gate reads extraRoles for rank). Atomic single update plus
+// one audit entry. No tokenVersion rotation is needed: verifyJwt re-reads
+// `role` from the DB on every request, so power is revoked on the target's
+// very next request without forcing a re-login.
+//
+// Exported and dependency-injected (db, audit) so it can be unit-tested
+// without a database, following the execBiosHandler precedent in
+// routes/terminal.js.
+export async function stepDownHandler(req, res, deps = {}) {
+  const { db = prisma, audit = auditReq } = deps;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ error: 'Invalid user id' });
+  }
+
+  const target = await db.user.findUnique({ where: { id } });
+  if (!target) return res.status(404).json({ error: 'User not found' });
+  if (target.role !== 'President') {
+    return res
+      .status(400)
+      .json({ error: 'Only a sitting President can step down' });
+  }
+
+  const extraRoles = Array.from(
+    new Set([...(target.extraRoles || []), 'FormerPresident'])
+  );
+  const updated = await db.user.update({
+    where: { id },
+    data: { role: 'JuniorAnalyst', extraRoles },
+    select: { id: true, name: true, email: true, role: true, extraRoles: true },
+  });
+
+  await audit(req, 'user.stepped_down', 'user', id, {
+    from: 'President',
+    to: 'JuniorAnalyst',
+    badge: 'FormerPresident',
+  });
+  res.json(updated);
+}
+
+// President-only. A former president is, by definition, a former
+// *President*, so only a sitting President can perform the step-down.
+router.post('/:id/step-down', requireAdmin, (req, res) =>
+  stepDownHandler(req, res)
+);
 
 export default router;

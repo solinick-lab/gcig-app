@@ -9,6 +9,7 @@ const ROLE_LABELS = {
   JuniorAnalyst: 'Junior Analyst',
   AdvisoryBoardMember: 'Advisory Board Member',
   FacultyAdvisory: 'Faculty Advisor',
+  FormerPresident: 'Former President',
 };
 
 const VARIANTS = {
@@ -22,6 +23,9 @@ const VARIANTS = {
   JuniorAnalyst: 'bg-white text-navy-500 border-navy-100',
   AdvisoryBoardMember: 'bg-emerald-50 text-emerald-800 border-emerald-200',
   FacultyAdvisory: 'bg-purple-50 text-purple-800 border-purple-200',
+  // Echoes the presidential navy/gold, but lighter — reads as an honorary
+  // title rather than active office.
+  FormerPresident: 'bg-navy-50 text-navy border-gold-300',
 };
 
 export default function RoleBadge({ role, className = '' }) {
