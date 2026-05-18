@@ -22,6 +22,12 @@ enum Role {
   JuniorAnalyst
   AdvisoryBoardMember
   FacultyAdvisory
+  // Honorific only. Used solely as an extraRoles badge for a President who
+  // has stepped down — their *primary* role becomes JuniorAnalyst. Ranked
+  // 0 in ROLE_RANK (middleware/auth.js); never assignable as a primary
+  // role (see ASSIGNABLE_ROLES in routes/users.js). Appended last so
+  // existing enum value ordinals are unchanged.
+  FormerPresident
 }
 
 enum AttendanceStatus {

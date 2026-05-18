@@ -168,6 +168,10 @@ export const ROLE_RANK = {
   ChiefOfCommunication: 2,
   AdvisoryBoardMember: 1,
   FacultyAdvisory: 1,
+  // Honorific badge only — confers no power. A former president's primary
+  // role is JuniorAnalyst; this rank only matters as defense in depth if
+  // FormerPresident were ever mis-set as a primary role.
+  FormerPresident: 0,
 };
 
 // Look up the role string for a given numeric rank. Returns null if no match.
