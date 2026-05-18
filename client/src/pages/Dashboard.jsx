@@ -75,6 +75,9 @@ export default function Dashboard() {
   // FRED macro snapshot. Cheap (1h server cache). Hidden when
   // FRED_API_KEY isn't configured — endpoint returns configured: false.
   const [macro, setMacro] = useState(null);
+  // Estimated cash-sleeve interest, added on top of the sheet total for
+  // the headline figure (matches Portfolio.jsx, per the treasurer).
+  const [cashYield, setCashYield] = useState(null);
 
   useEffect(() => {
     api.get('/dashboard').then((r) => setDashboard(r.data)).catch(() => setDashboard({}));
@@ -82,6 +85,10 @@ export default function Dashboard() {
     api.get('/holdings/history').then((r) => setHistory(r.data || [])).catch(() => setHistory([]));
     api.get('/holdings/earnings').then((r) => setEarnings(r.data)).catch(() => setEarnings(null));
     api.get('/dashboard/macro').then((r) => setMacro(r.data)).catch(() => setMacro(null));
+    api
+      .get('/holdings/cash-yield')
+      .then((r) => setCashYield(r.data))
+      .catch(() => setCashYield(null));
     // DIR runs in parallel with the dashboard request. On cache miss
     // it can take 10-30s; on cache hit it's instant. The page
     // renders without waiting either way.
@@ -131,6 +138,7 @@ export default function Dashboard() {
         totals={quotes?.totals}
         holdings={quotes?.holdings}
         history={normalizedHistory}
+        cashInterestEarned={Number(cashYield?.estimatedInterestEarned) || 0}
       />
 
       {macro?.configured && macro.indicators?.length > 0 && (
@@ -196,16 +204,16 @@ function Masthead({ user }) {
 
 // ─── Portfolio hero ─────────────────────────────────────────────────────
 
-function PortfolioHero({ totals, holdings, history }) {
+function PortfolioHero({ totals, holdings, history, cashInterestEarned = 0 }) {
   const totalValue = totals?.totalValue;
   const cashValue = totals?.cashValue;
   const nonCashHoldings = (holdings || []).filter((h) => !h.isCash);
 
-  // The sheet total already carries the cash sleeves (the leftover
-  // FGTXX cash IS the sheet's CASH line; the rest was drawn down to buy
-  // the stocks the sheet prices), so there's nothing to add on top —
-  // the old `+ cashInterestEarned` was double-counting.
-  const displayedValue = totalValue != null ? totalValue : null;
+  // Headline fund value adds the estimated cash-sleeve interest on top
+  // of the sheet total, per the treasurer's instruction (same as
+  // Portfolio.jsx). Kept consistent everywhere the figure is shown.
+  const displayedValue =
+    totalValue != null ? totalValue + cashInterestEarned : null;
 
   // Return metrics. Lifetime goes against total invested capital (100k
   // start + infusions). Daily / weekly / YTD use raw sheet snapshots.

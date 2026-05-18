@@ -8,11 +8,10 @@ import api from '../api/client.js';
 // line reports) — plus a rough, clearly-labelled estimate of the
 // interest the sleeves threw off while they were funded.
 //
-// That interest is context only. It is NOT added to the portfolio
-// total or return anywhere: every dollar of it either reinvested into
-// the FGTXX balance or was spent on stock the sheet already prices, so
-// the sheet's total already carries it. Lives under the Holdings table
-// on the Portfolio page.
+// Per the treasurer's instruction this estimated interest IS added on
+// top of the sheet total for the headline value/return (Portfolio +
+// Dashboard), so the club gets explicit credit for the cash yield.
+// Lives under the Holdings table on the Portfolio page.
 function fmtMoney(n, opts = {}) {
   if (n == null || !Number.isFinite(n)) return '—';
   return n.toLocaleString('en-US', {
@@ -82,8 +81,8 @@ export default function CashInterestCard({
           </div>
           <div className="mt-1 text-[11px] text-navy-300">
             $40k seeded FGTXX, $60k seeded BDA in Oct 2025. BDA was drawn
-            down to zero buying stocks, then FGTXX. Already inside the
-            portfolio total — shown here for context.
+            down to zero buying stocks, then FGTXX. This estimate is
+            added on top of the sheet total for the headline figures.
           </div>
         </div>
         <div className="text-right">
@@ -91,7 +90,7 @@ export default function CashInterestCard({
             ≈{fmtMoney(estimatedInterestEarned, { cents: true })}
           </div>
           <div className="mt-1 text-[10px] uppercase tracking-wider text-navy-300">
-            estimate · not additive
+estimate · added to total
           </div>
         </div>
       </div>

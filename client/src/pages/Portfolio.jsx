@@ -130,20 +130,28 @@ export default function Portfolio() {
   const totals = data?.totals || {};
   const holdings = data?.holdings || [];
 
-  // Rough, informational-only estimate of the interest the BDA + FGTXX
-  // sleeves threw off while they were funded. It is NOT added to any
-  // total: the leftover FGTXX cash is the sheet's CASH line, and the
-  // rest was drawn down to buy stocks the sheet already prices — so the
-  // sheet's totalValue already carries every dollar of it. Surfacing it
-  // here is context, not an adjustment.
+  // Estimated interest the BDA + FGTXX sleeves threw off while funded.
+  // Per the treasurer's instruction this is added on top of the sheet
+  // total for the headline figures, so the club gets explicit credit
+  // for the cash yield. (Note: economically the sheet already carries
+  // most of this — reinvested FGTXX dividends and interest that was
+  // spent on the stocks the sheet prices — so this deliberately leans
+  // optimistic. It's a single, consistent add applied everywhere the
+  // headline value/return is shown.)
   const estimatedCashInterest = Number(cashYield?.estimatedInterestEarned) || 0;
+
+  // The displayed fund value: live sheet total + the cash-interest
+  // estimate. Used for the hero, the totals row, and the return tiles.
+  const displayedTotal =
+    totals.totalValue != null
+      ? totals.totalValue + estimatedCashInterest
+      : null;
 
   // Total Gain/Loss against the actual capital invested (starting $100k
   // + every infusion) so per-position cost-basis rounding in the sheet
-  // doesn't throw off the top-line number. The sheet total already
-  // includes the cash sleeves, so there's nothing to add on top.
+  // doesn't throw off the top-line number.
   const equityGainLoss =
-    totals.totalValue != null ? totals.totalValue - TOTAL_INVESTED : null;
+    displayedTotal != null ? displayedTotal - TOTAL_INVESTED : null;
   const lifetimeGainLoss = equityGainLoss;
   const lifetimeGainLossPct =
     lifetimeGainLoss != null ? (lifetimeGainLoss / TOTAL_INVESTED) * 100 : null;
@@ -308,7 +316,7 @@ export default function Portfolio() {
     if (!data || fullHistory.length < 2) return null;
     const liveTotal = data.totals?.totalValue;
     if (liveTotal == null) return null;
-    const todayTotal = liveTotal;
+    const todayTotal = liveTotal + estimatedCashInterest;
     const todayIso = new Date().toISOString().slice(0, 10);
     for (let i = fullHistory.length - 1; i >= 0; i--) {
       const snap = fullHistory[i];
@@ -322,7 +330,7 @@ export default function Portfolio() {
       return { diff, pct };
     }
     return null;
-  }, [data, fullHistory]);
+  }, [data, fullHistory, estimatedCashInterest]);
 
   // Annualized Sharpe. Numerator comes from the Adjusted Return tile's
   // lifetime % (annualized by trading days in the sample) so the headline
@@ -431,7 +439,7 @@ export default function Portfolio() {
       {/* Full-width editorial hero — big AUM + since-inception in a navy
           gradient card, same vibe as the Dashboard hero but page-scoped. */}
       <PortfolioHero
-        totalValue={totals.totalValue}
+        totalValue={displayedTotal}
         lifetimeGainLoss={lifetimeGainLoss}
         lifetimeGainLossPct={lifetimeGainLossPct}
         cashValue={totals.cashValue}
@@ -754,7 +762,7 @@ export default function Portfolio() {
                 </span>
                 <div className="text-right">
                   <div className="font-bold text-navy tabular-nums">
-                    {fmtMoney(totals.totalValue)}
+                    {fmtMoney(displayedTotal)}
                   </div>
                   <div
                     className={`text-xs font-semibold ${isUp ? 'text-emerald-600' : 'text-red-600'}`}
@@ -900,7 +908,7 @@ export default function Portfolio() {
                       Total ({holdings.length} positions)
                     </td>
                     <td className="py-3 pr-4 text-right font-bold text-navy tabular-nums">
-                      {fmtMoney(totals.totalValue)}
+                      {fmtMoney(displayedTotal)}
                     </td>
                     <td />
                     <td
@@ -928,16 +936,15 @@ export default function Portfolio() {
             add or remove a position, edit the sheet directly. Tap any
             holding to see company details. The sheet's CASH line is the
             leftover FGTXX money-market balance; BDA was drawn down to
-            zero buying the positions above, so it's already reflected in
-            the total.
+            zero buying the positions above.
             {estimatedCashInterest > 0 && (
               <>
-                {' '}The cash sleeves are estimated to have earned{' '}
+                {' '}An estimated{' '}
                 <span className="font-semibold text-navy">
                   ≈{fmtMoney(estimatedCashInterest, { cents: true })}
                 </span>{' '}
-                in interest while idle (already included in the total —
-                see card below).
+                of cash-sleeve interest is added on top of the sheet
+                total for the headline figures (see card below).
               </>
             )}
           </div>
