@@ -107,6 +107,117 @@ export async function getUpcomingEarningsBatch(tickers, opts = {}) {
   return out;
 }
 
+// Period label for an earnings row. Finnhub usually carries `quarter`
+// (1-4) and `year`; when it doesn't (it's inconsistent on the free
+// tier) we fall back to deriving a calendar quarter from the report
+// date so the panel never shows a bare blank where a label belongs.
+function earningsPeriod(row) {
+  if (row?.quarter && row?.year) return `Q${row.quarter} ${row.year}`;
+  if (row?.year) return String(row.year);
+  if (row?.date) {
+    const d = new Date(`${row.date}T00:00:00Z`);
+    if (!Number.isNaN(d.getTime())) {
+      const q = Math.floor(d.getUTCMonth() / 3) + 1;
+      return `Q${q} ${d.getUTCFullYear()}`;
+    }
+  }
+  return '—';
+}
+
+// The EARN panel's view of the same Finnhub /calendar/earnings feed
+// getUpcomingEarnings already taps — one widened window (≈13 months
+// back through ≈90 days ahead) instead of the forward-only slice, so a
+// single call yields both the next scheduled report and the trailing
+// beat/miss record. Reuses finnhubFetch, fmtDate and the shared
+// earningsCache/TTL wholesale; the cache key is namespaced ('earn:')
+// so the widened payload and getUpcomingEarnings' narrow single-row
+// payload share the Map and its 12h TTL without clobbering each
+// other's differently-shaped value.
+//
+// Returns { upcoming, history }: `upcoming` is the soonest row dated
+// today-or-later that still carries an estimate (null when nothing is
+// on the calendar — ETFs, illiquid names, no consensus coverage);
+// `history` is past rows that actually reported (have epsActual),
+// newest-first and capped at 12, each with a surprise % computed off
+// the estimate (null when the estimate is missing or zero, so a
+// divide-by-zero or a meaningless surprise never reaches the UI).
+// Never throws — a miss or any error degrades to { upcoming:null,
+// history:[] } exactly like its sibling.
+export async function getEarnings(ticker) {
+  const key = process.env.FINNHUB_API_KEY;
+  if (!key || !ticker) return { upcoming: null, history: [] };
+  const upper = String(ticker).toUpperCase();
+
+  const cacheKey = `earn:${upper}`;
+  const cached = earningsCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < EARNINGS_TTL_MS) {
+    return cached.data;
+  }
+
+  const now = new Date();
+  // ≈13 months back catches the last four-or-five reported quarters
+  // even when a release just slipped a few days; ≈90 days ahead is the
+  // same forward horizon a fiscal-quarter cadence needs to surface the
+  // next scheduled date.
+  const from = fmtDate(new Date(now.getTime() - 400 * 24 * 60 * 60 * 1000));
+  const to = fmtDate(new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000));
+  const url =
+    `${FINNHUB_BASE}/calendar/earnings?from=${from}&to=${to}` +
+    `&symbol=${encodeURIComponent(upper)}&token=${encodeURIComponent(key)}`;
+
+  let data = { upcoming: null, history: [] };
+  try {
+    const json = await finnhubFetch(url);
+    const rows = Array.isArray(json?.earningsCalendar) ? json.earningsCalendar : [];
+    const today = fmtDate(now);
+
+    // Next report: the soonest future-dated row that still has an
+    // estimate. A future row with no estimate yet is not actionable —
+    // treat it as nothing scheduled rather than show a date with a
+    // blank number.
+    const upcomingRow = rows
+      .filter((r) => r && r.date && r.date >= today && r.epsEstimate != null)
+      .sort((a, b) => a.date.localeCompare(b.date))[0] || null;
+
+    // History: rows that have actually reported (epsActual present),
+    // strictly in the past, newest-first, capped at 12 quarters.
+    const history = rows
+      .filter((r) => r && r.date && r.date < today && r.epsActual != null)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 12)
+      .map((r) => {
+        const est = r.epsEstimate;
+        const act = r.epsActual;
+        // Surprise is only meaningful with a non-zero estimate;
+        // |est| in the denominator keeps the sign coming from the
+        // beat/miss, not from a negative-EPS base.
+        const surprisePct =
+          est != null && act != null && est !== 0
+            ? ((act - est) / Math.abs(est)) * 100
+            : null;
+        return {
+          period: earningsPeriod(r),
+          date: r.date,
+          epsEstimate: est ?? null,
+          epsActual: act ?? null,
+          surprisePct,
+        };
+      });
+
+    data = {
+      upcoming: upcomingRow
+        ? { date: upcomingRow.date, epsEstimate: upcomingRow.epsEstimate ?? null }
+        : null,
+      history,
+    };
+  } catch (err) {
+    console.warn(`getEarnings(${upper}) failed:`, err.message);
+    data = { upcoming: null, history: [] };
+  }
+  earningsCache.set(cacheKey, { at: Date.now(), data });
+  return data;
+}
+
 // Analyst recommendation trend. Finnhub returns the most recent few
 // months as separate rows. We keep the latest, plus a 3-month-ago
 // row if one exists, so callers can show "current + delta".
@@ -174,6 +285,65 @@ export async function getAnalystConsensus(ticker) {
     data = null;
   }
   consensusCache.set(upper, { at: Date.now(), data });
+  return data;
+}
+
+// The CON panel's view of the same Finnhub /stock/recommendation feed
+// getAnalystConsensus already taps. That sibling collapses the feed to
+// the single ratio + one prior row Peers needs; CON wants the full
+// distribution and several recent periods so a user can see whether
+// sentiment is firming or fading. Reuses finnhubFetch and the shared
+// consensusCache/24h TTL wholesale; the cache key is namespaced
+// ('con:') so this newest-first trend payload and getAnalystConsensus'
+// differently-shaped derived value share the Map without clobbering
+// each other — exactly the move getEarnings made against the earnings
+// cache.
+//
+// Returns { latest, trend }: `latest` is the newest period's raw
+// breakdown ({ period, strongBuy, buy, hold, sell, strongSell }, all
+// coerced to numbers) or null when the name has no analyst coverage
+// (ETFs, illiquid issues, Finnhub returning []); `trend` is the recent
+// periods newest-first, capped at 6, each the same shape. Never throws
+// — a miss or any error degrades to { latest:null, trend:[] }.
+export async function getConsensus(ticker) {
+  const key = process.env.FINNHUB_API_KEY;
+  if (!key || !ticker) return { latest: null, trend: [] };
+  const upper = String(ticker).toUpperCase();
+
+  const cacheKey = `con:${upper}`;
+  const cached = consensusCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < CONSENSUS_TTL_MS) {
+    return cached.data;
+  }
+
+  const url =
+    `${FINNHUB_BASE}/stock/recommendation?symbol=${encodeURIComponent(upper)}` +
+    `&token=${encodeURIComponent(key)}`;
+
+  let data = { latest: null, trend: [] };
+  try {
+    const json = await finnhubFetch(url);
+    if (Array.isArray(json) && json.length > 0) {
+      // Newest period first. Each row reduced to the buy/hold/sell
+      // distribution with every count forced to a number so a missing
+      // bucket reads as 0 in the panel rather than undefined.
+      const rows = [...json]
+        .sort((a, b) => (b.period || '').localeCompare(a.period || ''))
+        .map((r) => ({
+          period: r.period || '',
+          strongBuy: Number(r.strongBuy) || 0,
+          buy: Number(r.buy) || 0,
+          hold: Number(r.hold) || 0,
+          sell: Number(r.sell) || 0,
+          strongSell: Number(r.strongSell) || 0,
+        }));
+      data = { latest: rows[0] || null, trend: rows.slice(0, 6) };
+    }
+  } catch (err) {
+    console.warn(`getConsensus(${upper}) failed:`, err.message);
+    data = { latest: null, trend: [] };
+  }
+  consensusCache.set(cacheKey, { at: Date.now(), data });
   return data;
 }
 

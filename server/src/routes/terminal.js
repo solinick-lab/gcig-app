@@ -7,11 +7,12 @@ import { getPortfolioMovers, getSheetPortfolio } from '../services/sheetPortfoli
 import { getProxyStatement } from '../services/proxyStatement.js';
 import { getExecutiveBios } from '../services/executiveBios.js';
 import { parseLeadership, parseBoard, parseComp, buildNetwork } from '../services/governanceParsers.js';
-import { getPeers, getPeerSnapshot } from '../services/marketData.js';
+import { getPeers, getPeerSnapshot, getEarnings, getConsensus } from '../services/marketData.js';
 import { getNewsForTicker } from '../services/news.js';
 import { getWorldIndices, REGION_ORDER } from '../services/worldIndices.js';
 import { getInsiderTransactions } from '../services/insiderTx.js';
 import { getLiveQuotes } from '../services/liveQuotes.js';
+import { getRecentFilings } from '../services/secFilings.js';
 
 // Terminal — AI-driven endpoints that back the /terminal workstation.
 // Quote/news/fundamentals data is reused from /api/holdings/* (already
@@ -44,6 +45,10 @@ const KNOWN_FUNCTIONS = [
   { id: 'FA', label: 'Financial Analysis', summary: 'Multi-year fundamentals deep dive.' },
   { id: 'PEER', label: 'Peers', summary: 'Sector peer comparison table.' },
   { id: 'INSDR', label: 'Insider Activity', summary: 'Form 4 insider buys/sells overlaid on the price chart.' },
+  { id: 'EARN', label: 'Earnings', summary: 'Next report date + estimate and a trailing EPS beat/miss history.' },
+  { id: 'CON', label: 'Analyst Consensus', summary: 'Analyst buy/hold/sell breakdown and recent trend.' },
+  { id: 'CMP', label: 'Compare', summary: '2–4 tickers side by side: live price, day %, and key valuation.' },
+  { id: 'NOTE', label: 'Notes', summary: 'Your private research notes for this ticker, saved to your profile.' },
   { id: 'MGMT', label: 'Management & Board', summary: 'CEO, executives, board, compensation, and interlocking-board network from the latest DEF 14A.' },
   { id: 'BI', label: 'Bloomberg Intelligence', summary: 'Free-form research chat with workspace context.' },
   { id: 'WEI', label: 'World Equity Indices', summary: 'Global index snapshot.' },
@@ -163,6 +168,68 @@ router.get('/governance/:ticker/exec-bios', (req, res) =>
   execBiosHandler(req, res)
 );
 
+// EARN — a ticker's next scheduled report (date + EPS estimate) and a
+// trailing beat/miss record (EPS estimate vs. actual + surprise %),
+// off the same Finnhub /calendar/earnings feed PEER/holdings already
+// use (one widened window; getEarnings owns the split + the shared
+// 12h cache). The service is never-throws and returns its honest
+// empty stub on any miss — ETFs, illiquid names, or no consensus
+// coverage — so a coverage gap is a normal 200 with upcoming:null /
+// history:[], never a 5xx; the panel says "no earnings data" and
+// suppresses the AI brief rather than erroring. Handler extracted with
+// an injectable service (the shape terminal.earnings.test.js uses to
+// stay off the network) and wrapped in its own try/catch: even though
+// the service contract is never-throws, the route does not lean on
+// that — any unexpected rejection still degrades to the same honest-
+// empty 200 with a warn, so this endpoint can never 5xx.
+export async function earningsHandler(req, res, deps = {}) {
+  const fetchEarnings = deps.getEarnings || getEarnings;
+  const raw = String(req.params.ticker || '').trim().toUpperCase();
+  if (!raw || !/^[A-Z0-9.\-]{1,12}$/.test(raw)) {
+    return res.status(400).json({ error: 'Invalid ticker' });
+  }
+  try {
+    const { upcoming, history } = await fetchEarnings(raw);
+    res.json({ ticker: raw, upcoming, history });
+  } catch (err) {
+    console.warn(`terminal/earnings(${raw}) degraded:`, err.message);
+    res.json({ ticker: raw, upcoming: null, history: [] });
+  }
+}
+
+router.get('/earnings/:ticker', (req, res) => earningsHandler(req, res));
+
+// CON — a ticker's analyst buy/hold/sell breakdown (the latest period)
+// plus the recent trend, off the same Finnhub /stock/recommendation
+// feed Peers already consumes; getConsensus owns the newest-first
+// reshape and shares the recommendation cache (its own namespaced
+// key). The service is never-throws and returns its honest empty stub
+// on any miss — ETFs, illiquid names, or no analyst coverage — so a
+// coverage gap is a normal 200 with latest:null / trend:[], never a
+// 5xx; the panel says "no analyst coverage" and suppresses the AI
+// brief rather than erroring. Handler extracted with an injectable
+// service (the shape terminal.consensus.test.js uses to stay off the
+// network) and wrapped in its own try/catch: even though the service
+// contract is never-throws, the route does not lean on that — any
+// unexpected rejection still degrades to the same honest-empty 200
+// with a warn, so this endpoint can never 5xx.
+export async function consensusHandler(req, res, deps = {}) {
+  const fetchConsensus = deps.getConsensus || getConsensus;
+  const raw = String(req.params.ticker || '').trim().toUpperCase();
+  if (!raw || !/^[A-Z0-9.\-]{1,12}$/.test(raw)) {
+    return res.status(400).json({ error: 'Invalid ticker' });
+  }
+  try {
+    const { latest, trend } = await fetchConsensus(raw);
+    res.json({ ticker: raw, latest, trend });
+  } catch (err) {
+    console.warn(`terminal/consensus(${raw}) degraded:`, err.message);
+    res.json({ ticker: raw, latest: null, trend: [] });
+  }
+}
+
+router.get('/consensus/:ticker', (req, res) => consensusHandler(req, res));
+
 // GET /quotes?tickers=A,B,C — the only live-price tap the terminal's
 // quote panels (DES, Peers, MOVR) draw on. Thin by design: it owns the
 // abuse net, not the cache. liveQuotes.js already de-dupes/upper-cases
@@ -202,6 +269,110 @@ export async function quotesHandler(req, res, deps = {}) {
 }
 
 router.get('/quotes', (req, res) => quotesHandler(req, res));
+
+// CMP — 2–4 tickers side by side: the comparison columns Peers
+// already shows (name, mkt cap, P/E, fwd P/E, div, beta) for an
+// arbitrary user-picked set rather than a sector peer list. Pure
+// reuse of getPeerSnapshot — the same per-name fundamentals bundle
+// PEER lifts, one snapshot per requested ticker, sharing its 15m
+// cache; there is no new Finnhub path here. Live price + day % are
+// not this route's job: the panel overlays /terminal/quotes via
+// useLiveRefresh exactly like Peers/Movers, so /compare stays the
+// slow fundamentals snapshot only.
+//
+// The ?tickers list is normalized by the identical rule
+// quotesHandler uses (split, trim, upper-case, drop empties, dedupe)
+// but capped at 4 — the panel never compares more than four, and the
+// cap keeps a hand-crafted list from fanning into a snapshot burst.
+// One row per requested ticker is the contract: a snapshot miss
+// (unknown symbol, Finnhub gap, or even a per-ticker rejection) keeps
+// the row with every fundamental nulled so the panel still renders a
+// column for every name the user asked for. An empty list is the
+// lenient honest 200 { tickers:[], rows:[] }, not a 4xx — the same
+// free-form-list posture as /quotes, not the single-path-param
+// governance guards.
+//
+// Handler extracted with an injectable service (the shape
+// terminal.compare.test.js uses to stay off the network) and wrapped
+// in its own try/catch around both the per-ticker fetch and the
+// whole pass: getPeerSnapshot is contractually never-throws, but the
+// route does not lean on that — a per-ticker rejection degrades that
+// row, and any handler-level failure degrades to a 200
+// { tickers:[], rows:[] } with a warn, so this endpoint can never
+// 5xx.
+export async function compareHandler(req, res, deps = {}) {
+  const fetchSnapshot = deps.getPeerSnapshot || getPeerSnapshot;
+  try {
+    const list = Array.from(
+      new Set(
+        String(req.query?.tickers || '')
+          .split(',')
+          .map((t) => t.trim().toUpperCase())
+          .filter(Boolean)
+      )
+    ).slice(0, 4);
+    if (list.length === 0) return res.json({ tickers: [], rows: [] });
+
+    const snaps = await Promise.all(
+      list.map((t) => Promise.resolve(fetchSnapshot(t)).catch(() => null))
+    );
+
+    const rows = list.map((t, i) => {
+      const s = snaps[i];
+      return {
+        ticker: t,
+        name: s?.name ?? null,
+        marketCap: s?.marketCap ?? null,
+        peRatio: s?.trailingPE ?? null,
+        forwardPE: s?.forwardPE ?? null,
+        dividendYield: s?.dividendYield ?? null,
+        beta: s?.beta ?? null,
+      };
+    });
+    res.json({ tickers: list, rows });
+  } catch (err) {
+    console.warn('terminal/compare degraded:', err.message);
+    res.json({ tickers: [], rows: [] });
+  }
+}
+
+router.get('/compare', (req, res) => compareHandler(req, res));
+
+// FIL — a ticker's recent SEC filings (8-K, 10-Q, 10-K, DEF 14A,
+// Form 4 …) straight off the EDGAR submissions feed. Pure reuse of
+// secFilings.js: getRecentFilings already backs holdings.js and owns
+// its own 6h per-ticker cache, ticker→CIK resolution (including the
+// dot/dash share-class convention), and the never-throws empty
+// degrade — there is no new SEC fetch path here. We pull a 40-row
+// window: deep enough that an annual DEF 14A or 10-K isn't buried
+// behind a torrent of 8-Ks/Form 4s for an active large-cap, while
+// still a single cached JSON read.
+//
+// Handler extracted with an injectable service (the shape
+// terminal.filings.test.js uses to stay off the network) and wrapped
+// in its own try/catch: getRecentFilings is contractually never-
+// throws (it returns [] on any miss), but the route does not lean on
+// that — any unexpected rejection still degrades to a 200
+// { ticker, filings: [] } with a warn, so this endpoint can never
+// 5xx and the panel says "no recent filings" rather than erroring.
+// A malformed path param is the one 400, matching the sibling
+// /governance and exec-bios input guards exactly.
+export async function filingsHandler(req, res, deps = {}) {
+  const fetchFilings = deps.getRecentFilings || getRecentFilings;
+  const raw = String(req.params.ticker || '').trim().toUpperCase();
+  if (!raw || !/^[A-Z0-9.\-]{1,12}$/.test(raw)) {
+    return res.status(400).json({ error: 'Invalid ticker' });
+  }
+  try {
+    const filings = await fetchFilings(raw, { limit: 40 });
+    res.json({ ticker: raw, filings: Array.isArray(filings) ? filings : [] });
+  } catch (err) {
+    console.warn(`terminal/filings(${raw}) degraded:`, err.message);
+    res.json({ ticker: raw, filings: [] });
+  }
+}
+
+router.get('/filings/:ticker', (req, res) => filingsHandler(req, res));
 
 // MOVR — every holding and how much it's up or down today, read live
 // from the positions sheet (same source as the dashboard). Not the
@@ -352,6 +523,13 @@ const FN_PROMPTS = {
     'Large option exercises followed by immediate sells are routine, not bearish — distinguish them from open-market conviction buys. ' +
     GROUNDING_RULES,
 
+  EARN:
+    'You are an earnings analyst at GCIG, a student investment fund, reading a company\'s report history. ' +
+    'Write a 2–3 sentence brief. When is the next report, and is it near? ' +
+    'Has the recent record been a beat or miss streak, and is the EPS surprise trend widening or narrowing? ' +
+    'Flag if the estimate set is thin (few quarters) or stale, which makes the next print less predictable. ' +
+    GROUNDING_RULES,
+
   MOVR:
     'You are a portfolio risk analyst at GCIG, a student investment fund, reviewing today\'s performance across the book. ' +
     'Write a 2–3 sentence brief. Is the fund broadly green or red? How concentrated is the move — is one name driving most of the P&L? ' +
@@ -362,6 +540,27 @@ const FN_PROMPTS = {
     'You are a governance analyst at GCIG, a student investment fund. ' +
     'Write a 2–3 sentence brief on the leadership team. Note CEO tenure and any recent turnover. ' +
     'Flag if compensation appears outsized relative to company size, or if the board has notable interlocking directorships with portfolio companies. ' +
+    GROUNDING_RULES,
+
+  FIL:
+    'You are a filings analyst at GCIG, a student investment fund, reading a ticker\'s recent SEC submissions. ' +
+    'Write a 2–3 sentence brief on what is notable. Flag a fresh 10-K or 10-Q, a material 8-K, or a new DEF 14A, and note clustered Form 4s in a short window. ' +
+    'Distinguish substantive filings from routine boilerplate (144s, ownership amendments). ' +
+    'If nothing has been filed recently or the feed is stale, say so plainly rather than overstating thin activity. ' +
+    GROUNDING_RULES,
+
+  CON:
+    'You are a sell-side-coverage analyst at GCIG, a student investment fund, reading a ticker\'s analyst recommendation distribution. ' +
+    'Write a 2–3 sentence brief. What is the current skew — is the latest period weighted to buy, hold, or sell? ' +
+    'Comparing the recent periods, is sentiment improving (upgrades, buys rising) or deteriorating (downgrades, holds/sells rising)? ' +
+    'Flag thin or absent coverage (only a handful of analysts, or none), which makes the consensus weak signal. ' +
+    GROUNDING_RULES,
+
+  CMP:
+    'You are a relative-value analyst at GCIG, a student investment fund, comparing a small hand-picked set of tickers head to head. ' +
+    'Write a 2–3 sentence brief. Which name looks rich and which looks cheap on P/E (and forward P/E) relative to the group, and does any growth, yield, or beta difference justify that gap? ' +
+    'Name the clear outlier — the cheapest, the most expensive, or the one whose risk profile (beta) or income (dividend) sets it apart. ' +
+    'If the set is too small or fundamentals are missing for most names, say so plainly rather than forcing a comparison. ' +
     GROUNDING_RULES,
 
   WEI:
