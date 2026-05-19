@@ -96,6 +96,7 @@ model User {
   tradeRequests     TradeRequest[]   @relation("TradeRequestCreator")
   presidentReviewsGiven    PresidentReview[] @relation("PresidentReviewReviewer")
   presidentReviewsReceived PresidentReview[] @relation("PresidentReviewPresident")
+  researchNotes            ResearchNote[]
 }
 
 // Chat channels are addressed by a simple string:
@@ -713,4 +714,24 @@ model PriceBar {
 
   @@unique([ticker, date])
   @@index([ticker, date(sort: Desc)])
+}
+
+// A private free-text research note a member keeps on a ticker while
+// doing diligence — their own thesis, open questions, a reminder to
+// themselves. Strictly per-user: one note per (user, ticker), upserted
+// on save, and never visible to anyone else. Cascade from User so an
+// account deletion takes its notes with it. The terminal's NOTE panel
+// reads and writes this through /api/notes, always scoped to the
+// caller's own id (HoldingThesis is the club-wide analogue; this is
+// the personal one).
+model ResearchNote {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  ticker    String
+  body      String
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, ticker])
+  @@index([userId])
 }

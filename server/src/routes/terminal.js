@@ -48,6 +48,7 @@ const KNOWN_FUNCTIONS = [
   { id: 'EARN', label: 'Earnings', summary: 'Next report date + estimate and a trailing EPS beat/miss history.' },
   { id: 'CON', label: 'Analyst Consensus', summary: 'Analyst buy/hold/sell breakdown and recent trend.' },
   { id: 'CMP', label: 'Compare', summary: '2–4 tickers side by side: live price, day %, and key valuation.' },
+  { id: 'NOTE', label: 'Notes', summary: 'Your private research notes for this ticker, saved to your profile.' },
   { id: 'MGMT', label: 'Management & Board', summary: 'CEO, executives, board, compensation, and interlocking-board network from the latest DEF 14A.' },
   { id: 'BI', label: 'Bloomberg Intelligence', summary: 'Free-form research chat with workspace context.' },
   { id: 'WEI', label: 'World Equity Indices', summary: 'Global index snapshot.' },
