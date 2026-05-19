@@ -23,6 +23,13 @@ jobs:
 
       - run: npm ci --ignore-scripts
 
+      # bcrypt is a native module. `--ignore-scripts` skips its
+      # postinstall binary build, so every test that loads the auth /
+      # president-step-down routes (which import bcrypt) crashes on
+      # require — a false red on every PR. Rebuild just bcrypt's
+      # binding; --ignore-scripts still guards every other package.
+      - run: npm rebuild bcrypt
+
       - run: npx prisma generate
 
       - run: npm test
