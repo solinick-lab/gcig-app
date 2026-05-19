@@ -4,6 +4,10 @@ import { format, parse, startOfWeek, getDay } from 'date-fns';
 import enUS from 'date-fns/locale/en-US';
 import { Plus, Presentation, CalendarDays, Send, Utensils, Handshake } from 'lucide-react';
 import api from '../api/client.js';
+import {
+  utcIsoToEtInputValue,
+  etInputValueToUtcIso,
+} from '../utils/etDateTime.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
@@ -238,7 +242,7 @@ export default function Calendar() {
       id: p.id,
       pitcherName: p.pitcherName || '',
       ticker: p.ticker,
-      date: new Date(p.date).toISOString().slice(0, 16),
+      date: utcIsoToEtInputValue(p.date),
       location: p.location || '',
       slideshowUrl: p.slideshowUrl || '',
       presenterIds: (p.presenters || []).map((pp) => pp.id),
@@ -268,7 +272,7 @@ export default function Calendar() {
       const body = {
         pitcherName,
         ticker: pitchForm.ticker,
-        date: new Date(pitchForm.date).toISOString(),
+        date: etInputValueToUtcIso(pitchForm.date),
         location: pitchForm.location || null,
         slideshowUrl: pitchForm.slideshowUrl || null,
         presenterIds: pitchForm.presenterIds,
@@ -304,7 +308,7 @@ export default function Calendar() {
     setEventForm({
       id: ev.id,
       title: ev.title,
-      date: new Date(ev.date).toISOString().slice(0, 16),
+      date: utcIsoToEtInputValue(ev.date),
       location: ev.location || '',
       description: ev.description || '',
       audience: ev.audience || 'all',
@@ -325,7 +329,7 @@ export default function Calendar() {
     // server doesn't reject the update.
     if (!eventForm.recurring) {
       body.title = eventForm.title;
-      body.date = new Date(eventForm.date).toISOString();
+      body.date = etInputValueToUtcIso(eventForm.date);
       body.location = eventForm.location || null;
       body.description = eventForm.description || null;
       body.audience = eventForm.audience || 'all';

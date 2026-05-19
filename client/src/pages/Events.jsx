@@ -4,6 +4,10 @@ import { format, parse, startOfWeek, getDay } from 'date-fns';
 import enUS from 'date-fns/locale/en-US';
 import { Plus } from 'lucide-react';
 import api from '../api/client.js';
+import {
+  utcIsoToEtInputValue,
+  etInputValueToUtcIso,
+} from '../utils/etDateTime.js';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
@@ -52,7 +56,7 @@ export default function Events() {
     setForm({
       id: ev.id,
       title: ev.title,
-      date: new Date(ev.date).toISOString().slice(0, 16),
+      date: utcIsoToEtInputValue(ev.date),
       location: ev.location || '',
       description: ev.description || '',
     });
@@ -64,7 +68,7 @@ export default function Events() {
     e.preventDefault();
     const body = {
       title: form.title,
-      date: new Date(form.date).toISOString(),
+      date: etInputValueToUtcIso(form.date),
       location: form.location || null,
       description: form.description || null,
     };

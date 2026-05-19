@@ -4,6 +4,10 @@ import { format, parse, startOfWeek, getDay } from 'date-fns';
 import enUS from 'date-fns/locale/en-US';
 import { Plus } from 'lucide-react';
 import api from '../api/client.js';
+import {
+  utcIsoToEtInputValue,
+  etInputValueToUtcIso,
+} from '../utils/etDateTime.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
@@ -92,7 +96,7 @@ export default function Pitches() {
       id: pitch.id,
       pitcherName: pitch.pitcherName || '',
       ticker: pitch.ticker,
-      date: new Date(pitch.date).toISOString().slice(0, 16),
+      date: utcIsoToEtInputValue(pitch.date),
       location: pitch.location || '',
       slideshowUrl: pitch.slideshowUrl || '',
       presenterIds: (pitch.presenters || []).map((p) => p.id),
@@ -124,7 +128,7 @@ export default function Pitches() {
       const body = {
         pitcherName,
         ticker: form.ticker,
-        date: new Date(form.date).toISOString(),
+        date: etInputValueToUtcIso(form.date),
         location: form.location || null,
         slideshowUrl: form.slideshowUrl || null,
         presenterIds: form.presenterIds,

@@ -12,6 +12,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import api from '../api/client.js';
+import { etInputValueToUtcIso } from '../utils/etDateTime.js';
 import { openOrPreview } from '../api/fileHelpers.js';
 import FilePreviewModal from '../components/FilePreviewModal.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -84,7 +85,7 @@ export default function Votes() {
         ticker: form.ticker,
         title: form.title || null,
         pitchId: form.pitchId ? Number(form.pitchId) : null,
-        deadline: new Date(form.deadline).toISOString(),
+        deadline: etInputValueToUtcIso(form.deadline),
       });
       setModalOpen(false);
       setForm(emptyForm());
