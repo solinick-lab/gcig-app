@@ -7,7 +7,7 @@ import { getPortfolioMovers, getSheetPortfolio } from '../services/sheetPortfoli
 import { getProxyStatement } from '../services/proxyStatement.js';
 import { getExecutiveBios } from '../services/executiveBios.js';
 import { parseLeadership, parseBoard, parseComp, buildNetwork } from '../services/governanceParsers.js';
-import { getPeers, getPeerSnapshot, getEarnings } from '../services/marketData.js';
+import { getPeers, getPeerSnapshot, getEarnings, getConsensus } from '../services/marketData.js';
 import { getNewsForTicker } from '../services/news.js';
 import { getWorldIndices, REGION_ORDER } from '../services/worldIndices.js';
 import { getInsiderTransactions } from '../services/insiderTx.js';
@@ -46,6 +46,7 @@ const KNOWN_FUNCTIONS = [
   { id: 'PEER', label: 'Peers', summary: 'Sector peer comparison table.' },
   { id: 'INSDR', label: 'Insider Activity', summary: 'Form 4 insider buys/sells overlaid on the price chart.' },
   { id: 'EARN', label: 'Earnings', summary: 'Next report date + estimate and a trailing EPS beat/miss history.' },
+  { id: 'CON', label: 'Analyst Consensus', summary: 'Analyst buy/hold/sell breakdown and recent trend.' },
   { id: 'MGMT', label: 'Management & Board', summary: 'CEO, executives, board, compensation, and interlocking-board network from the latest DEF 14A.' },
   { id: 'BI', label: 'Bloomberg Intelligence', summary: 'Free-form research chat with workspace context.' },
   { id: 'WEI', label: 'World Equity Indices', summary: 'Global index snapshot.' },
@@ -195,6 +196,37 @@ export async function earningsHandler(req, res, deps = {}) {
 }
 
 router.get('/earnings/:ticker', (req, res) => earningsHandler(req, res));
+
+// CON — a ticker's analyst buy/hold/sell breakdown (the latest period)
+// plus the recent trend, off the same Finnhub /stock/recommendation
+// feed Peers already consumes; getConsensus owns the newest-first
+// reshape and shares the recommendation cache (its own namespaced
+// key). The service is never-throws and returns its honest empty stub
+// on any miss — ETFs, illiquid names, or no analyst coverage — so a
+// coverage gap is a normal 200 with latest:null / trend:[], never a
+// 5xx; the panel says "no analyst coverage" and suppresses the AI
+// brief rather than erroring. Handler extracted with an injectable
+// service (the shape terminal.consensus.test.js uses to stay off the
+// network) and wrapped in its own try/catch: even though the service
+// contract is never-throws, the route does not lean on that — any
+// unexpected rejection still degrades to the same honest-empty 200
+// with a warn, so this endpoint can never 5xx.
+export async function consensusHandler(req, res, deps = {}) {
+  const fetchConsensus = deps.getConsensus || getConsensus;
+  const raw = String(req.params.ticker || '').trim().toUpperCase();
+  if (!raw || !/^[A-Z0-9.\-]{1,12}$/.test(raw)) {
+    return res.status(400).json({ error: 'Invalid ticker' });
+  }
+  try {
+    const { latest, trend } = await fetchConsensus(raw);
+    res.json({ ticker: raw, latest, trend });
+  } catch (err) {
+    console.warn(`terminal/consensus(${raw}) degraded:`, err.message);
+    res.json({ ticker: raw, latest: null, trend: [] });
+  }
+}
+
+router.get('/consensus/:ticker', (req, res) => consensusHandler(req, res));
 
 // GET /quotes?tickers=A,B,C — the only live-price tap the terminal's
 // quote panels (DES, Peers, MOVR) draw on. Thin by design: it owns the
@@ -445,6 +477,13 @@ const FN_PROMPTS = {
     'Write a 2–3 sentence brief on what is notable. Flag a fresh 10-K or 10-Q, a material 8-K, or a new DEF 14A, and note clustered Form 4s in a short window. ' +
     'Distinguish substantive filings from routine boilerplate (144s, ownership amendments). ' +
     'If nothing has been filed recently or the feed is stale, say so plainly rather than overstating thin activity. ' +
+    GROUNDING_RULES,
+
+  CON:
+    'You are a sell-side-coverage analyst at GCIG, a student investment fund, reading a ticker\'s analyst recommendation distribution. ' +
+    'Write a 2–3 sentence brief. What is the current skew — is the latest period weighted to buy, hold, or sell? ' +
+    'Comparing the recent periods, is sentiment improving (upgrades, buys rising) or deteriorating (downgrades, holds/sells rising)? ' +
+    'Flag thin or absent coverage (only a handful of analysts, or none), which makes the consensus weak signal. ' +
     GROUNDING_RULES,
 
   WEI:

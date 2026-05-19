@@ -288,6 +288,65 @@ export async function getAnalystConsensus(ticker) {
   return data;
 }
 
+// The CON panel's view of the same Finnhub /stock/recommendation feed
+// getAnalystConsensus already taps. That sibling collapses the feed to
+// the single ratio + one prior row Peers needs; CON wants the full
+// distribution and several recent periods so a user can see whether
+// sentiment is firming or fading. Reuses finnhubFetch and the shared
+// consensusCache/24h TTL wholesale; the cache key is namespaced
+// ('con:') so this newest-first trend payload and getAnalystConsensus'
+// differently-shaped derived value share the Map without clobbering
+// each other — exactly the move getEarnings made against the earnings
+// cache.
+//
+// Returns { latest, trend }: `latest` is the newest period's raw
+// breakdown ({ period, strongBuy, buy, hold, sell, strongSell }, all
+// coerced to numbers) or null when the name has no analyst coverage
+// (ETFs, illiquid issues, Finnhub returning []); `trend` is the recent
+// periods newest-first, capped at 6, each the same shape. Never throws
+// — a miss or any error degrades to { latest:null, trend:[] }.
+export async function getConsensus(ticker) {
+  const key = process.env.FINNHUB_API_KEY;
+  if (!key || !ticker) return { latest: null, trend: [] };
+  const upper = String(ticker).toUpperCase();
+
+  const cacheKey = `con:${upper}`;
+  const cached = consensusCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < CONSENSUS_TTL_MS) {
+    return cached.data;
+  }
+
+  const url =
+    `${FINNHUB_BASE}/stock/recommendation?symbol=${encodeURIComponent(upper)}` +
+    `&token=${encodeURIComponent(key)}`;
+
+  let data = { latest: null, trend: [] };
+  try {
+    const json = await finnhubFetch(url);
+    if (Array.isArray(json) && json.length > 0) {
+      // Newest period first. Each row reduced to the buy/hold/sell
+      // distribution with every count forced to a number so a missing
+      // bucket reads as 0 in the panel rather than undefined.
+      const rows = [...json]
+        .sort((a, b) => (b.period || '').localeCompare(a.period || ''))
+        .map((r) => ({
+          period: r.period || '',
+          strongBuy: Number(r.strongBuy) || 0,
+          buy: Number(r.buy) || 0,
+          hold: Number(r.hold) || 0,
+          sell: Number(r.sell) || 0,
+          strongSell: Number(r.strongSell) || 0,
+        }));
+      data = { latest: rows[0] || null, trend: rows.slice(0, 6) };
+    }
+  } catch (err) {
+    console.warn(`getConsensus(${upper}) failed:`, err.message);
+    data = { latest: null, trend: [] };
+  }
+  consensusCache.set(cacheKey, { at: Date.now(), data });
+  return data;
+}
+
 // Finnhub /stock/peers — companies it groups in the same sub-industry
 // as the symbol. Free tier, 60 rpm; the set is stable, so a 24h cache
 // keeps this off the budget. Returns an uppercased ticker array

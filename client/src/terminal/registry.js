@@ -13,6 +13,7 @@ import Peers from './functions/Peers.jsx';
 import InsiderActivity from './functions/InsiderActivity.jsx';
 import Filings from './functions/Filings.jsx';
 import Earnings from './functions/Earnings.jsx';
+import Consensus from './functions/Consensus.jsx';
 import Governance from './functions/Governance.jsx';
 import TopNews from './functions/TopNews.jsx';
 import WorldIndices from './functions/WorldIndices.jsx';
@@ -59,6 +60,7 @@ export const FUNCTIONS = [
   { id: 'INSDR', label: 'Insider Activity', help: 'Form 4 insider buys/sells on the price chart.', requires: 'ticker', component: InsiderActivity },
   { id: 'FIL', label: 'Filings', help: 'Recent SEC filings (8-K/10-Q/10-K/DEF 14A/Form 4) with an AI read.', requires: 'ticker', component: Filings },
   { id: 'EARN', label: 'Earnings', help: 'Next report + trailing EPS beat/miss history.', requires: 'ticker', component: Earnings },
+  { id: 'CON', label: 'Analyst Consensus', help: 'Buy/hold/sell breakdown & trend.', requires: 'ticker', component: Consensus },
   { id: 'MGMT', label: 'Management & Board', help: 'CEO, board, comp & interlocking boards from the latest DEF 14A.', requires: 'ticker', component: Governance },
   { id: 'WEI', label: 'World Indices', help: 'Global index snapshot.', requires: null, component: WorldIndices },
   { id: 'TOP', label: 'Top News', help: 'Market-wide top headlines.', requires: null, component: TopNews },
