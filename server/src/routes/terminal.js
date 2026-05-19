@@ -47,6 +47,7 @@ const KNOWN_FUNCTIONS = [
   { id: 'INSDR', label: 'Insider Activity', summary: 'Form 4 insider buys/sells overlaid on the price chart.' },
   { id: 'EARN', label: 'Earnings', summary: 'Next report date + estimate and a trailing EPS beat/miss history.' },
   { id: 'CON', label: 'Analyst Consensus', summary: 'Analyst buy/hold/sell breakdown and recent trend.' },
+  { id: 'CMP', label: 'Compare', summary: '2–4 tickers side by side: live price, day %, and key valuation.' },
   { id: 'MGMT', label: 'Management & Board', summary: 'CEO, executives, board, compensation, and interlocking-board network from the latest DEF 14A.' },
   { id: 'BI', label: 'Bloomberg Intelligence', summary: 'Free-form research chat with workspace context.' },
   { id: 'WEI', label: 'World Equity Indices', summary: 'Global index snapshot.' },
@@ -268,6 +269,74 @@ export async function quotesHandler(req, res, deps = {}) {
 
 router.get('/quotes', (req, res) => quotesHandler(req, res));
 
+// CMP — 2–4 tickers side by side: the comparison columns Peers
+// already shows (name, mkt cap, P/E, fwd P/E, div, beta) for an
+// arbitrary user-picked set rather than a sector peer list. Pure
+// reuse of getPeerSnapshot — the same per-name fundamentals bundle
+// PEER lifts, one snapshot per requested ticker, sharing its 15m
+// cache; there is no new Finnhub path here. Live price + day % are
+// not this route's job: the panel overlays /terminal/quotes via
+// useLiveRefresh exactly like Peers/Movers, so /compare stays the
+// slow fundamentals snapshot only.
+//
+// The ?tickers list is normalized by the identical rule
+// quotesHandler uses (split, trim, upper-case, drop empties, dedupe)
+// but capped at 4 — the panel never compares more than four, and the
+// cap keeps a hand-crafted list from fanning into a snapshot burst.
+// One row per requested ticker is the contract: a snapshot miss
+// (unknown symbol, Finnhub gap, or even a per-ticker rejection) keeps
+// the row with every fundamental nulled so the panel still renders a
+// column for every name the user asked for. An empty list is the
+// lenient honest 200 { tickers:[], rows:[] }, not a 4xx — the same
+// free-form-list posture as /quotes, not the single-path-param
+// governance guards.
+//
+// Handler extracted with an injectable service (the shape
+// terminal.compare.test.js uses to stay off the network) and wrapped
+// in its own try/catch around both the per-ticker fetch and the
+// whole pass: getPeerSnapshot is contractually never-throws, but the
+// route does not lean on that — a per-ticker rejection degrades that
+// row, and any handler-level failure degrades to a 200
+// { tickers:[], rows:[] } with a warn, so this endpoint can never
+// 5xx.
+export async function compareHandler(req, res, deps = {}) {
+  const fetchSnapshot = deps.getPeerSnapshot || getPeerSnapshot;
+  try {
+    const list = Array.from(
+      new Set(
+        String(req.query?.tickers || '')
+          .split(',')
+          .map((t) => t.trim().toUpperCase())
+          .filter(Boolean)
+      )
+    ).slice(0, 4);
+    if (list.length === 0) return res.json({ tickers: [], rows: [] });
+
+    const snaps = await Promise.all(
+      list.map((t) => Promise.resolve(fetchSnapshot(t)).catch(() => null))
+    );
+
+    const rows = list.map((t, i) => {
+      const s = snaps[i];
+      return {
+        ticker: t,
+        name: s?.name ?? null,
+        marketCap: s?.marketCap ?? null,
+        peRatio: s?.trailingPE ?? null,
+        forwardPE: s?.forwardPE ?? null,
+        dividendYield: s?.dividendYield ?? null,
+        beta: s?.beta ?? null,
+      };
+    });
+    res.json({ tickers: list, rows });
+  } catch (err) {
+    console.warn('terminal/compare degraded:', err.message);
+    res.json({ tickers: [], rows: [] });
+  }
+}
+
+router.get('/compare', (req, res) => compareHandler(req, res));
+
 // FIL — a ticker's recent SEC filings (8-K, 10-Q, 10-K, DEF 14A,
 // Form 4 …) straight off the EDGAR submissions feed. Pure reuse of
 // secFilings.js: getRecentFilings already backs holdings.js and owns
@@ -484,6 +553,13 @@ const FN_PROMPTS = {
     'Write a 2–3 sentence brief. What is the current skew — is the latest period weighted to buy, hold, or sell? ' +
     'Comparing the recent periods, is sentiment improving (upgrades, buys rising) or deteriorating (downgrades, holds/sells rising)? ' +
     'Flag thin or absent coverage (only a handful of analysts, or none), which makes the consensus weak signal. ' +
+    GROUNDING_RULES,
+
+  CMP:
+    'You are a relative-value analyst at GCIG, a student investment fund, comparing a small hand-picked set of tickers head to head. ' +
+    'Write a 2–3 sentence brief. Which name looks rich and which looks cheap on P/E (and forward P/E) relative to the group, and does any growth, yield, or beta difference justify that gap? ' +
+    'Name the clear outlier — the cheapest, the most expensive, or the one whose risk profile (beta) or income (dividend) sets it apart. ' +
+    'If the set is too small or fundamentals are missing for most names, say so plainly rather than forcing a comparison. ' +
     GROUNDING_RULES,
 
   WEI:
