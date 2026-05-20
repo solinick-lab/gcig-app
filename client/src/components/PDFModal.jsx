@@ -64,10 +64,19 @@ export function embedUrl(url, mime) {
   }
 }
 
-// True if we have a reasonable expectation the browser can render this
-// inline. PDF by extension or mime type is the clean case; Drive and
-// Slides preview URLs are also fine; everything else (PPTX, DOCX,
-// arbitrary domains) is honest-false → fallback panel.
+// v1.1 widens the embed attempt to any http(s) document — PDFs and
+// HTML alike — because the FIL terminal opens SEC EDGAR pages, which
+// are plain HTML, not PDF. The iframe is best-effort: if the source
+// sends X-Frame-Options / Content-Security-Policy: frame-ancestors
+// that bar us, the pane just paints blank and the header's
+// always-visible "Open in new tab" link is the user's escape (the
+// honest-no-silent-break posture v1 already committed to). Known
+// non-embeddable downloads (PPTX, DOCX, archives) still return false
+// up front so we show the explicit fallback message instead of a
+// useless blank iframe, and managed onedrive: refs stay false for the
+// Bearer-header gap noted up top.
+const NON_EMBEDDABLE_EXTS = /\.(pptx?|docx?|xlsx?|zip|rar|7z|tar|gz)(?:[?#].*)?$/i;
+
 export function embeddable(url, mime) {
   if (!url) return false;
   if (isManagedFile(url)) return false; // see auth note above
@@ -80,6 +89,14 @@ export function embeddable(url, mime) {
         u.hostname.endsWith('docs.google.com')) &&
       u.pathname.includes('/preview')
     ) {
+      return true;
+    }
+    // Widened path: any http(s) document the browser can navigate to
+    // is worth attempting in an iframe (covers SEC EDGAR HTML docs,
+    // arbitrary news/research pages). Skip known binary downloads
+    // where an iframe attempt has no chance of rendering.
+    if ((u.protocol === 'http:' || u.protocol === 'https:') &&
+        !NON_EMBEDDABLE_EXTS.test(u.pathname)) {
       return true;
     }
     return false;

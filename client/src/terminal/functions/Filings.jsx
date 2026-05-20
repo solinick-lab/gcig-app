@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client.js';
+import PDFModal from '../../components/PDFModal.jsx';
 
 // FIL — a ticker's recent SEC filings straight off the EDGAR
 // submissions feed (8-K, 10-Q, 10-K, DEF 14A, Form 4 …). Requires a
 // ticker. Mirrors Peers/InsiderActivity: fetch, render the shared
 // term-table, then hand a compact filing list to /annotate for the
-// AI brief. Filings link OUT to the SEC document (external, new tab)
-// — they are not internal terminal functions, so there is no
-// onOpen/DES wiring here.
+// AI brief. v1.1 routes a plain row click into the in-app PDFModal so
+// the document opens inside the terminal instead of stealing a new
+// tab; cmd/ctrl/shift/middle-click still fall through to the native
+// new-tab path for power users who rely on it.
 
 // EDGAR hands dates as ISO YYYY-MM-DD strings. Parse as a local date
 // (not new Date('2026-05-01'), which is UTC midnight and can slip a
@@ -24,6 +26,10 @@ export default function Filings({ ticker }) {
   const [err, setErr] = useState(null);
   const [brief, setBrief] = useState('');
   const [briefLoading, setBriefLoading] = useState(false);
+  // The filing currently open in the in-app modal, or null. Passing
+  // { url, title } in the same shape PitchRequests/Votes use keeps
+  // the call site identical to the pitch-deck wiring.
+  const [selectedDoc, setSelectedDoc] = useState(null);
 
   useEffect(() => {
     if (!ticker) return;
@@ -139,40 +145,65 @@ export default function Filings({ ticker }) {
               </tr>
             </thead>
             <tbody>
-              {filings.map((f, i) => (
-                <tr key={`${f.accessionNumber || f.url || f.form}-${i}`}>
-                  <td className="sym">
-                    <a
-                      href={f.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={`Open ${f.form || 'filing'} on SEC.gov`}
-                    >
-                      {f.form || '—'}
-                    </a>
-                  </td>
-                  <td>{fmtDate(f.filingDate)}</td>
-                  <td>
-                    <a
-                      href={f.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={`Open ${f.form || 'filing'} on SEC.gov`}
-                    >
-                      {f.description || f.form || 'Filing'}
-                    </a>
-                  </td>
-                </tr>
-              ))}
+              {filings.map((f, i) => {
+                const docTitle = `${data.ticker} ${f.form || 'Filing'} · ${fmtDate(f.filingDate)}`;
+                // Plain primary click opens the in-terminal modal;
+                // cmd/ctrl/shift/alt and middle-click fall through to
+                // the native target=_blank so power users keep their
+                // familiar new-tab escape. SEC may still block the
+                // iframe via X-Frame-Options — the modal's header
+                // carries the always-visible new-tab fallback for
+                // that case.
+                const onRowClick = (e) => {
+                  if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+                    e.preventDefault();
+                    setSelectedDoc({ url: f.url, title: docTitle });
+                  }
+                };
+                return (
+                  <tr key={`${f.accessionNumber || f.url || f.form}-${i}`}>
+                    <td className="sym">
+                      <a
+                        href={f.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={`Open ${f.form || 'filing'} on SEC.gov`}
+                        onClick={onRowClick}
+                      >
+                        {f.form || '—'}
+                      </a>
+                    </td>
+                    <td>{fmtDate(f.filingDate)}</td>
+                    <td>
+                      <a
+                        href={f.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={`Open ${f.form || 'filing'} on SEC.gov`}
+                        onClick={onRowClick}
+                      >
+                        {f.description || f.form || 'Filing'}
+                      </a>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </>
       )}
 
       <div style={{ color: 'var(--term-fg-muted)', fontSize: 11 }}>
-        SEC EDGAR submissions feed · newest first · 6h cache · each row
-        opens the filing on SEC.gov in a new tab.
+        SEC EDGAR submissions feed · newest first · 6h cache · click a
+        row to preview the filing inline; cmd/ctrl/middle-click still
+        opens it in a new tab.
       </div>
+
+      <PDFModal
+        url={selectedDoc?.url}
+        title={selectedDoc?.title}
+        onClose={() => setSelectedDoc(null)}
+      />
     </div>
   );
 }
