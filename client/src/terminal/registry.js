@@ -19,6 +19,7 @@ import Notes from './functions/Notes.jsx';
 import Governance from './functions/Governance.jsx';
 import TopNews from './functions/TopNews.jsx';
 import WorldIndices from './functions/WorldIndices.jsx';
+import WeatherImpact from './functions/WeatherImpact.jsx';
 import ComingSoon from './functions/ComingSoon.jsx';
 
 export const FUNCTIONS = [
@@ -70,6 +71,7 @@ export const FUNCTIONS = [
   { id: 'TOP', label: 'Top News', help: 'Market-wide top headlines.', requires: null, component: TopNews },
   { id: 'MOVR', label: 'Movers', help: 'Day\'s biggest gainers and losers.', requires: null, component: Movers },
   { id: 'ECO', label: 'Economic Calendar', help: 'Upcoming releases and central bank events.', requires: null, component: ComingSoon },
+  { id: 'WX', label: 'Weather Impact', help: 'Named-storm event impact on your Gulf O&G + insurer exposure.', requires: null, component: WeatherImpact },
 ];
 
 export const FUNCTION_BY_ID = Object.fromEntries(FUNCTIONS.map((f) => [f.id, f]));
