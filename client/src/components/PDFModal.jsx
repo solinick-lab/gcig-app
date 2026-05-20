@@ -65,7 +65,13 @@ export function embedUrl(url, mime) {
     // fallback "Open in new tab" link still goes to the original SEC
     // URL for the rare case the proxy can't render perfectly.
     if (u.hostname === 'www.sec.gov' || u.hostname === 'data.sec.gov') {
-      return `/api/terminal/sec-doc-proxy?url=${encodeURIComponent(url)}`;
+      // The iframe `src` is a top-level GET — not an axios call — so
+      // we need the absolute API origin here. A relative `/api/...`
+      // would resolve against the client origin (no /api on the
+      // static site → 404 → blank pane). Same `VITE_API_BASE_URL`
+      // the shared `api` axios client reads at build time.
+      const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+      return `${apiBase}/api/terminal/sec-doc-proxy?url=${encodeURIComponent(url)}`;
     }
     return url;
   } catch {
