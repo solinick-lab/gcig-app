@@ -277,7 +277,21 @@ export async function uploadFile({ buffer, filename, contentType }) {
 // Stream a file from OneDrive to an Express response. Proxies the
 // Content-Type and Content-Disposition so the browser handles
 // inline preview / download correctly.
-export async function streamDownload(itemId, res) {
+//
+// `options.inline` is the opt-in for the in-app PDF modal. When set
+// AND the upstream content-type is application/pdf, the disposition
+// header is rewritten to `inline; filename="…"` so the browser
+// previews instead of saves. The original filename is taken from the
+// upstream Content-Disposition; if Graph didn't give us one we fall
+// back to a bare `inline` (still valid per RFC 6266). The default
+// (no inline flag) preserves Graph's attachment behavior 1:1 — every
+// existing download call site is unaffected.
+//
+// Non-PDF responses never get an inline override even when the flag
+// is set: silently inlining a PPTX would surface a download prompt in
+// some browsers and an unreadable XML blob in others. Honesty wins —
+// embedding falls back to the modal's "open in new tab" panel.
+export async function streamDownload(itemId, res, options = {}) {
   const token = await getAccessToken();
   const url = `${GRAPH}/me/drive/items/${encodeURIComponent(itemId)}/content`;
   const r = await fetch(url, {
@@ -292,8 +306,21 @@ export async function streamDownload(itemId, res) {
   res.setHeader('Content-Type', ct);
   const cl = r.headers.get('content-length');
   if (cl) res.setHeader('Content-Length', cl);
-  const cd = r.headers.get('content-disposition');
-  if (cd) res.setHeader('Content-Disposition', cd);
+  const upstreamCd = r.headers.get('content-disposition');
+  const wantInline =
+    options.inline === true && /^application\/pdf\b/i.test(ct);
+  if (wantInline) {
+    // Reuse the filename Graph reported (parsed loosely — `filename=`
+    // or `filename*=` UTF-8). If neither is present we still emit
+    // `inline` alone so the browser knows to preview.
+    const filename = parseFilename(upstreamCd);
+    res.setHeader(
+      'Content-Disposition',
+      filename ? `inline; filename="${filename}"` : 'inline'
+    );
+  } else if (upstreamCd) {
+    res.setHeader('Content-Disposition', upstreamCd);
+  }
 
   const reader = r.body.getReader();
   try {
@@ -305,6 +332,27 @@ export async function streamDownload(itemId, res) {
   } finally {
     res.end();
   }
+}
+
+// Best-effort Content-Disposition filename extractor. Looks for a
+// quoted `filename="…"` first, then an unquoted `filename=…`, then a
+// URL-encoded `filename*=UTF-8''…`. Returns null when nothing's
+// usable — callers should treat that as "emit `inline` with no name".
+function parseFilename(header) {
+  if (!header) return null;
+  const quoted = header.match(/filename="([^"]+)"/i);
+  if (quoted) return quoted[1];
+  const bare = header.match(/filename=([^;]+)/i);
+  if (bare) return bare[1].trim();
+  const star = header.match(/filename\*=(?:UTF-8'')?([^;]+)/i);
+  if (star) {
+    try {
+      return decodeURIComponent(star[1].trim());
+    } catch {
+      return star[1].trim();
+    }
+  }
+  return null;
 }
 
 // Fetch the file's bytes into memory. Used for email attachments where

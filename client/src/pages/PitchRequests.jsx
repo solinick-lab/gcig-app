@@ -7,8 +7,7 @@ import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
 import RequestPitchModal from '../components/RequestPitchModal.jsx';
-import FilePreviewModal from '../components/FilePreviewModal.jsx';
-import { openOrPreview } from '../api/fileHelpers.js';
+import PDFModal from '../components/PDFModal.jsx';
 import { formatStartTime, ROOM_LABELS } from '../lib/lunchSlots.js';
 
 const PM_RANKED = [
@@ -234,7 +233,11 @@ function RequestRow({
   const proposed = row.proposedDate
     ? format(new Date(row.proposedDate), 'EEE, MMM d, yyyy')
     : 'No date proposed';
-  const [preview, setPreview] = useState(null);
+  // PDFModal mounts only once a deck has been selected — the parent
+  // component is a row, so this is one-modal-per-row scoped state.
+  // Passing { url, title } in the same shape FilePreviewModal used
+  // keeps the call site dead simple.
+  const [selectedPdf, setSelectedPdf] = useState(null);
 
   return (
     <div className="rounded-lg border border-navy-100 bg-white p-4">
@@ -286,14 +289,10 @@ function RequestRow({
           <button
             type="button"
             onClick={() =>
-              openOrPreview(
-                {
-                  url: row.deckRef,
-                  title: `${row.ticker} pitch deck`,
-                  filename: `${row.ticker}-deck.pdf`,
-                },
-                setPreview
-              )
+              setSelectedPdf({
+                url: row.deckRef,
+                title: `${row.ticker} pitch deck`,
+              })
             }
             className="inline-flex items-center gap-1 text-xs font-semibold text-gold-700 underline"
           >
@@ -343,12 +342,11 @@ function RequestRow({
           </Button>
         </div>
       )}
-      {preview && (
-        <FilePreviewModal
-          url={preview.url}
-          title={preview.title}
-          filename={preview.filename}
-          onClose={() => setPreview(null)}
+      {selectedPdf && (
+        <PDFModal
+          url={selectedPdf.url}
+          title={selectedPdf.title}
+          onClose={() => setSelectedPdf(null)}
         />
       )}
     </div>

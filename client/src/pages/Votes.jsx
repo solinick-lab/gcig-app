@@ -13,8 +13,7 @@ import {
 } from 'lucide-react';
 import api from '../api/client.js';
 import { etInputValueToUtcIso } from '../utils/etDateTime.js';
-import { openOrPreview } from '../api/fileHelpers.js';
-import FilePreviewModal from '../components/FilePreviewModal.jsx';
+import PDFModal from '../components/PDFModal.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import PageHeader from '../components/PageHeader.jsx';
 import Card from '../components/Card.jsx';
@@ -304,7 +303,10 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
   const [ballotAmount, setBallotAmount] = useState('');
   const [ballotError, setBallotError] = useState('');
   const [casting, setCasting] = useState(false);
-  const [preview, setPreview] = useState(null);
+  // One PDFModal mount per session detail view. Falsy `selectedPdf`
+  // keeps the modal unmounted entirely (PDFModal also returns null on
+  // a falsy url, but skipping the JSX is the cheaper short-circuit).
+  const [selectedPdf, setSelectedPdf] = useState(null);
   const [sendingDocusign, setSendingDocusign] = useState(false);
   const [docusignError, setDocusignError] = useState('');
   const isOpen = session.status === 'open' && !isPast(new Date(session.deadline));
@@ -418,14 +420,10 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
               <button
                 type="button"
                 onClick={() =>
-                  openOrPreview(
-                    {
-                      url: session.pitch.slideshowUrl,
-                      title: `${session.pitch.ticker} slideshow`,
-                      filename: `${session.pitch.ticker}-pitch.pdf`,
-                    },
-                    setPreview
-                  )
+                  setSelectedPdf({
+                    url: session.pitch.slideshowUrl,
+                    title: `${session.pitch.ticker} slideshow`,
+                  })
                 }
                 className="text-sm font-semibold text-gold-700 underline"
               >
@@ -605,12 +603,11 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
           )}
         </Card>
       </div>
-      {preview && (
-        <FilePreviewModal
-          url={preview.url}
-          title={preview.title}
-          filename={preview.filename}
-          onClose={() => setPreview(null)}
+      {selectedPdf && (
+        <PDFModal
+          url={selectedPdf.url}
+          title={selectedPdf.title}
+          onClose={() => setSelectedPdf(null)}
         />
       )}
     </>

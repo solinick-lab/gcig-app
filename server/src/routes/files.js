@@ -300,11 +300,30 @@ router.get('/:itemId/info', verifyJwt, async (req, res) => {
 
 // Streamed download. Kept last because the wildcard path eats
 // anything not matched above.
-router.get('/:itemId', verifyJwt, async (req, res) => {
+//
+// `?inline=1` opts into the PDFModal preview path: the underlying
+// service rewrites the Content-Disposition to `inline` so the
+// browser previews instead of downloading. The default (no query
+// flag) is byte-for-byte the prior attachment behavior. Non-PDF
+// content is never overridden — see the streamDownload comment.
+//
+// Exported as `downloadHandler` so the route test can drive it
+// directly with injected deps and a fake req/res, matching the
+// notes.test.js / terminal.quotes.test.js precedent — no supertest,
+// no network, no real OneDrive call.
+export async function downloadHandler(req, res, deps = {}) {
+  const stream = deps.streamDownload || streamDownload;
   const { itemId } = req.params;
   if (!itemId) return res.status(400).json({ error: 'Bad item id' });
+  // Accept the common truthy flavors a query-string can carry without
+  // demanding the caller hand-pick one — `?inline=1`, `?inline=true`,
+  // and bare `?inline` all mean the same thing.
+  const inline =
+    req.query?.inline === '1' ||
+    req.query?.inline === 'true' ||
+    req.query?.inline === '';
   try {
-    await streamDownload(itemId, res);
+    await stream(itemId, res, { inline });
   } catch (err) {
     if (err.code === 'NOT_AUTHORIZED') {
       return res.status(503).json({ error: 'OneDrive not connected' });
@@ -314,6 +333,8 @@ router.get('/:itemId', verifyJwt, async (req, res) => {
       res.status(502).json({ error: err.message });
     }
   }
-});
+}
+
+router.get('/:itemId', verifyJwt, (req, res) => downloadHandler(req, res));
 
 export default router;
