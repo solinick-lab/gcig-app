@@ -141,3 +141,23 @@ two-site client wiring.
   expected, not a bug.
 - PPTX can't preview inline (no browser PDF.js-equivalent for
   PowerPoint) → fallback message. Honest.
+
+## v1.1 — extended to FIL terminal panel
+
+- Scope: clicking a filing row in `Filings.jsx` opens the SEC document
+  in the same `PDFModal`. Cmd/ctrl/shift/alt-click and middle-click
+  still fall through to the native `target="_blank"` new-tab path so
+  power users keep that escape unchanged.
+- `embeddable(url, mime)` widened: any http(s) URL is now considered
+  embeddable, *unless* its pathname ends in a known non-embeddable
+  binary extension (`.pptx`, `.docx`, `.xlsx`, `.zip`, `.rar`, `.7z`,
+  `.tar`, `.gz`). SEC EDGAR archive URLs are plain HTML, not PDF, so
+  the old PDF-only heuristic would have routed every filing to the
+  fallback panel. PDF/Drive/Slides cases are untouched.
+- Honest caveat: SEC servers can still send `X-Frame-Options` or
+  `Content-Security-Policy: frame-ancestors` that bar embedding. When
+  that happens the iframe paints blank, and the modal header's
+  always-visible "Open in new tab" link is the user's escape — same
+  no-silent-break posture as v1.
+- Modal title format: `${TICKER} ${FORM} · ${MM/DD/YY}` so the user
+  knows what they're looking at without reading the URL bar.
