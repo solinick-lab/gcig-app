@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CommandBar from './CommandBar.jsx';
 import FloatingWindow from './FloatingWindow.jsx';
 import { getFunction, FUNCTIONS } from './registry.js';
@@ -120,6 +120,58 @@ export default function TerminalShell({ onExit }) {
       ws.map((w) => (w.id === id ? { ...w, fn: newFn } : w))
     );
   }, []);
+
+  // Double-tap Escape closes the focused pane — a keyboard equivalent
+  // of clicking the × on a window's title bar. The 500 ms window is
+  // tight enough that a deliberate two-press feels intentional and a
+  // stray single Esc never closes anything.
+  const lastEscAtRef = useRef(0);
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key !== 'Escape') return;
+      // PersonModal and PDFModal listen on the capture phase and
+      // preventDefault on Esc, so by the time this bubble-phase
+      // handler runs they've already eaten the press to close
+      // themselves. Let them own it — the user expects the visible
+      // modal to dismiss first, not the pane behind it. Disarm the
+      // timer so the next Esc starts a fresh single-tap.
+      if (e.defaultPrevented) {
+        lastEscAtRef.current = 0;
+        return;
+      }
+      // Esc is a common cancel/blur gesture inside text fields
+      // (command bar, watchlist add-ticker, NOTE textarea, the
+      // function switcher). Bail when the user is typing so a
+      // double-Esc to clear an input doesn't yank the pane out
+      // from under them.
+      const el = document.activeElement;
+      if (el && (
+        el.tagName === 'INPUT' ||
+        el.tagName === 'TEXTAREA' ||
+        el.tagName === 'SELECT' ||
+        el.isContentEditable
+      )) {
+        lastEscAtRef.current = 0;
+        return;
+      }
+      if (!focusedId) {
+        lastEscAtRef.current = 0;
+        return;
+      }
+      const now = Date.now();
+      if (now - lastEscAtRef.current < 500) {
+        closeWindow(focusedId);
+        lastEscAtRef.current = 0;
+      } else {
+        lastEscAtRef.current = now;
+      }
+    }
+    // Bubble phase on purpose — modal capture-phase handlers run
+    // first, and we read e.defaultPrevented to decide whether to
+    // claim the press.
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [focusedId, closeWindow]);
 
   const focused = windows.find((w) => w.id === focusedId) || null;
 
