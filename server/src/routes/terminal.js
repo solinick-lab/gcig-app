@@ -14,6 +14,7 @@ import { getInsiderTransactions } from '../services/insiderTx.js';
 import { getLiveQuotes } from '../services/liveQuotes.js';
 import { getRecentFilings } from '../services/secFilings.js';
 import { getWeatherImpact } from '../services/weatherSignals.js';
+import { scanUniverse as scanInsiderClusters } from '../services/insiderClusters.js';
 
 // Terminal — AI-driven endpoints that back the /terminal workstation.
 // Quote/news/fundamentals data is reused from /api/holdings/* (already
@@ -49,6 +50,7 @@ const KNOWN_FUNCTIONS = [
   { id: 'EARN', label: 'Earnings', summary: 'Next report date + estimate and a trailing EPS beat/miss history.' },
   { id: 'CON', label: 'Analyst Consensus', summary: 'Analyst buy/hold/sell breakdown and recent trend.' },
   { id: 'CMP', label: 'Compare', summary: '2–4 tickers side by side: live price, day %, and key valuation.' },
+  { id: 'ICLUSTER', label: 'Insider Clusters', summary: 'Multi-insider open-market buy clusters across the book (last 60d).' },
   { id: 'NOTE', label: 'Notes', summary: 'Your private research notes for this ticker, saved to your profile.' },
   { id: 'MGMT', label: 'Management & Board', summary: 'CEO, executives, board, compensation, and interlocking-board network from the latest DEF 14A.' },
   { id: 'BI', label: 'Bloomberg Intelligence', summary: 'Free-form research chat with workspace context.' },
@@ -424,7 +426,117 @@ export async function weatherImpactHandler(req, res, deps = {}) {
   }
 }
 
+// ICLUSTER — multi-insider open-market buy clusters across a small
+// universe (v1 = the fund's holdings, optionally + watchlist if its
+// route ships). The whole methodology — 60d window, ≥3 distinct
+// insiders, code-P only, role-weighted score, into-weakness flag — is
+// the cluster service's call; this route owns the universe-building
+// (cash filter, watchlist loose-coupling, ?tickers= override, 50-
+// ticker defensive cap) and the honest-empty degrade.
+//
+// The watchlist is loose-coupled per the spec: PR #32 hasn't merged on
+// this branch, so we attempt a dynamic import of the future watchlist
+// service and silently fall back to "holdings only" when it isn't
+// there. Once #32 ships, the same import resolves and a default
+// watchlist provider is mixed in without touching this file. A test-
+// injected deps.getWatchlistTickers wins outright (a throw is also
+// degraded so a flaky watchlist read never breaks the cluster scan).
+//
+// scanUniverse is contractually never-throws (per-ticker errors are
+// absorbed by getTickerCluster), but the route does not lean on that —
+// any unexpected rejection still degrades to a 200 honest-empty
+// { asOf, universe:[], results:[] } with a console.warn so this
+// endpoint can never 5xx.
+//
+// IMPORTANT FRAMING: per the spec this is a SCREEN, not a backtested
+// signal. The panel footer and the AI brief both carry that line —
+// the data layer surfaces the pattern, the UI never overstates it.
+export async function insiderClustersHandler(req, res, deps = {}) {
+  const scan = deps.scanUniverse || scanInsiderClusters;
+  const fetchPortfolio = deps.getSheetPortfolio || getSheetPortfolio;
+  // The watchlist provider on this branch doesn't exist yet. When the
+  // tests inject one, it wins; otherwise we try the dynamic import,
+  // and if that yields nothing useful we skip it silently.
+  let fetchWatchlist = deps.getWatchlistTickers;
+  if (!fetchWatchlist) {
+    try {
+      const mod = await import('./watchlist.js');
+      if (mod && typeof mod.getWatchlistTickers === 'function') {
+        fetchWatchlist = mod.getWatchlistTickers;
+      }
+    } catch {
+      // ERR_MODULE_NOT_FOUND on this branch — expected; nothing to do.
+    }
+  }
+
+  try {
+    // ?tickers=A,B,C overrides the computed universe entirely — the
+    // same split/trim/upper-case/dedupe normalization /quotes uses.
+    const raw = String(req.query?.tickers || '').trim();
+    let list;
+    if (raw) {
+      list = Array.from(
+        new Set(
+          raw
+            .split(',')
+            .map((t) => t.trim().toUpperCase())
+            .filter(Boolean)
+        )
+      );
+    } else {
+      const holdings = await (async () => {
+        try {
+          const p = await fetchPortfolio();
+          const arr = Array.isArray(p) ? p : p?.holdings || [];
+          return arr
+            .filter((h) => h && !h.isCash)
+            .map((h) => String(h.ticker || '').trim().toUpperCase())
+            .filter(Boolean);
+        } catch (err) {
+          console.warn('insiderClusters portfolio degraded:', err.message);
+          return [];
+        }
+      })();
+      const watch = fetchWatchlist
+        ? await (async () => {
+            try {
+              const arr = await fetchWatchlist();
+              return Array.isArray(arr)
+                ? arr.map((t) => String(t || '').trim().toUpperCase()).filter(Boolean)
+                : [];
+            } catch (err) {
+              // A missing or throwing watchlist provider is honestly
+              // degraded — the universe falls back to holdings only.
+              console.warn('insiderClusters watchlist degraded:', err.message);
+              return [];
+            }
+          })()
+        : [];
+      list = Array.from(new Set([...holdings, ...watch]));
+    }
+    // Defensive cap so a hand-crafted ?tickers= can't fan one
+    // request into a Finnhub burst. Legitimate universes are an
+    // order of magnitude below this.
+    list = list.slice(0, 50);
+
+    const results = await scan(list);
+    res.json({
+      asOf: new Date().toISOString(),
+      universe: list,
+      results: Array.isArray(results) ? results : [],
+    });
+  } catch (err) {
+    console.warn('terminal/insider-clusters degraded:', err.message);
+    res.json({
+      asOf: new Date().toISOString(),
+      universe: [],
+      results: [],
+    });
+  }
+}
+
 router.get('/weather-impact', (req, res) => weatherImpactHandler(req, res));
+router.get('/insider-clusters', (req, res) => insiderClustersHandler(req, res));
 
 // MOVR — every holding and how much it's up or down today, read live
 // from the positions sheet (same source as the dashboard). Not the
@@ -626,6 +738,12 @@ const FN_PROMPTS = {
     'Write a 2–3 sentence brief. If a named storm is currently active in the NHC feed, lead with its name and intensity. ' +
     'Cite the historical mean abnormal return (5-day, SPY-relative) for each basket and the n behind it; note where the user\'s holdings sit inside the affected basket. ' +
     'Explicitly frame the output as a historical playbook, not a forecast — past landfalls inform the basket\'s typical reaction, not the next one. ' +
+    GROUNDING_RULES,
+
+  ICLUSTER:
+    'You are a forensic analyst at GCIG, a student investment fund, reading a cluster-scanner output across the book. ' +
+    'Write a 2–3 sentence brief. Flag the top scoring names by their role composition and total dollars committed, and distinguish into-weakness clusters (insiders buying after a drawdown) from into-strength clusters. ' +
+    'Frame this explicitly as a SCREEN, not a standalone signal — evidence to bring to a fundamentals thesis, not a trade trigger on its own. ' +
     GROUNDING_RULES,
 };
 
