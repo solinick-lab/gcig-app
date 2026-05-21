@@ -8,26 +8,36 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
 
 [data-theme='terminal'] {
-  --term-bg: #0a0a08;
-  --term-bg-panel: #0f0f0c;
-  --term-bg-panel-hover: #14140f;
-  --term-bg-header: #1a1a14;
-  --term-border: #2a2a20;
-  --term-border-focused: #6a4d00;
-  --term-fg: #ffb000;
-  --term-fg-dim: #b07700;
-  --term-fg-muted: #6a4d00;
-  --term-positive: #00d860;
-  --term-negative: #ff4040;
-  --term-cyan: #4ecdc4;
-  --term-blue: #6ea8ff;
-  --term-magenta: #ff6ec7;
-  --term-white: #f0e6d2;
+  /* Palette in OKLCH. The neutrals are warm-tinted toward the amber
+     hue (a hair of chroma at low lightness) so the black reads as
+     phosphor-on-glass rather than flat ink — the difference between a
+     real Bloomberg panel and a generic dark theme lives in that tint.
+     Amber is the workhorse; orange carries clickable/action language
+     the way Bloomberg's numbered menu items do; the steel blue is the
+     one cool note, reserved for section labels so the grid has a spine
+     that isn't just more amber. */
+  --term-bg: oklch(0.16 0.006 70);
+  --term-bg-panel: oklch(0.195 0.008 70);
+  --term-bg-panel-hover: oklch(0.235 0.01 70);
+  --term-bg-header: oklch(0.25 0.012 65);
+  --term-border: oklch(0.34 0.018 68);
+  --term-border-focused: oklch(0.6 0.11 70);
+  --term-amber: oklch(0.82 0.16 72);
+  --term-fg: var(--term-amber);
+  --term-fg-dim: oklch(0.66 0.13 68);
+  --term-fg-muted: oklch(0.5 0.075 66);
+  --term-orange: oklch(0.72 0.19 52);
+  --term-positive: oklch(0.81 0.19 150);
+  --term-negative: oklch(0.64 0.22 26);
+  --term-cyan: oklch(0.81 0.1 200);
+  --term-blue: oklch(0.74 0.1 245);
+  --term-magenta: oklch(0.73 0.16 350);
+  --term-white: oklch(0.93 0.014 85);
   /* GP price-graph palette — the one panel that steps off amber: a
      white line over a navy wash, mirroring Bloomberg's GP plot. The
      chrome around it (header, ranges, studies) stays in-theme. */
-  --gp-line: #eaf0ff;
-  --gp-area: #4f7bc4;
+  --gp-line: oklch(0.95 0.02 250);
+  --gp-area: oklch(0.6 0.12 250);
 
   background: var(--term-bg);
   color: var(--term-fg);
@@ -66,9 +76,30 @@
   flex-shrink: 0;
 }
 
+/* The brand reads as an inverted function-code chip — black on amber,
+   the way Bloomberg stamps the active mnemonic. It anchors the bar so
+   the eye knows where "home" is. */
 [data-theme='terminal'] .term-topbar-brand {
-  color: var(--term-fg);
+  background: var(--term-amber);
+  color: oklch(0.16 0.006 70);
   font-weight: 700;
+  letter-spacing: 0.14em;
+  padding: 3px 9px;
+}
+
+/* Monospaced market clock, ticking. Bloomberg always shows the time;
+   the tabular figures keep it from jittering as the seconds roll. */
+[data-theme='terminal'] .term-topbar-clock {
+  color: var(--term-white);
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+
+[data-theme='terminal'] .term-topbar-clock .tz {
+  color: var(--term-fg-muted);
+  margin-left: 4px;
 }
 
 [data-theme='terminal'] .term-topbar-status {
@@ -119,11 +150,129 @@
   background: var(--term-bg);
   border-bottom: 1px solid var(--term-border);
   flex-shrink: 0;
+  /* Anchor the autocomplete dropdown, which is absolutely placed
+     against this row. */
+  position: relative;
+  z-index: 50;
 }
 
 [data-theme='terminal'] .term-commandbar-prompt {
-  color: var(--term-fg-dim);
+  color: var(--term-amber);
   font-weight: 700;
+}
+
+/* The blinking block caret. Bloomberg's command line ends in a solid
+   amber block, not a thin I-beam; we hide the native caret on the
+   input and park this faux-block right after the prompt, shown only
+   while the field is empty (real text takes over from there). */
+[data-theme='terminal'] .term-commandbar-caret {
+  width: 8px;
+  height: 15px;
+  background: var(--term-amber);
+  display: inline-block;
+  margin-left: -4px;
+  animation: term-caret-blink 1.06s steps(1) infinite;
+}
+
+@keyframes term-caret-blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme='terminal'] .term-commandbar-caret { animation: none; }
+}
+
+/* ── Command autocomplete ─────────────────────────────────────────────
+ * The Bloomberg signature: as you type, a panel of matching functions
+ * drops out of the command line. Arrow keys walk it, Enter/Tab fills
+ * it. Squared off, hard-bordered, sitting flush under the bar so it
+ * reads as the line extending downward, not a floating popover. */
+[data-theme='terminal'] .term-cmd-suggest {
+  position: absolute;
+  top: 100%;
+  left: 14px;
+  right: 14px;
+  margin-top: -1px;
+  background: var(--term-bg-panel);
+  border: 1px solid var(--term-border-focused);
+  max-height: 280px;
+  overflow-y: auto;
+  box-shadow: 0 14px 28px oklch(0 0 0 / 0.55);
+}
+
+[data-theme='terminal'] .term-cmd-suggest-head {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 10px;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--term-fg-muted);
+  border-bottom: 1px solid var(--term-border);
+}
+
+[data-theme='terminal'] .term-cmd-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 10px;
+  cursor: pointer;
+  border-bottom: 1px dotted var(--term-border);
+}
+
+[data-theme='terminal'] .term-cmd-row:last-child {
+  border-bottom: none;
+}
+
+[data-theme='terminal'] .term-cmd-row .num {
+  color: var(--term-orange);
+  font-weight: 700;
+  font-size: 11px;
+  width: 22px;
+  flex-shrink: 0;
+}
+
+[data-theme='terminal'] .term-cmd-row .mnem {
+  color: var(--term-amber);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  width: 86px;
+  flex-shrink: 0;
+}
+
+[data-theme='terminal'] .term-cmd-row .mnem .tkr {
+  color: var(--term-fg-muted);
+  font-weight: 500;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+[data-theme='terminal'] .term-cmd-row .label {
+  color: var(--term-white);
+  font-size: 11px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-theme='terminal'] .term-cmd-row:hover {
+  background: var(--term-bg-header);
+}
+
+/* The keyboard-selected row inverts to amber, the way Bloomberg fills
+   the highlighted menu line. Everything inside it goes black so the
+   row reads as one solid bar at a glance. */
+[data-theme='terminal'] .term-cmd-row.active {
+  background: var(--term-amber);
+}
+
+[data-theme='terminal'] .term-cmd-row.active .num,
+[data-theme='terminal'] .term-cmd-row.active .mnem,
+[data-theme='terminal'] .term-cmd-row.active .mnem .tkr,
+[data-theme='terminal'] .term-cmd-row.active .label {
+  color: oklch(0.16 0.006 70);
 }
 
 [data-theme='terminal'] .term-commandbar-input {
@@ -302,6 +451,14 @@
   font-weight: 700;
 }
 
+/* The container suppresses pointer events so it never traps a stray
+   click on the canvas; the launch shortcuts opt back in. */
+[data-theme='terminal'] .term-empty-actions {
+  pointer-events: auto;
+  justify-content: center;
+  margin: 4px 0 2px;
+}
+
 /* Panel content scaffolding. Always set our own bg so even if mosaic's
    light theme wins on the wrapper, the panel content stays on the dark
    amber surface. */
@@ -317,9 +474,9 @@
 [data-theme='terminal'] .term-panel-header {
   display: flex;
   align-items: baseline;
-  gap: 12px;
+  gap: 10px;
   color: var(--term-fg);
-  border-bottom: 1px solid var(--term-border);
+  border-bottom: 1px solid var(--term-fg-muted);
   padding-bottom: 6px;
 }
 
@@ -329,6 +486,17 @@
   letter-spacing: 0.05em;
 }
 
+/* The "US EQUITY" / security-class descriptor that trails the ticker
+   on a real Bloomberg header. Small, muted, uppercase — it labels the
+   instrument without competing with the ticker. */
+[data-theme='terminal'] .term-panel-header .equity {
+  color: var(--term-blue);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
 [data-theme='terminal'] .term-panel-header .name {
   color: var(--term-white);
   font-size: 12px;
@@ -336,6 +504,37 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Numbered action language — Bloomberg's orange "1) 2) 3)" hyperlink
+   shortcuts. A shared affordance any panel can drop in; the number is
+   the clickable target, the amber label rides alongside. */
+[data-theme='terminal'] .term-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 11px;
+}
+
+[data-theme='terminal'] .term-action {
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+  color: var(--term-amber);
+  letter-spacing: 0.04em;
+}
+
+[data-theme='terminal'] .term-action .n {
+  color: var(--term-orange);
+  font-weight: 700;
+  margin-right: 5px;
+}
+
+[data-theme='terminal'] .term-action:hover {
+  color: var(--term-white);
+  text-decoration: underline;
 }
 
 [data-theme='terminal'] .term-stat-grid {
@@ -450,7 +649,7 @@
 }
 
 [data-theme='terminal'] .term-movers-title {
-  color: var(--term-fg);
+  color: var(--term-blue);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -540,7 +739,7 @@
 
 /* WEI — world indices table */
 [data-theme='terminal'] .term-idx-region {
-  color: var(--term-fg);
+  color: var(--term-blue);
   font-weight: 700;
   font-size: 10px;
   letter-spacing: 0.14em;
@@ -1119,6 +1318,16 @@
 
 [data-theme='terminal'] .term-statusbar .sep {
   color: var(--term-border);
+}
+
+/* Keycap glyph for the function-key hints — the boxed amber mnemonic
+   Bloomberg prints next to its shortcuts. */
+[data-theme='terminal'] .term-statusbar .key {
+  border: 1px solid var(--term-fg-muted);
+  color: var(--term-amber);
+  padding: 0 5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
 }
 
 /* ── LIVE badge + auto-refresh timestamp ─────────────────────────── */
