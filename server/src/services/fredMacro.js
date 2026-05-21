@@ -15,6 +15,14 @@ const FRED_BASE = 'https://api.stlouisfed.org/fred';
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1h
 let cache = { at: 0, data: null };
 
+// Historical observation series live on a separate 6h cache: factor
+// sensitivity regresses on a 252-trading-day window, so daily refresh
+// is unnecessary and over-fetching the long observation feed every
+// request would burn the FRED rate budget. Keyed by `${seriesId}:${days}`
+// so a callsite asking for 400 days doesn't poison a 365-day lookup.
+const SERIES_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h
+const seriesCache = new Map();
+
 // Daily-updating series. `precision` = decimals to render. `unit` is
 // purely cosmetic — '%' renders as a suffix, '$' as a prefix, '' as
 // a bare number.
@@ -134,4 +142,79 @@ export async function getMacroSnapshot({ forceFresh = false } = {}) {
   };
   cache = { at: Date.now(), data: out };
   return out;
+}
+
+// Historical observation feed for a single FRED series. Returns
+// [{ date: 'YYYY-MM-DD', value: number }, …] oldest-first to match
+// the convention priceHistory.getHistory returns its bars in — the
+// two arrays are routinely intersected by date downstream and they
+// only line up cleanly if both walk forward in time. Missing values
+// (FRED encodes them as ".") are dropped, not zero-filled, so the
+// regression's joint NaN filter never sees them.
+//
+// Returns [] honestly when FRED_API_KEY is unset — mirrors the
+// macro-snapshot's "hidden when unset" pattern; the factor surface
+// in the panel just shows n=0 for that row rather than a fake series.
+// Per-seriesId 6h cache keyed by `${id}:${days}` so a 400-day caller
+// and a 365-day caller don't share a (potentially too-short) result.
+export async function getFredSeries(seriesId, { days = 365 } = {}) {
+  const id = String(seriesId || '').trim();
+  if (!id) return [];
+  if (!process.env.FRED_API_KEY) return [];
+
+  const cacheKey = `${id}:${days}`;
+  const hit = seriesCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < SERIES_CACHE_TTL_MS) return hit.data;
+
+  // observation_start is the oldest date we want back; over-fetch a
+  // touch beyond the trading-day target so weekends, holidays, and
+  // FRED reporting gaps still leave us 252 td after intersection.
+  const startMs = Date.now() - days * 86_400_000;
+  const start = new Date(startMs).toISOString().slice(0, 10);
+  const url =
+    `${FRED_BASE}/series/observations?series_id=${encodeURIComponent(id)}` +
+    `&api_key=${process.env.FRED_API_KEY}&file_type=json` +
+    `&observation_start=${start}`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      console.warn(`FRED series ${id} responded ${res.status}`);
+      seriesCache.set(cacheKey, { at: Date.now(), data: [] });
+      return [];
+    }
+    const json = await res.json();
+    const raw = Array.isArray(json?.observations) ? json.observations : [];
+    // FRED encodes missing values as the literal string "." — drop
+    // them rather than coercing to NaN/0, so the regression's joint
+    // filter doesn't have to know about FRED's sentinel.
+    const out = [];
+    for (const obs of raw) {
+      if (!obs || typeof obs.date !== 'string') continue;
+      if (obs.value === '.' || obs.value == null) continue;
+      const v = Number(obs.value);
+      if (!Number.isFinite(v)) continue;
+      out.push({ date: obs.date, value: v });
+    }
+    // Oldest-first ordering. FRED's default is already oldest-first
+    // when sort_order is omitted, but pin it explicitly — a vendor
+    // flip would silently invert the date intersection downstream.
+    out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    seriesCache.set(cacheKey, { at: Date.now(), data: out });
+    return out;
+  } catch (err) {
+    console.warn(`FRED series ${id} fetch failed:`, err.message);
+    seriesCache.set(cacheKey, { at: Date.now(), data: [] });
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Test-only cache bust so tests don't bleed cached observations into
+// each other. Not exported via index — only the colocated suite uses it.
+export function _resetFredSeriesCache() {
+  seriesCache.clear();
 }
