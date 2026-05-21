@@ -85,7 +85,19 @@ router.get('/chart/:ticker', async (req, res) => {
   }
   try {
     const bars = await getHistory(raw, range);
-    const points = bars.map((b) => ({ t: new Date(b.date).getTime(), close: b.close }));
+    // Forward the whole OHLCV bar, not just the close. GP draws the close
+    // line but reads open/high/low/volume for its session header, and a
+    // candlestick mode would want them too — the PriceBar cache already
+    // carries them, so collapsing to {t, close} here only made the panel
+    // re-derive what we'd just thrown away.
+    const points = bars.map((b) => ({
+      t: new Date(b.date).getTime(),
+      open: b.open,
+      high: b.high,
+      low: b.low,
+      close: b.close,
+      volume: b.volume,
+    }));
     res.json({ ticker: raw, range, interval: '1d', points, _source: 'cache' });
   } catch (err) {
     if (err.status === 404) return res.status(404).json({ error: 'Ticker not found' });
