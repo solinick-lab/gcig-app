@@ -14,6 +14,7 @@ import { getInsiderTransactions } from '../services/insiderTx.js';
 import { getLiveQuotes } from '../services/liveQuotes.js';
 import { getRecentFilings } from '../services/secFilings.js';
 import { getWeatherImpact } from '../services/weatherSignals.js';
+import { getMacroSensitivity } from '../services/factorSensitivity.js';
 import { scanUniverse as scanInsiderClusters } from '../services/insiderClusters.js';
 
 // Terminal — AI-driven endpoints that back the /terminal workstation.
@@ -59,6 +60,7 @@ const KNOWN_FUNCTIONS = [
   { id: 'MOVR', label: 'Movers', summary: 'Day\'s biggest gainers and losers.' },
   { id: 'ECO', label: 'Economic Calendar', summary: 'Upcoming releases and central bank events.' },
   { id: 'WX', label: 'Weather Impact', summary: 'Named-storm landfalls vs. Gulf O&G + P&C insurer baskets; historical playbook + active-storm feed.' },
+  { id: 'MACRO', label: 'Macro Sensitivity', summary: 'Portfolio β to 10Y / WTI / USD / VIX / SPY (252-day OLS), top contributors, scenario preview.' },
   { id: 'HELP', label: 'Help', summary: 'List of available terminal functions.' },
 ];
 
@@ -426,6 +428,42 @@ export async function weatherImpactHandler(req, res, deps = {}) {
   }
 }
 
+// MACRO — portfolio sensitivity to the five macro factors (10Y yield,
+// WTI oil, USD index, VIX, SPY) over a 252-trading-day OLS. The whole
+// matrix is assembled by factorSensitivity.js: every holding × every
+// factor's daily regression, aggregated to a portfolio β per factor
+// with the n≥60 filter + weight redistribution + top-3 contributors
+// + a default-shock scenario preview. The service is never-throws and
+// returns honest empty (lookbackDays only, factors:[], holdings:[],
+// marketValues:{}) on any failure mode — a missing FRED_API_KEY, a
+// sheet outage, a NASDAQ 502 on the price-bar refresh — so the panel
+// always paints a stable frame and the empty-state copy ("FRED
+// unavailable") never collapses into a 5xx splash.
+//
+// Handler extracted with an injectable service (the shape
+// terminal.macroSensitivity.test.js uses to stay off both the FRED
+// observation feed and the price-bar cache) and wrapped in its own
+// try/catch: getMacroSensitivity is contractually never-throws, but
+// the route does not lean on that — any unexpected rejection still
+// degrades to the same honest-empty 200 with a warn, so this endpoint
+// can never 5xx.
+export async function macroSensitivityHandler(req, res, deps = {}) {
+  const fetchMatrix = deps.getMacroSensitivity || getMacroSensitivity;
+  try {
+    const data = await fetchMatrix();
+    res.json(data);
+  } catch (err) {
+    console.warn('terminal/macro-sensitivity degraded:', err.message);
+    res.json({
+      asOf: new Date().toISOString(),
+      lookbackDays: 252,
+      factors: [],
+      holdings: [],
+      marketValues: {},
+    });
+  }
+}
+
 // ICLUSTER — multi-insider open-market buy clusters across a small
 // universe (v1 = the fund's holdings, optionally + watchlist if its
 // route ships). The whole methodology — 60d window, ≥3 distinct
@@ -536,6 +574,7 @@ export async function insiderClustersHandler(req, res, deps = {}) {
 }
 
 router.get('/weather-impact', (req, res) => weatherImpactHandler(req, res));
+router.get('/macro-sensitivity', (req, res) => macroSensitivityHandler(req, res));
 router.get('/insider-clusters', (req, res) => insiderClustersHandler(req, res));
 
 // MOVR — every holding and how much it's up or down today, read live
@@ -738,6 +777,13 @@ const FN_PROMPTS = {
     'Write a 2–3 sentence brief. If a named storm is currently active in the NHC feed, lead with its name and intensity. ' +
     'Cite the historical mean abnormal return (5-day, SPY-relative) for each basket and the n behind it; note where the user\'s holdings sit inside the affected basket. ' +
     'Explicitly frame the output as a historical playbook, not a forecast — past landfalls inform the basket\'s typical reaction, not the next one. ' +
+    GROUNDING_RULES,
+
+  MACRO:
+    'You are a macro factor analyst at GCIG, a student investment fund, reading the portfolio\'s sensitivity to 10Y yields, WTI oil, USD index, VIX, and SPY from a 252-trading-day OLS regression. ' +
+    'Write a 2–3 sentence brief. Cite the portfolio β per factor with its sign (a negative β to 10Y means the book falls when yields rise) and name the 1–3 dominant contributing tickers along with their individual β. ' +
+    'Summarize what the default scenario implies in plain language (e.g. "if 10Y rises 50bps, the book is expected down ~X%"), and mention R² and n so the reader knows how predictive past sensitivity has been — single-factor R² on individual stocks is typically low (0.05–0.30), which is honest, not a bug. ' +
+    'Frame this explicitly as past sensitivity, not a forecast: rolling betas drift across regimes, so the scenario is a "what the book did when this factor moved historically" cue, not a prediction. ' +
     GROUNDING_RULES,
 
   ICLUSTER:

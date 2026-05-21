@@ -21,6 +21,7 @@ import Governance from './functions/Governance.jsx';
 import TopNews from './functions/TopNews.jsx';
 import WorldIndices from './functions/WorldIndices.jsx';
 import WeatherImpact from './functions/WeatherImpact.jsx';
+import MacroSensitivity from './functions/MacroSensitivity.jsx';
 import ComingSoon from './functions/ComingSoon.jsx';
 
 export const FUNCTIONS = [
@@ -74,6 +75,7 @@ export const FUNCTIONS = [
   { id: 'MOVR', label: 'Movers', help: 'Day\'s biggest gainers and losers.', requires: null, component: Movers },
   { id: 'ECO', label: 'Economic Calendar', help: 'Upcoming releases and central bank events.', requires: null, component: ComingSoon },
   { id: 'WX', label: 'Weather Impact', help: 'Named-storm event impact on your Gulf O&G + insurer exposure.', requires: null, component: WeatherImpact },
+  { id: 'MACRO', label: 'Macro Sensitivity', help: 'Portfolio sensitivity to 10Y, oil, USD, VIX, SPY (1y OLS).', requires: null, component: MacroSensitivity },
 ];
 
 export const FUNCTION_BY_ID = Object.fromEntries(FUNCTIONS.map((f) => [f.id, f]));
