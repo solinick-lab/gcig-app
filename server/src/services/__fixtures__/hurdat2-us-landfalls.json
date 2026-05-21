@@ -1,0 +1,181 @@
+{
+  "_source": "https://www.nhc.noaa.gov/data/hurdat/hurdat2-1851-2025-02272026.txt",
+  "_generatedAt": "2026-05-20T04:35:38.536Z",
+  "_comment": "NHC HURDAT2 Continental-US-landfall named storms (2020-present). HURDAT2 marks every landfall row with an \"L\" regardless of country; we filter to rows whose lat/lon sit inside the CONUS Gulf + Atlantic coastline rectangles. For storms that landfall in CONUS more than once (Sally 2020 brushed Florida as a TD before its Alabama hurricane landfall), the strongest L row is used — the market-relevant event date. Saffir-Simpson category is bucketed off the wind speed at that row. Regenerate with scripts/build-hurdat2-fixture.mjs after each annual NHC update.",
+  "entries": [
+    {
+      "name": "Bertha",
+      "date": "2020-05-27",
+      "category": "Tropical Storm",
+      "season": 2020
+    },
+    {
+      "name": "Cristobal",
+      "date": "2020-06-07",
+      "category": "Tropical Storm",
+      "season": 2020
+    },
+    {
+      "name": "Fay",
+      "date": "2020-07-10",
+      "category": "Tropical Storm",
+      "season": 2020
+    },
+    {
+      "name": "Isaias",
+      "date": "2020-08-04",
+      "category": "Hurricane Cat 1",
+      "season": 2020
+    },
+    {
+      "name": "Laura",
+      "date": "2020-08-27",
+      "category": "Hurricane Cat 4",
+      "season": 2020
+    },
+    {
+      "name": "Sally",
+      "date": "2020-09-16",
+      "category": "Hurricane Cat 2",
+      "season": 2020
+    },
+    {
+      "name": "Beta",
+      "date": "2020-09-22",
+      "category": "Tropical Storm",
+      "season": 2020
+    },
+    {
+      "name": "Delta",
+      "date": "2020-10-09",
+      "category": "Hurricane Cat 2",
+      "season": 2020
+    },
+    {
+      "name": "Zeta",
+      "date": "2020-10-28",
+      "category": "Hurricane Cat 3",
+      "season": 2020
+    },
+    {
+      "name": "Eta",
+      "date": "2020-11-09",
+      "category": "Tropical Storm",
+      "season": 2020
+    },
+    {
+      "name": "Claudette",
+      "date": "2021-06-19",
+      "category": "Tropical Storm",
+      "season": 2021
+    },
+    {
+      "name": "Danny",
+      "date": "2021-06-28",
+      "category": "Tropical Storm",
+      "season": 2021
+    },
+    {
+      "name": "Elsa",
+      "date": "2021-07-07",
+      "category": "Tropical Storm",
+      "season": 2021
+    },
+    {
+      "name": "Fred",
+      "date": "2021-08-16",
+      "category": "Tropical Storm",
+      "season": 2021
+    },
+    {
+      "name": "Henri",
+      "date": "2021-08-22",
+      "category": "Tropical Storm",
+      "season": 2021
+    },
+    {
+      "name": "Ida",
+      "date": "2021-08-29",
+      "category": "Hurricane Cat 4",
+      "season": 2021
+    },
+    {
+      "name": "Mindy",
+      "date": "2021-09-09",
+      "category": "Tropical Storm",
+      "season": 2021
+    },
+    {
+      "name": "Nicholas",
+      "date": "2021-09-14",
+      "category": "Hurricane Cat 1",
+      "season": 2021
+    },
+    {
+      "name": "Colin",
+      "date": "2022-07-01",
+      "category": "Tropical Storm",
+      "season": 2022
+    },
+    {
+      "name": "Ian",
+      "date": "2022-09-28",
+      "category": "Hurricane Cat 4",
+      "season": 2022
+    },
+    {
+      "name": "Nicole",
+      "date": "2022-11-10",
+      "category": "Hurricane Cat 1",
+      "season": 2022
+    },
+    {
+      "name": "Idalia",
+      "date": "2023-08-30",
+      "category": "Hurricane Cat 3",
+      "season": 2023
+    },
+    {
+      "name": "Ophelia",
+      "date": "2023-09-23",
+      "category": "Tropical Storm",
+      "season": 2023
+    },
+    {
+      "name": "Beryl",
+      "date": "2024-07-08",
+      "category": "Hurricane Cat 1",
+      "season": 2024
+    },
+    {
+      "name": "Debby",
+      "date": "2024-08-05",
+      "category": "Hurricane Cat 1",
+      "season": 2024
+    },
+    {
+      "name": "Francine",
+      "date": "2024-09-11",
+      "category": "Hurricane Cat 2",
+      "season": 2024
+    },
+    {
+      "name": "Helene",
+      "date": "2024-09-27",
+      "category": "Hurricane Cat 4",
+      "season": 2024
+    },
+    {
+      "name": "Milton",
+      "date": "2024-10-10",
+      "category": "Hurricane Cat 3",
+      "season": 2024
+    },
+    {
+      "name": "Chantal",
+      "date": "2025-07-06",
+      "category": "Tropical Storm",
+      "season": 2025
+    }
+  ]
+}

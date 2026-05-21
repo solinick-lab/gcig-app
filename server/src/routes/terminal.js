@@ -13,6 +13,7 @@ import { getWorldIndices, REGION_ORDER } from '../services/worldIndices.js';
 import { getInsiderTransactions } from '../services/insiderTx.js';
 import { getLiveQuotes } from '../services/liveQuotes.js';
 import { getRecentFilings } from '../services/secFilings.js';
+import { getWeatherImpact } from '../services/weatherSignals.js';
 import { getMacroSensitivity } from '../services/factorSensitivity.js';
 import { scanUniverse as scanInsiderClusters } from '../services/insiderClusters.js';
 
@@ -58,6 +59,7 @@ const KNOWN_FUNCTIONS = [
   { id: 'TOP', label: 'Top News', summary: 'Market-wide top headlines.' },
   { id: 'MOVR', label: 'Movers', summary: 'Day\'s biggest gainers and losers.' },
   { id: 'ECO', label: 'Economic Calendar', summary: 'Upcoming releases and central bank events.' },
+  { id: 'WX', label: 'Weather Impact', summary: 'Named-storm landfalls vs. Gulf O&G + P&C insurer baskets; historical playbook + active-storm feed.' },
   { id: 'MACRO', label: 'Macro Sensitivity', summary: 'Portfolio β to 10Y / WTI / USD / VIX / SPY (252-day OLS), top contributors, scenario preview.' },
   { id: 'HELP', label: 'Help', summary: 'List of available terminal functions.' },
 ];
@@ -378,6 +380,54 @@ export async function filingsHandler(req, res, deps = {}) {
 
 router.get('/filings/:ticker', (req, res) => filingsHandler(req, res));
 
+// WX — Weather Impact. Maps US-landfall named storms (the HURDAT2
+// archive, 2020-present) to two curated exposure baskets — Gulf O&G
+// and US P&C insurers — and runs a SPY-relative forward-return
+// event-study against the price-bar cache. The output is a historical
+// playbook, not a forecast: the same eventStudy primitive shipped here
+// powers the next sub-project (macro factor sensitivity) and gets the
+// math right once. The route folds in the user's holdings (cash
+// excluded) so the panel can call out where the user is overlapped on
+// each basket. The NHC live active-storm feed is best-effort and
+// degrades silently — historical playbook still works without it.
+//
+// Handler extracted with injectable services (deps.getWeatherImpact +
+// deps.getSheetPortfolio for the holdings) and wrapped in its own
+// try/catch: the weatherSignals service is contractually never-throws
+// (it owns its own NHC + per-exposure try/catches), but the route does
+// not lean on that — any unexpected rejection still degrades to a
+// 200 honest-empty { activeStorms:[], exposures:[] } with a warn, so
+// this endpoint can never 5xx. An unreachable sheet just collapses
+// the holdings overlap to []; the exposures still surface their
+// historical study.
+export async function weatherImpactHandler(req, res, deps = {}) {
+  const fetchImpact = deps.getWeatherImpact || getWeatherImpact;
+  const fetchPortfolio = deps.getSheetPortfolio || getSheetPortfolio;
+  try {
+    let holdings = [];
+    try {
+      const hp = await fetchPortfolio();
+      const arr = Array.isArray(hp) ? hp : hp?.holdings || [];
+      holdings = arr
+        .filter((h) => !h?.isCash)
+        .map((h) => String(h?.ticker || '').toUpperCase())
+        .filter(Boolean);
+    } catch (err) {
+      console.warn('terminal/weather-impact: sheet read failed:', err.message);
+      holdings = [];
+    }
+    const data = await fetchImpact(holdings);
+    res.json(data);
+  } catch (err) {
+    console.warn('terminal/weather-impact degraded:', err.message);
+    res.json({
+      asOf: new Date().toISOString(),
+      activeStorms: [],
+      exposures: [],
+    });
+  }
+}
+
 // MACRO — portfolio sensitivity to the five macro factors (10Y yield,
 // WTI oil, USD index, VIX, SPY) over a 252-trading-day OLS. The whole
 // matrix is assembled by factorSensitivity.js: every holding × every
@@ -523,6 +573,7 @@ export async function insiderClustersHandler(req, res, deps = {}) {
   }
 }
 
+router.get('/weather-impact', (req, res) => weatherImpactHandler(req, res));
 router.get('/macro-sensitivity', (req, res) => macroSensitivityHandler(req, res));
 router.get('/insider-clusters', (req, res) => insiderClustersHandler(req, res));
 
@@ -719,6 +770,13 @@ const FN_PROMPTS = {
     'You are a global macro analyst at GCIG, a student investment fund. ' +
     'Write a 2–3 sentence brief on the global equity picture. Which regions are leading and lagging? ' +
     'Is there a risk-on or risk-off pattern across geographies? Note any index moving more than ±1.5% as it likely has a story behind it. ' +
+    GROUNDING_RULES,
+
+  WX:
+    'You are a climate event-study analyst at GCIG, a student investment fund, reading a historical playbook of US-landfall named storms against curated sector baskets (Gulf O&G, P&C insurers). ' +
+    'Write a 2–3 sentence brief. If a named storm is currently active in the NHC feed, lead with its name and intensity. ' +
+    'Cite the historical mean abnormal return (5-day, SPY-relative) for each basket and the n behind it; note where the user\'s holdings sit inside the affected basket. ' +
+    'Explicitly frame the output as a historical playbook, not a forecast — past landfalls inform the basket\'s typical reaction, not the next one. ' +
     GROUNDING_RULES,
 
   MACRO:
