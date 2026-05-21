@@ -5,6 +5,7 @@
 
 import Description from './functions/Description.jsx';
 import Chart from './functions/Chart.jsx';
+import Fundamentals from './functions/Fundamentals.jsx';
 import News from './functions/News.jsx';
 import BloombergIntelligence from './functions/BloombergIntelligence.jsx';
 import Help from './functions/Help.jsx';
@@ -62,6 +63,7 @@ export const FUNCTIONS = [
     component: Help,
   },
   { id: 'FA', label: 'Financial Analysis', help: 'Multi-year fundamentals deep dive.', requires: 'ticker', component: ComingSoon },
+  { id: 'GF', label: 'Graph Fundamentals', help: 'Revenue, margins, EPS & cash flow over time (SEC XBRL).', requires: 'ticker', component: Fundamentals },
   { id: 'PEER', label: 'Peers', help: 'Sector peer comparison table.', requires: 'ticker', component: Peers },
   { id: 'INSDR', label: 'Insider Activity', help: 'Form 4 insider buys/sells on the price chart.', requires: 'ticker', component: InsiderActivity },
   { id: 'FIL', label: 'Filings', help: 'Recent SEC filings (8-K/10-Q/10-K/DEF 14A/Form 4) with an AI read.', requires: 'ticker', component: Filings },

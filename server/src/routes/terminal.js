@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { verifyJwt, requireExecutive } from '../middleware/auth.js';
 import { llmChat } from '../services/llm.js';
 import { getHistory } from '../services/priceHistory.js';
+import { getFundamentals } from '../services/secFundamentals.js';
 import { getPortfolioMovers, getSheetPortfolio } from '../services/sheetPortfolio.js';
 import { getProxyStatement } from '../services/proxyStatement.js';
 import { getExecutiveBios } from '../services/executiveBios.js';
@@ -103,6 +104,29 @@ router.get('/chart/:ticker', async (req, res) => {
     if (err.status === 404) return res.status(404).json({ error: 'Ticker not found' });
     console.error(`terminal/chart(${raw}) failed:`, err.message);
     res.status(502).json({ error: 'Chart fetch failed' });
+  }
+});
+
+// GF — graph fundamentals. Structured income-statement / cash-flow
+// figures from SEC XBRL companyfacts (services/secFundamentals.js),
+// normalized to annual or quarterly period rows with derived margins.
+// Best-effort and US-centric: a ticker SEC doesn't tag (many ADRs,
+// funds) comes back as an empty rows array, not an error.
+router.get('/fundamentals/:ticker', async (req, res) => {
+  const raw = String(req.params.ticker || '').trim().toUpperCase();
+  if (!raw || !/^[A-Z0-9.\-]{1,12}$/.test(raw)) {
+    return res.status(400).json({ error: 'Invalid ticker' });
+  }
+  const freq = req.query.freq === 'quarterly' ? 'quarterly' : 'annual';
+  try {
+    res.json(await getFundamentals(raw, freq));
+  } catch (err) {
+    if (err.status === 404)
+      return res.status(404).json({ error: 'No SEC fundamentals for this ticker' });
+    if (err.status === 400)
+      return res.status(400).json({ error: 'Invalid ticker' });
+    console.error(`terminal/fundamentals(${raw}) failed:`, err.message);
+    res.status(502).json({ error: 'Fundamentals fetch failed' });
   }
 });
 
