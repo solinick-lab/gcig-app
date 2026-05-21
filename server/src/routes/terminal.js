@@ -14,6 +14,7 @@ import { getInsiderTransactions } from '../services/insiderTx.js';
 import { getLiveQuotes } from '../services/liveQuotes.js';
 import { getRecentFilings } from '../services/secFilings.js';
 import { getWeatherImpact } from '../services/weatherSignals.js';
+import { getActiveAlerts } from '../services/wxAlerts.js';
 import { getMacroSensitivity } from '../services/factorSensitivity.js';
 import { scanUniverse as scanInsiderClusters } from '../services/insiderClusters.js';
 
@@ -60,6 +61,7 @@ const KNOWN_FUNCTIONS = [
   { id: 'MOVR', label: 'Movers', summary: 'Day\'s biggest gainers and losers.' },
   { id: 'ECO', label: 'Economic Calendar', summary: 'Upcoming releases and central bank events.' },
   { id: 'WX', label: 'Weather Impact', summary: 'Named-storm landfalls vs. Gulf O&G + P&C insurer baskets; historical playbook + active-storm feed.' },
+  { id: 'RDR', label: 'Weather Radar', summary: 'Live US NEXRAD radar + active NWS warning polygons (tornado / severe TS / flood / winter / tropical).' },
   { id: 'MACRO', label: 'Macro Sensitivity', summary: 'Portfolio β to 10Y / WTI / USD / VIX / SPY (252-day OLS), top contributors, scenario preview.' },
   { id: 'HELP', label: 'Help', summary: 'List of available terminal functions.' },
 ];
@@ -428,6 +430,31 @@ export async function weatherImpactHandler(req, res, deps = {}) {
   }
 }
 
+// RDR — Weather Radar. The radar imagery is NEXRAD tiles the client
+// pulls browser-side from the Iowa Mesonet, so this endpoint only
+// proxies the warning polygons: NWS requires a User-Agent header a
+// browser fetch can't set, the same wall the SEC services work around.
+// wxAlerts is contractually never-throws, but the route wraps it
+// anyway so an unexpected rejection still degrades to a 200
+// honest-empty FeatureCollection rather than a 5xx.
+export async function weatherAlertsHandler(req, res, deps = {}) {
+  const fetchAlerts = deps.getActiveAlerts || getActiveAlerts;
+  try {
+    res.json(await fetchAlerts());
+  } catch (err) {
+    console.warn('terminal/wx-alerts degraded:', err.message);
+    res.json({
+      asOf: new Date().toISOString(),
+      total: 0,
+      mappedCount: 0,
+      areaOnlyCount: 0,
+      counts: {},
+      features: { type: 'FeatureCollection', features: [] },
+      list: [],
+    });
+  }
+}
+
 // MACRO — portfolio sensitivity to the five macro factors (10Y yield,
 // WTI oil, USD index, VIX, SPY) over a 252-trading-day OLS. The whole
 // matrix is assembled by factorSensitivity.js: every holding × every
@@ -574,6 +601,7 @@ export async function insiderClustersHandler(req, res, deps = {}) {
 }
 
 router.get('/weather-impact', (req, res) => weatherImpactHandler(req, res));
+router.get('/wx-alerts', (req, res) => weatherAlertsHandler(req, res));
 router.get('/macro-sensitivity', (req, res) => macroSensitivityHandler(req, res));
 router.get('/insider-clusters', (req, res) => insiderClustersHandler(req, res));
 
@@ -777,6 +805,12 @@ const FN_PROMPTS = {
     'Write a 2–3 sentence brief. If a named storm is currently active in the NHC feed, lead with its name and intensity. ' +
     'Cite the historical mean abnormal return (5-day, SPY-relative) for each basket and the n behind it; note where the user\'s holdings sit inside the affected basket. ' +
     'Explicitly frame the output as a historical playbook, not a forecast — past landfalls inform the basket\'s typical reaction, not the next one. ' +
+    GROUNDING_RULES,
+
+  RDR:
+    'You are a weather-risk analyst at GCIG, a student investment fund, reading a live snapshot of active US NWS warnings (the panel also shows NEXRAD radar). ' +
+    'Write a 2–3 sentence brief. Lead with the most severe / highest-impact warnings (tornado, severe thunderstorm, flash flood) and roughly where they cluster by region or state from the area descriptions, and give counts by type. ' +
+    'These are current conditions, not a forecast or a market call — describe the weather picture plainly and do not infer ticker-level impact unless the panel data names a holding. ' +
     GROUNDING_RULES,
 
   MACRO:
