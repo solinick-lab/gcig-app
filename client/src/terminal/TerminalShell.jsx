@@ -39,6 +39,15 @@ export default function TerminalShell({ onExit }) {
   // top z so click-to-front needs nothing fancier than "current max + 1".
   const zSeq = useRef(1);
 
+  // Mirrors the keydown handler reads without re-subscribing each render.
+  const windowsRef = useRef(windows);
+  windowsRef.current = windows;
+  const focusedRef = useRef(focusedId);
+  focusedRef.current = focusedId;
+  // The Escape close gesture is two-stroke (select, then shut); armedRef
+  // holds the id selected by the first press that's waiting on the second.
+  const armedRef = useRef(null);
+
   // Build a workspace context blob to hand the AI chat panel so it can
   // reason about what the user is currently looking at.
   const workspaceContext = useMemo(() => {
@@ -67,6 +76,7 @@ export default function TerminalShell({ onExit }) {
   // already open; FloatingWindow pulls it back in if it lands off-screen.
   const spawnWindow = useCallback((fn, ticker) => {
     if (!fn) return;
+    armedRef.current = null;
     const id = nextWindowId();
     zSeq.current += 1;
     setWindows((ws) => {
@@ -135,29 +145,26 @@ export default function TerminalShell({ onExit }) {
     );
   }, []);
 
-  // Double-tap Escape closes the focused pane — a keyboard equivalent
-  // of clicking the × on a window's title bar. The 500 ms window is
-  // tight enough that a deliberate two-press feels intentional and a
-  // stray single Esc never closes anything.
-  const lastEscAtRef = useRef(0);
+  // Escape is a two-stroke close that alternates select, then shut. The
+  // first press selects the window you were last in — the focused one,
+  // or, once focus has gone after a close, whichever sits on top of the
+  // stack — and raises it so you see what's about to go. The second
+  // press closes that armed window. A run of presses therefore peels the
+  // stack one window per pair: four escapes shut two. armedRef carries
+  // the id between the two strokes.
   useEffect(() => {
     function onKeyDown(e) {
       if (e.key !== 'Escape') return;
-      // PersonModal and PDFModal listen on the capture phase and
-      // preventDefault on Esc, so by the time this bubble-phase
-      // handler runs they've already eaten the press to close
-      // themselves. Let them own it — the user expects the visible
-      // modal to dismiss first, not the pane behind it. Disarm the
-      // timer so the next Esc starts a fresh single-tap.
+      // PersonModal and PDFModal preventDefault on Esc from the capture
+      // phase to dismiss themselves first; let the visible modal own the
+      // press and reset the gesture so the next Esc starts clean.
       if (e.defaultPrevented) {
-        lastEscAtRef.current = 0;
+        armedRef.current = null;
         return;
       }
-      // Esc is a common cancel/blur gesture inside text fields
-      // (command bar, watchlist add-ticker, NOTE textarea, the
-      // function switcher). Bail when the user is typing so a
-      // double-Esc to clear an input doesn't yank the pane out
-      // from under them.
+      // Esc also cancels/blurs inside text fields (command bar, the NOTE
+      // textarea, the function switcher). Bail while typing so it never
+      // yanks a pane out from under an edit.
       const el = document.activeElement;
       if (el && (
         el.tagName === 'INPUT' ||
@@ -165,27 +172,44 @@ export default function TerminalShell({ onExit }) {
         el.tagName === 'SELECT' ||
         el.isContentEditable
       )) {
-        lastEscAtRef.current = 0;
+        armedRef.current = null;
         return;
       }
-      if (!focusedId) {
-        lastEscAtRef.current = 0;
+      const ws = windowsRef.current;
+      if (!ws.length) {
+        armedRef.current = null;
         return;
       }
-      const now = Date.now();
-      if (now - lastEscAtRef.current < 500) {
-        closeWindow(focusedId);
-        lastEscAtRef.current = 0;
-      } else {
-        lastEscAtRef.current = now;
+      // Second stroke: the armed window is still open, so close it.
+      const armed = armedRef.current && ws.find((w) => w.id === armedRef.current);
+      if (armed) {
+        closeWindow(armed.id);
+        armedRef.current = null;
+        return;
       }
+      // First stroke: select the last-active window — the focused one,
+      // else the top of the z-stack — and arm it for the next press.
+      const focused = focusedRef.current
+        ? ws.find((w) => w.id === focusedRef.current)
+        : null;
+      const target = focused || ws.reduce((top, w) => (w.z > top.z ? w : top));
+      focusWindow(target.id);
+      armedRef.current = target.id;
     }
-    // Bubble phase on purpose — modal capture-phase handlers run
-    // first, and we read e.defaultPrevented to decide whether to
-    // claim the press.
+    // Touching the mouse abandons a half-finished gesture: a click means
+    // you're aiming somewhere deliberate, not peeling the stack by key.
+    function onPointerDown() {
+      armedRef.current = null;
+    }
+    // Bubble phase on purpose — modal capture-phase handlers run first,
+    // and we read e.defaultPrevented to decide whether to claim the press.
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [focusedId, closeWindow]);
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [closeWindow, focusWindow]);
 
   const focused = windows.find((w) => w.id === focusedId) || null;
 
