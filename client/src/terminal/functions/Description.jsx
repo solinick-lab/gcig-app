@@ -136,6 +136,7 @@ export default function Description({ ticker }) {
     <div className="term-panel">
       <div className="term-panel-header">
         <span className="ticker">{ticker.toUpperCase()}</span>
+        <span className="equity">Equity</span>
         <span className="name">{info.name || '—'}</span>
       </div>
 

@@ -178,12 +178,16 @@ export default function TerminalShell({ onExit }) {
   return (
     <div className="terminal-root" data-theme="terminal">
       <div className="term-topbar">
-        <span className="term-topbar-brand">GCIG TERMINAL</span>
-        <span style={{ color: 'var(--term-fg-dim)', fontSize: 11 }}>v0</span>
+        <span className="term-topbar-brand">GCIG</span>
+        <span style={{ color: 'var(--term-fg-dim)', fontSize: 11, letterSpacing: '0.14em' }}>
+          TERMINAL <span style={{ color: 'var(--term-fg-muted)' }}>v0</span>
+        </span>
         <div className="term-topbar-status">
           <span><span className="dot" /> CONNECTED</span>
           <span>·</span>
           <span>{user?.name || 'USER'}</span>
+          <span>·</span>
+          <MarketClock />
           <button className="term-topbar-exit" onClick={onExit}>EXIT</button>
         </div>
       </div>
@@ -197,6 +201,20 @@ export default function TerminalShell({ onExit }) {
             <div className="term-empty-sub">
               Type a command to open a window — e.g. <b>AAPL DES</b>, <b>MOVR</b>,
               or ask in plain English.
+            </div>
+            <div className="term-actions term-empty-actions">
+              <button className="term-action" onClick={() => spawnWindow('DES', 'AAPL')}>
+                <span className="n">1)</span> AAPL DES
+              </button>
+              <button className="term-action" onClick={() => spawnWindow('MOVR')}>
+                <span className="n">2)</span> Movers
+              </button>
+              <button className="term-action" onClick={() => spawnWindow('WEI')}>
+                <span className="n">3)</span> World Indices
+              </button>
+              <button className="term-action" onClick={() => spawnWindow('HELP')}>
+                <span className="n">4)</span> Function menu
+              </button>
             </div>
             <div className="term-empty-sub">
               Drag a window by its title bar; resize from the bottom-right corner.
@@ -251,10 +269,37 @@ export default function TerminalShell({ onExit }) {
             : 'NONE FOCUSED'}
         </span>
         <span className="sep">|</span>
-        <span>HELP HELP &lt;GO&gt; for function list</span>
+        <span>
+          <span className="key">HELP</span> for the function menu ·{' '}
+          <span className="key">/</span> to jump to the command line
+        </span>
         <span style={{ marginLeft: 'auto' }}>{new Date().toLocaleDateString()}</span>
       </div>
     </div>
+  );
+}
+
+// The market clock. Bloomberg's chrome always carries the time; ours
+// ticks once a second in New York hours — the timezone the desk and the
+// custodian both run on — so an open terminal feels alive even when no
+// panel is refreshing.
+function MarketClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const time = now.toLocaleTimeString('en-US', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZone: 'America/New_York',
+  });
+  return (
+    <span className="term-topbar-clock">
+      {time}<span className="tz">ET</span>
+    </span>
   );
 }
 
