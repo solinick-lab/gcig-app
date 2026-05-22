@@ -71,7 +71,7 @@ export default function Intraday({ ticker }) {
   if (!data) return null;
 
   return (
-    <div className="term-panel term-gp term-gip">
+    <div className="term-panel term-gp term-gip" style={{ height: '100%' }}>
       <div className="term-gp-header">
         <div className="term-gp-quote">
           <span className="ticker">{sym}</span>
