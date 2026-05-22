@@ -107,7 +107,6 @@ export default function Intraday({ ticker }) {
                 dataKey="t"
                 type="number"
                 domain={['dataMin', 'dataMax']}
-                scale="time"
                 tickFormatter={fmt.time}
                 tick={{ fill: 'var(--term-fg-dim)', fontSize: 10 }}
                 axisLine={{ stroke: 'var(--term-border)' }}
