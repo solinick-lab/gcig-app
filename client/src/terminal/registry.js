@@ -25,6 +25,7 @@ import WeatherImpact from './functions/WeatherImpact.jsx';
 import WeatherRadar from './functions/WeatherRadar.jsx';
 import MacroSensitivity from './functions/MacroSensitivity.jsx';
 import Portfolio from './functions/Portfolio.jsx';
+import SupplyChain from './functions/SupplyChain.jsx';
 import ComingSoon from './functions/ComingSoon.jsx';
 
 export const FUNCTIONS = [
@@ -78,6 +79,7 @@ export const FUNCTIONS = [
   { id: 'TOP', label: 'Top News', help: 'Market-wide top headlines.', requires: null, component: TopNews },
   { id: 'MOVR', label: 'Movers', help: 'Day\'s biggest gainers and losers.', requires: null, component: Movers },
   { id: 'PM', label: 'Portfolio Manager', help: 'The whole book: positions, weights, live value & P&L, sector allocation.', requires: null, component: Portfolio },
+  { id: 'SPLC', label: 'Supply Chain', help: 'Customers, suppliers & key inputs from the latest 10-K, with stated revenue concentration.', requires: 'ticker', component: SupplyChain },
   { id: 'ECO', label: 'Economic Calendar', help: 'Upcoming releases and central bank events.', requires: null, component: ComingSoon },
   { id: 'WX', label: 'Weather Impact', help: 'Named-storm event impact on your Gulf O&G + insurer exposure.', requires: null, component: WeatherImpact },
   { id: 'RDR', label: 'Weather Radar', help: 'Live US NEXRAD radar + active NWS warnings.', requires: null, component: WeatherRadar },
