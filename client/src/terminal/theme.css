@@ -1518,6 +1518,140 @@
   min-width: 0;
 }
 
+/* ── SPLC supply chain ────────────────────────────────────────────────
+ * A filing read, not a market graph: a concentration callout, then
+ * customer exposure bars and named supplier / input lists. Honest about
+ * its single-10-K source in the footer. */
+[data-theme='terminal'] .term-splc {
+  gap: 10px;
+}
+
+[data-theme='terminal'] .term-splc-concentration {
+  border: 1px solid var(--term-border);
+  background: var(--term-bg-panel-hover);
+  padding: 7px 10px;
+  font-size: 12px;
+  color: var(--term-white);
+  line-height: 1.5;
+}
+
+[data-theme='terminal'] .term-splc-concentration .k {
+  display: block;
+  color: var(--term-orange);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  margin-bottom: 3px;
+}
+
+[data-theme='terminal'] .term-splc-section {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+[data-theme='terminal'] .term-splc-title {
+  color: var(--term-blue);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--term-border);
+  margin-bottom: 2px;
+}
+
+[data-theme='terminal'] .term-splc-row {
+  display: grid;
+  grid-template-columns: 180px 1fr 52px;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  padding: 2px 0;
+  border-bottom: 1px dotted var(--term-border);
+}
+
+[data-theme='terminal'] .term-splc-row.plain {
+  grid-template-columns: 180px 1fr;
+}
+
+/* Entity names are buttons but read as amber links — clicking resolves
+   public names to a ticker and opens DES. */
+[data-theme='terminal'] .term-splc-row .ent {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  color: var(--term-amber);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-theme='terminal'] .term-splc-row .ent:hover {
+  color: var(--term-white);
+  text-decoration: underline;
+}
+
+[data-theme='terminal'] .term-splc-row .track {
+  height: 10px;
+  background: var(--term-bg-panel-hover);
+  border: 1px solid var(--term-border);
+}
+
+[data-theme='terminal'] .term-splc-row .fill {
+  display: block;
+  height: 100%;
+  background: var(--term-amber);
+}
+
+[data-theme='terminal'] .term-splc-row .note {
+  color: var(--term-fg-dim);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-theme='terminal'] .term-splc-row .pct {
+  text-align: right;
+  color: var(--term-white);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+[data-theme='terminal'] .term-splc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+[data-theme='terminal'] .term-splc-chips .chip {
+  border: 1px solid var(--term-border);
+  color: var(--term-white);
+  font-size: 11px;
+  padding: 2px 8px;
+  letter-spacing: 0.02em;
+}
+
+[data-theme='terminal'] .term-splc-source {
+  color: var(--term-fg-muted);
+  font-size: 10px;
+  line-height: 1.5;
+  border-top: 1px solid var(--term-border);
+  padding-top: 6px;
+}
+
+[data-theme='terminal'] .term-splc-source a {
+  color: var(--term-fg-dim);
+}
+
+[data-theme='terminal'] .term-splc-source a:hover {
+  color: var(--term-fg);
+}
+
 /* Bottom status bar */
 [data-theme='terminal'] .term-statusbar {
   display: flex;

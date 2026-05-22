@@ -5,6 +5,7 @@ import { llmChat } from '../services/llm.js';
 import { getHistory } from '../services/priceHistory.js';
 import { getFundamentals } from '../services/secFundamentals.js';
 import { getPortfolioMovers, getSheetPortfolio } from '../services/sheetPortfolio.js';
+import { getSupplyChain } from '../services/secSupplyChain.js';
 import { getProxyStatement } from '../services/proxyStatement.js';
 import { getExecutiveBios } from '../services/executiveBios.js';
 import { parseLeadership, parseBoard, parseComp, buildNetwork } from '../services/governanceParsers.js';
@@ -61,6 +62,7 @@ const KNOWN_FUNCTIONS = [
   { id: 'TOP', label: 'Top News', summary: 'Market-wide top headlines.' },
   { id: 'MOVR', label: 'Movers', summary: 'Day\'s biggest gainers and losers.' },
   { id: 'PM', label: 'Portfolio Manager', summary: 'The whole book: positions, weights, live value and P&L, sector allocation.' },
+  { id: 'SPLC', label: 'Supply Chain', summary: 'Customers, suppliers and key inputs named in the latest 10-K, with stated revenue concentration.' },
   { id: 'ECO', label: 'Economic Calendar', summary: 'Upcoming releases and central bank events.' },
   { id: 'WX', label: 'Weather Impact', summary: 'Named-storm landfalls vs. Gulf O&G + P&C insurer baskets; historical playbook + active-storm feed.' },
   { id: 'RDR', label: 'Weather Radar', summary: 'Live US NEXRAD radar + active NWS warning polygons (tornado / severe TS / flood / winter / tropical).' },
@@ -672,6 +674,20 @@ router.get('/portfolio', async (_req, res) => {
   } catch (err) {
     console.error('terminal/portfolio failed:', err.message);
     res.status(502).json({ error: 'Portfolio unavailable — could not read the positions sheet.' });
+  }
+});
+
+// SPLC — supply-chain relationships extracted from the focused ticker's
+// latest 10-K. Null when there's no US 10-K (foreign filers, ETFs); the
+// panel renders that as "no filing" rather than an error.
+router.get('/supply-chain/:ticker', async (req, res) => {
+  try {
+    const data = await getSupplyChain(req.params.ticker);
+    if (!data) return res.status(404).json({ error: 'No 10-K supply-chain disclosure found for this ticker.' });
+    res.json(data);
+  } catch (err) {
+    console.error('terminal/supply-chain failed:', err.message);
+    res.status(502).json({ error: 'Supply-chain read failed — could not reach EDGAR.' });
   }
 });
 
