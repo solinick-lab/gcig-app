@@ -1230,6 +1230,14 @@
   margin-top: 1px;
 }
 
+[data-theme='terminal'] .term-gp-tip .pos {
+  color: var(--term-positive);
+}
+
+[data-theme='terminal'] .term-gp-tip .neg {
+  color: var(--term-negative);
+}
+
 /* ── GF graph fundamentals ────────────────────────────────────────────
  * Reuses the GP chart wrap and tooltip; adds its own metric toggles and
  * overlay-line picker. Bars stay in-theme (amber + the accent set). */
