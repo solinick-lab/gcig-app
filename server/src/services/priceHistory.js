@@ -252,6 +252,93 @@ export async function getHistory(rawTicker, range = '6mo') {
   }));
 }
 
+// ── Intraday (GIP) ────────────────────────────────────────────────────
+// NASDAQ's chart endpoint returns the current session as ~1-minute
+// points (epoch-ms timestamp + price), pre- and post-market included,
+// alongside the day's quote header (last, previous close, volume). This
+// is the one place we want *intraday* rather than the daily PriceBar
+// cache, so it bypasses the DB entirely — intraday is ephemeral. A short
+// in-memory cache keeps a burst of GIP polls off NASDAQ's edge.
+const intradayCache = new Map(); // ticker → { at, value }
+const INTRADAY_TTL_MS = 45 * 1000;
+
+function parsePct(s) {
+  if (s == null) return null;
+  const t = String(s).replace(/[%\s+]/g, '');
+  const n = Number(t);
+  return Number.isFinite(n) ? n / 100 : null;
+}
+
+async function fetchNasdaqChart(ticker, assetclass) {
+  const url =
+    `https://api.nasdaq.com/api/quote/${encodeURIComponent(ticker)}/chart?assetclass=${assetclass}`;
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': HTTP_UA,
+      Accept: 'application/json, text/plain, */*',
+      Referer: 'https://www.nasdaq.com/',
+      Origin: 'https://www.nasdaq.com',
+    },
+  });
+  if (!res.ok) {
+    if (res.status === 404 || res.status === 400) return null;
+    const e = new Error(`NASDAQ chart HTTP ${res.status}`);
+    e.status = 502;
+    throw e;
+  }
+  const json = await res.json();
+  if (json?.status?.rCode !== 200) return null;
+  if (!Array.isArray(json?.data?.chart)) return null;
+  return json.data;
+}
+
+// Public: today's intraday line for a ticker. Returns the session points
+// plus a quote header; throws { status } on a bad ticker / upstream miss.
+export async function getIntraday(rawTicker) {
+  const ticker = String(rawTicker || '').trim().toUpperCase();
+  if (!ticker || !/^[A-Z0-9.\-]{1,12}$/.test(ticker)) {
+    const e = new Error('Invalid ticker');
+    e.status = 400;
+    throw e;
+  }
+  const hit = intradayCache.get(ticker);
+  if (hit && Date.now() - hit.at < INTRADAY_TTL_MS) return hit.value;
+
+  // Equities first, ETFs as the fallback bucket — same split the daily
+  // path uses.
+  let data = await fetchNasdaqChart(ticker, 'stocks');
+  if (!data) data = await fetchNasdaqChart(ticker, 'etf');
+  if (!data) {
+    const e = new Error('Ticker not found');
+    e.status = 404;
+    throw e;
+  }
+
+  const points = [];
+  for (const c of data.chart) {
+    const price = Number(c?.y);
+    const t = Number(c?.x);
+    if (!Number.isFinite(price) || !Number.isFinite(t)) continue;
+    points.push({ t, price });
+  }
+  const last = parseMoney(data.lastSalePrice);
+  const prevClose = parseMoney(data.previousClose);
+  const value = {
+    ticker,
+    company: data.company || null,
+    exchange: data.exchange || null,
+    asOf: data.timeAsOf || null,
+    last,
+    prevClose,
+    netChange: last != null && prevClose != null ? last - prevClose : parseMoney(data.netChange),
+    pctChange: last != null && prevClose ? (last - prevClose) / prevClose : parsePct(data.percentageChange),
+    volume: parseInt0(data.volume),
+    points,
+  };
+  intradayCache.set(ticker, { at: Date.now(), value });
+  return value;
+}
+
 // Universe = distinct tickers we already have any bars for. Cron job
 // refreshes all of them nightly. Empty on a fresh DB; grows naturally
 // as users hit GP for new tickers.

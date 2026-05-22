@@ -5,6 +5,7 @@
 
 import Description from './functions/Description.jsx';
 import Chart from './functions/Chart.jsx';
+import Intraday from './functions/Intraday.jsx';
 import Fundamentals from './functions/Fundamentals.jsx';
 import Financials from './functions/Financials.jsx';
 import News from './functions/News.jsx';
@@ -43,6 +44,13 @@ export const FUNCTIONS = [
     help: 'Price chart with selectable interval.',
     requires: 'ticker',
     component: Chart,
+  },
+  {
+    id: 'GIP',
+    label: 'Intraday Price',
+    help: "Today's intraday price line (pre/post-market) vs prior close.",
+    requires: 'ticker',
+    component: Intraday,
   },
   {
     id: 'CN',

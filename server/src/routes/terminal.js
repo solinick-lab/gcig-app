@@ -2,7 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { verifyJwt, requireExecutive } from '../middleware/auth.js';
 import { llmChat } from '../services/llm.js';
-import { getHistory } from '../services/priceHistory.js';
+import { getHistory, getIntraday } from '../services/priceHistory.js';
 import { getFundamentals, getStatements } from '../services/secFundamentals.js';
 import { getPortfolioMovers, getSheetPortfolio } from '../services/sheetPortfolio.js';
 import { getSupplyChain } from '../services/secSupplyChain.js';
@@ -47,6 +47,7 @@ router.use(aiLimiter);
 const KNOWN_FUNCTIONS = [
   { id: 'DES', label: 'Description', summary: 'Company snapshot: quote, fundamentals, business summary, AI brief.' },
   { id: 'GP', label: 'Chart', summary: 'Price chart with selectable interval.' },
+  { id: 'GIP', label: 'Intraday Price', summary: 'Today\'s intraday price line with pre/post-market, vs prior close.' },
   { id: 'CN', label: 'Company News', summary: 'Latest news headlines for the focused ticker.' },
   { id: 'FA', label: 'Financial Analysis', summary: 'Multi-year fundamentals deep dive.' },
   { id: 'PEER', label: 'Peers', summary: 'Sector peer comparison table.' },
@@ -107,6 +108,23 @@ router.get('/chart/:ticker', async (req, res) => {
     if (err.status === 404) return res.status(404).json({ error: 'Ticker not found' });
     console.error(`terminal/chart(${raw}) failed:`, err.message);
     res.status(502).json({ error: 'Chart fetch failed' });
+  }
+});
+
+// GIP — today's intraday line (NASDAQ chart endpoint, ~1-min points,
+// pre/post-market included). Ephemeral; no PriceBar cache involved.
+router.get('/intraday/:ticker', async (req, res) => {
+  const raw = String(req.params.ticker || '').trim().toUpperCase();
+  if (!raw || !/^[A-Z0-9.\-]{1,12}$/.test(raw)) {
+    return res.status(400).json({ error: 'Invalid ticker' });
+  }
+  try {
+    res.json(await getIntraday(raw));
+  } catch (err) {
+    if (err.status === 404) return res.status(404).json({ error: 'Ticker not found' });
+    if (err.status === 400) return res.status(400).json({ error: 'Invalid ticker' });
+    console.error(`terminal/intraday(${raw}) failed:`, err.message);
+    res.status(502).json({ error: 'Intraday fetch failed' });
   }
 });
 
