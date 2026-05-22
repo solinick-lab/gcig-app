@@ -78,11 +78,39 @@ const SYSTEM =
   '"materials": [{"name": string, "note": string}]}\n' +
   'Hard rules:\n' +
   '- Use ONLY names that appear verbatim in the excerpts. Never invent, infer, or supply a name from outside knowledge.\n' +
-  '- "pct" is the share of revenue or sales a customer represents as a number (12 means 12%), and ONLY when the text states it for that customer; otherwise null.\n' +
-  '- If the excerpts name no specific customers, suppliers, or materials, return empty arrays. Do not pad with generic terms ("retail customers", "various suppliers").\n' +
+  '- "customers" and "suppliers" must be SPECIFICALLY NAMED companies, organizations, or government bodies — proper nouns like "Walmart", "Apple", "Taiwan Semiconductor", "U.S. Department of Defense". ' +
+  'NEVER list customer or supplier *types, segments, audiences, or categories*: consumers, sellers, developers, enterprises, advertisers, content creators, employees, retailers, small businesses, individuals, users, subscribers, partners, merchants, distributors, vendors, government (generic). ' +
+  'A diversified company that names no specific customer company has an empty "customers" array — that is the correct, expected answer, not a reason to pad with segments.\n' +
+  '- "pct" is the share of revenue or sales a NAMED customer represents, as a number (12 means 12%), and ONLY when the text states it for that specific named customer; otherwise null. Never put 0.\n' +
+  '- "materials" are concrete physical inputs ("aluminum", "cobalt", "semiconductors", "jet fuel"), never the phrase "raw materials" itself or "various inputs".\n' +
+  '- If the excerpts name nothing concrete for a category, return an empty array for it.\n' +
   '- "concentration" is one sentence on any stated customer-concentration risk, or null if none is mentioned.\n' +
   '- "summary" is one or two sentences on the company\'s customer/supplier posture, grounded strictly in the excerpts.\n' +
   '- Each "note" is at most twelve words, in the filing\'s own framing.';
+
+// A backstop against the model padding with customer/supplier *types*
+// when a filing names no specific company (Amazon's "consumers, sellers,
+// developers…"). These are categories, not relationships — drop them so
+// the panel shows an honest empty state instead of a wall of 0% rows.
+const GENERIC = new Set(
+  [
+    'consumers', 'consumer', 'customers', 'customer', 'sellers', 'seller', 'buyers', 'buyer',
+    'developers', 'developer', 'enterprises', 'enterprise', 'businesses', 'business',
+    'small businesses', 'large enterprises', 'advertisers', 'advertiser', 'content creators',
+    'content creator', 'employees', 'employee', 'retailers', 'retailer', 'retail customers',
+    'wholesalers', 'wholesaler', 'distributors', 'distributor', 'resellers', 'reseller',
+    'merchants', 'merchant', 'individuals', 'individual', 'users', 'user', 'end users',
+    'end user', 'subscribers', 'subscriber', 'members', 'member', 'clients', 'client',
+    'partners', 'partner', 'suppliers', 'supplier', 'vendors', 'vendor', 'government',
+    'governments', 'organizations', 'organization', 'institutions', 'institution',
+    'general public', 'public', 'third parties', 'third party', 'various customers',
+    'various suppliers', 'raw materials', 'materials', 'various', 'others',
+  ].map((s) => s.toLowerCase())
+);
+
+function isGeneric(name) {
+  return GENERIC.has(String(name || '').trim().toLowerCase());
+}
 
 function num(v) {
   const n = Number(v);
@@ -92,11 +120,14 @@ function num(v) {
 function cleanEntity(e, withPct) {
   if (!e || typeof e !== 'object') return null;
   const name = String(e.name || '').trim().slice(0, 80);
-  if (!name) return null;
+  // Drop blanks and generic category words — those aren't relationships.
+  if (!name || isGeneric(name)) return null;
   const out = { name, note: String(e.note || '').trim().slice(0, 90) };
   if (withPct) {
     const p = num(e.pct);
-    out.pct = p != null && p >= 0 && p <= 100 ? p : null;
+    // A real disclosed concentration is never 0%; treat 0 (and out-of-range)
+    // as "not stated" so it renders as — rather than a phantom 0% bar.
+    out.pct = p != null && p > 0 && p <= 100 ? p : null;
   }
   return out;
 }
