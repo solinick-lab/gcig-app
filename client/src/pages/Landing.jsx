@@ -862,7 +862,7 @@ function FieldVisit() {
                   />
                   <img
                     src="/field-visit.jpg"
-                    alt="Members of The Griffin Fund standing in the atrium of an institutional finance building during a Spring 2026 field visit."
+                    alt="Members of The Griffin Fund inside the atrium of JPMorgan's headquarters during a Spring 2026 tour and meeting."
                     className="fv-kenburns absolute inset-0 h-full w-full object-cover"
                     style={{
                       filter: imgFilter,
@@ -920,11 +920,11 @@ function FieldVisit() {
                     transition: `opacity 800ms ${E} 1700ms, transform 800ms ${E} 1700ms`,
                   }}
                 >
-                  <span className="fv-figcap-line">Spring 2026</span>
+                  <span className="fv-figcap-line">JPMorgan · Spring 2026</span>
                 </div>
                 <p className="mt-2 font-serif text-lg leading-snug text-white md:mt-3 md:text-2xl">
                   <WordReveal
-                    text="On the floor — a morning with practitioners, a long look at how capital actually moves."
+                    text="A tour of the floors, and a long meeting with the practitioners inside."
                     base={1900}
                     step={42}
                     duration={800}
