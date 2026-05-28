@@ -924,9 +924,9 @@ function FieldVisit() {
                 </div>
                 <p className="mt-2 font-serif text-lg leading-snug text-white md:mt-3 md:text-2xl">
                   <WordReveal
-                    text="A tour of the floors, and a long meeting with the practitioners inside."
+                    text="We spent a morning at JPMorgan — got a tour of the building, then sat down with some of their team."
                     base={1900}
-                    step={42}
+                    step={38}
                     duration={800}
                   />
                 </p>
