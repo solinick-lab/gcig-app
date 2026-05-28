@@ -536,127 +536,30 @@ function Pillar({ pillar, index }) {
   );
 }
 
-// FieldVisit — a single full-bleed editorial photograph staged as the
-// centerpiece between the abstract pillars above and the people listed
-// below. The reveal is choreographed deliberately: the typographic frame
-// arrives first, then the four enclosing rules draw in clockwise around
-// the figure, then the image opens through a vertical aperture while
-// simultaneously crossfading from desaturated/blurred to full color, with
-// a slow Ken Burns drift running underneath for the rest of the visit.
-// On scroll, the image carries a small vertical parallax and a graceful
-// desaturation at the edges of the viewport so the moment "fades" the
-// further it leaves the page. All motion is opt-out via
-// prefers-reduced-motion.
+// FieldVisit — editorial "field studies" section. A page header (eyebrow,
+// gold rule, heading, supporting line) sets the frame, then a sequence of
+// FieldPlate figures each take their own turn: the arrival timeline is
+// gated on each plate's own scroll-into-view, a slow Ken Burns drift runs
+// underneath, and scroll-coupled parallax + saturation decay tie the image
+// to viewport position so the moment "fades" the further it leaves the
+// page. All motion is opt-out via prefers-reduced-motion.
 function FieldVisit() {
-  const [sectionRef, seen] = useInView(0.18);
-  const [progressRef, sp] = useScrollProgress();
-
-  const reduced =
-    typeof window !== 'undefined' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-  // Translate the image vertically a small amount as the section travels
-  // through the viewport. Centered around 0 at sp=0.5 so the photo sits
-  // still when it owns the middle of the screen, then floats up/down at
-  // the extremes. Disabled under reduced-motion.
-  const parallaxY = reduced ? 0 : (sp - 0.5) * 36; // -18px..+18px
-
-  // Soft saturation/luminance decay as the section leaves the viewport —
-  // gives the photograph a sense of being a captured moment that recedes
-  // rather than just scrolling off-screen.
-  const decay = reduced ? 1 : Math.max(0, 1 - Math.abs(sp - 0.5) * 1.55);
-  const sat = 0.55 + decay * 0.45;
-  const bright = 0.92 + decay * 0.08;
-
-  // Cursor parallax — pointer movement nudges the image inside its
-  // frame. Disabled on touch / reduced-motion.
-  const figureRef = useRef(null);
-  const imgWrapRef = useRef(null);
-  useEffect(() => {
-    if (reduced) return;
-    const scope = figureRef.current;
-    const target = imgWrapRef.current;
-    if (!scope || !target) return;
-    if (window.matchMedia('(pointer: coarse)').matches) return;
-
-    let tx = 0, ty = 0, cx = 0, cy = 0, raf = null, inside = false;
-    const RANGE = 14;
-    const onMove = (e) => {
-      const r = scope.getBoundingClientRect();
-      const nx = (e.clientX - r.left) / r.width - 0.5;
-      const ny = (e.clientY - r.top) / r.height - 0.5;
-      tx = nx * RANGE;
-      ty = ny * (RANGE * 0.55);
-      inside = true;
-      if (!raf) raf = requestAnimationFrame(tick);
-    };
-    const onLeave = () => {
-      tx = 0; ty = 0; inside = false;
-      if (!raf) raf = requestAnimationFrame(tick);
-    };
-    const tick = () => {
-      cx += (tx - cx) * 0.07;
-      cy += (ty - cy) * 0.07;
-      target.style.setProperty('--cx', `${cx.toFixed(2)}px`);
-      target.style.setProperty('--cy', `${cy.toFixed(2)}px`);
-      if (Math.abs(tx - cx) > 0.05 || Math.abs(ty - cy) > 0.05 || inside) {
-        raf = requestAnimationFrame(tick);
-      } else {
-        raf = null;
-      }
-    };
-    scope.addEventListener('pointermove', onMove, { passive: true });
-    scope.addEventListener('pointerleave', onLeave);
-    return () => {
-      scope.removeEventListener('pointermove', onMove);
-      scope.removeEventListener('pointerleave', onLeave);
-      if (raf) cancelAnimationFrame(raf);
-    };
-  }, [reduced]);
-
-  // Combine both refs onto the section element.
-  const setRefs = (el) => {
-    sectionRef.current = el;
-    progressRef.current = el;
-  };
-
-  const E = EASE_OUT;
-  // Animation gates derived from `seen`. We jump to the final state when
-  // reduced-motion is on so the page never reads as inert.
-  const apertureClip = seen
-    ? 'inset(0% 0% 0% 0%)'
-    : 'inset(50% 0% 50% 0%)';
-  const imgFilter = seen
-    ? `grayscale(0%) blur(0) saturate(${sat}) brightness(${bright})`
-    : 'grayscale(100%) blur(14px) saturate(0.4) brightness(0.85)';
-  const figureLift = seen
-    ? 'translateY(0)'
-    : 'translateY(28px)';
-  const figureShadow = seen
-    ? '0 1px 2px rgba(27,42,74,0.05), 0 6px 14px rgba(27,42,74,0.08), 0 28px 60px -20px rgba(27,42,74,0.30), 0 60px 120px -36px rgba(27,42,74,0.30)'
-    : '0 1px 2px rgba(27,42,74,0.04), 0 4px 10px rgba(27,42,74,0.04)';
-
-  // Per-side rule transforms. Each draws in along its long axis from a
-  // specific origin so the four sides chase each other clockwise.
-  const rule = (active, origin) => ({
-    transformOrigin: origin,
-    transform: active ? 'scale(1)' : (origin.includes('left') || origin.includes('right') ? 'scaleX(0)' : 'scaleY(0)'),
-    transition: `transform 700ms cubic-bezier(0.77,0,0.175,1)`,
-  });
-
   return (
-    <section ref={setRefs} className="relative overflow-hidden border-b border-navy-50 bg-white">
-      {/* The off-white paper field behind the figure — picks up the gold
-          tint very faintly so the photo reads warmer when the eye lands. */}
+    <section className="relative overflow-hidden border-b border-navy-50 bg-white">
+      {/* The off-white paper field behind the plates — picks up the gold
+          tint very faintly so each photo reads warmer when the eye lands. */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            'radial-gradient(ellipse 80% 60% at 50% 40%, rgba(201,168,76,0.05), transparent 70%), linear-gradient(to bottom, #FBFAF6 0%, #FFFFFF 60%, #FAFAF7 100%)',
+            'radial-gradient(ellipse 80% 60% at 50% 25%, rgba(201,168,76,0.05), transparent 70%), linear-gradient(to bottom, #FBFAF6 0%, #FFFFFF 50%, #FAFAF7 100%)',
         }}
       />
 
+      {/* Shared keyframes + atom classes consumed by every plate inside
+          the section. Scoped via the .fv-seen toggle each plate applies
+          to its own wrapper so reveals stay independent. */}
       <style>{`
         @keyframes fv-kenburns {
           0%   { transform: scale(1.04) translate(0%, 0%); }
@@ -707,7 +610,7 @@ function FieldVisit() {
           border-color: #C9A84C;
           opacity: 0;
           transform: scale(0.7);
-          transition: opacity 700ms ${E} 900ms, transform 900ms ${E} 900ms;
+          transition: opacity 700ms cubic-bezier(0.16,1,0.3,1) 900ms, transform 900ms cubic-bezier(0.16,1,0.3,1) 900ms;
         }
         .fv-seen .fv-corner { opacity: 1; transform: scale(1); }
         .fv-corner.tl { top: -1px; left: -1px; border-top: 1.5px solid; border-left: 1.5px solid; }
@@ -739,9 +642,9 @@ function FieldVisit() {
         }
       `}</style>
 
-      <div className={`relative mx-auto max-w-6xl px-4 py-16 md:px-10 md:py-32 ${seen ? 'fv-seen' : ''}`}>
+      <div className="relative mx-auto max-w-6xl px-4 py-16 md:px-10 md:py-32">
         {/* Editorial header — eyebrow, gold rule, heading, supporting line. */}
-        <div className="mb-10 max-w-3xl md:mb-16">
+        <div className="mb-12 max-w-3xl md:mb-20">
           <Reveal>
             <div className="flex items-center text-[10px] font-semibold uppercase tracking-[0.28em] text-gold-700 md:text-[11px] md:tracking-[0.32em]">
               <span className="fv-eyebrow-dot" aria-hidden="true" />
@@ -759,201 +662,336 @@ function FieldVisit() {
           </h2>
           <p className="mt-4 max-w-xl font-serif text-base leading-relaxed text-navy-500 md:mt-6 md:text-lg">
             <WordReveal
-              text="The fund spends time inside the institutions whose discipline informs our own — a real portfolio means real visits, real conversations, real questions."
+              text="The fund spends time inside the institutions whose discipline informs our own — and brings the people who do this for a living back into the room. Real visits, real conversations, real questions."
               base={600}
-              step={32}
+              step={28}
               duration={750}
             />
           </p>
         </div>
 
-        {/* The figure. A 4:3 framed photograph that owns the centerline of
-            the page and is set with deliberate negative space. */}
-        <div className="relative">
-          {/* Side watermark — a vertical institutional tag that reads as
-              an editorial column rule, visible only on desktop. */}
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute -left-4 top-6 hidden text-[9px] font-semibold uppercase text-navy-200 md:block fv-rotate-watermark"
-            style={{
-              opacity: seen ? 1 : 0,
-              transform: `rotate(180deg) translateY(${seen ? 0 : -12}px)`,
-              transition: `opacity 1000ms ${E} 1200ms, transform 1000ms ${E} 1200ms`,
-            }}
-          >
-            The Griffin Fund · Field Study
-          </div>
-
-          <figure
-            ref={figureRef}
-            className="relative mx-auto"
-            style={{
-              maxWidth: '1080px',
-              transform: figureLift,
-              transition: `transform 1300ms ${E} 100ms`,
-            }}
-          >
-            {/* The four enclosing rules — each animates in along its long
-                axis. Together they "build" the picture frame clockwise
-                from the top edge. */}
-            <div className="pointer-events-none absolute inset-0 z-20">
-              <div
-                className="absolute left-0 right-0 top-0 h-px bg-navy/85"
-                style={{
-                  ...rule(seen, 'left center'),
-                  transitionDelay: '350ms',
-                }}
-              />
-              <div
-                className="absolute right-0 top-0 bottom-0 w-px bg-navy/85"
-                style={{
-                  ...rule(seen, 'center top'),
-                  transitionDelay: '620ms',
-                }}
-              />
-              <div
-                className="absolute left-0 right-0 bottom-0 h-px bg-navy/85"
-                style={{
-                  ...rule(seen, 'right center'),
-                  transitionDelay: '890ms',
-                }}
-              />
-              <div
-                className="absolute left-0 top-0 bottom-0 w-px bg-navy/85"
-                style={{
-                  ...rule(seen, 'center bottom'),
-                  transitionDelay: '1160ms',
-                }}
-              />
-
-              {/* Gold L-shaped corner accents that fade + scale in once the
-                  frame rules have finished drawing. */}
-              <span className="fv-corner tl" aria-hidden="true" />
-              <span className="fv-corner tr" aria-hidden="true" />
-              <span className="fv-corner bl" aria-hidden="true" />
-              <span className="fv-corner br" aria-hidden="true" />
-            </div>
-
-            {/* Image stage. The wrapper clips a Ken-Burns-animated inner
-                element, with a vertical aperture that opens from center
-                and a desaturate→color crossfade running in parallel. */}
-            <div
-              ref={imgWrapRef}
-              className="relative aspect-[4/3] w-full overflow-hidden bg-navy-50"
-              style={{
-                boxShadow: figureShadow,
-                transition: `box-shadow 1500ms ${E} 400ms`,
-                transform: `translate3d(var(--cx, 0px), calc(${parallaxY}px + var(--cy, 0px)), 0)`,
-                willChange: 'transform',
-              }}
-            >
-              <div
-                className="absolute inset-0"
-                style={{
-                  clipPath: apertureClip,
-                  WebkitClipPath: apertureClip,
-                  transition: `clip-path 1800ms cubic-bezier(0.77,0,0.175,1) 500ms, -webkit-clip-path 1800ms cubic-bezier(0.77,0,0.175,1) 500ms`,
-                }}
-              >
-                <picture>
-                  <source
-                    media="(max-width: 767px)"
-                    srcSet="/field-visit-mobile.jpg"
-                  />
-                  <img
-                    src="/field-visit.jpg"
-                    alt="Members of The Griffin Fund inside the atrium of JPMorgan's headquarters during a Spring 2026 tour and meeting."
-                    className="fv-kenburns absolute inset-0 h-full w-full object-cover"
-                    style={{
-                      filter: imgFilter,
-                      transition: `filter 2200ms ${E} 500ms`,
-                      willChange: 'filter, transform',
-                    }}
-                    loading="lazy"
-                    decoding="async"
-                  />
-                </picture>
-
-                {/* Atmosphere stack — vignette tightens the eye toward
-                    the center; the grain adds a film-still quality. */}
-                <div className="fv-vignette" aria-hidden="true" />
-                <div className="fv-grain" aria-hidden="true" />
-
-                {/* Lower scrim — a soft navy-to-transparent gradient that
-                    sits behind the caption block so the type lifts off
-                    the image instead of fighting it. */}
-                <div
-                  aria-hidden="true"
-                  className="pointer-events-none absolute bottom-0 left-0 right-0 h-2/5"
-                  style={{
-                    background:
-                      'linear-gradient(to top, rgba(13,22,38,0.62) 0%, rgba(13,22,38,0.20) 55%, transparent 100%)',
-                  }}
-                />
-              </div>
-
-              {/* Index label — top-right, tiny tracked caps. */}
-              <div
-                className="pointer-events-none absolute right-4 top-4 z-10 text-right md:right-6 md:top-6"
-                style={{
-                  opacity: seen ? 1 : 0,
-                  transform: `translateY(${seen ? 0 : -8}px)`,
-                  transition: `opacity 900ms ${E} 1500ms, transform 900ms ${E} 1500ms`,
-                }}
-              >
-                <div className="text-[9px] font-semibold uppercase tracking-[0.32em] text-white/80 md:text-[10px]">
-                  Field Study
-                </div>
-                <div className="mt-1 font-serif text-base font-light text-gold-300 md:text-lg">
-                  N<span className="italic">o</span> 01
-                </div>
-              </div>
-
-              {/* Caption — bottom-left, magazine-style. Date underline
-                  draws in after the words land. */}
-              <div className="pointer-events-none absolute bottom-4 left-4 right-4 z-10 md:bottom-7 md:left-7 md:right-auto md:max-w-md">
-                <div
-                  className="text-[10px] font-semibold uppercase tracking-[0.28em] text-gold-300 md:text-[11px] md:tracking-[0.32em]"
-                  style={{
-                    opacity: seen ? 1 : 0,
-                    transform: `translateY(${seen ? 0 : 10}px)`,
-                    transition: `opacity 800ms ${E} 1700ms, transform 800ms ${E} 1700ms`,
-                  }}
-                >
-                  <span className="fv-figcap-line">JPMorgan · Spring 2026</span>
-                </div>
-                <p className="mt-2 font-serif text-lg leading-snug text-white md:mt-3 md:text-2xl">
-                  <WordReveal
-                    text="We spent a morning at JPMorgan — got a tour of the building, then sat down with some of their team."
-                    base={1900}
-                    step={38}
-                    duration={800}
-                  />
-                </p>
-              </div>
-            </div>
-          </figure>
-
-          {/* Footer line beneath the figure — page number and pictured
-              tag, like a print plate. Animates in last. */}
-          <div
-            className="mx-auto mt-6 flex max-w-[1080px] items-end justify-between gap-6 md:mt-8"
-            style={{
-              opacity: seen ? 1 : 0,
-              transform: `translateY(${seen ? 0 : 10}px)`,
-              transition: `opacity 900ms ${E} 2400ms, transform 900ms ${E} 2400ms`,
-            }}
-          >
-            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-navy-400 md:text-[11px] md:tracking-[0.28em]">
-              Pictured — Members of the fund, with faculty advisor.
-            </div>
-            <div className="hidden text-[10px] font-semibold uppercase tracking-[0.32em] text-navy-200 md:block">
-              Plate I
-            </div>
-          </div>
-        </div>
+        {/* Plates run in document order. Each one carries its own scroll-
+            in-view gate, so the cinematic reveal fires the moment that
+            specific figure enters the viewport — not when the section
+            does. The first plate carries the side watermark; the second
+            is left clean. */}
+        <FieldPlate
+          src="/field-visit.jpg"
+          mobileSrc="/field-visit-mobile.jpg"
+          alt="Members of The Griffin Fund inside the atrium of JPMorgan's headquarters during a Spring 2025 tour and meeting."
+          eyebrow="JPMorgan · Spring 2025"
+          caption="We spent a morning at JPMorgan — got a tour of the building, then sat down with some of their team."
+          plateNumeral="01"
+          plateLabel="Plate I"
+          pictured="Pictured — Members of the fund, with faculty advisor."
+          showWatermark
+        />
+        <FieldPlate
+          src="/field-visit-2.jpg"
+          mobileSrc="/field-visit-2-mobile.jpg"
+          alt="Jacob Perman '16 speaking to members of The Griffin Fund in a Grace Church School classroom during a November 2025 alumni visit."
+          eyebrow="Jacob Perman '16 · November 2025"
+          caption="Jacob Perman '16 came back to walk us through what he actually does — leveraged finance at Wells Fargo."
+          plateNumeral="02"
+          plateLabel="Plate II"
+          pictured="Pictured — Jacob Perman '16, addressing the club."
+          className="mt-20 md:mt-32"
+        />
       </div>
     </section>
+  );
+}
+
+// FieldPlate — one framed photograph staged with the full reveal stack:
+// arrival lift, four enclosing rules drawing in clockwise, gold L-shaped
+// corner accents, a vertical clip-path aperture that opens from the
+// centerline, a B&W + blur → full color crossfade running in parallel,
+// a slow Ken Burns drift underneath, scroll-coupled vertical parallax,
+// saturation/brightness decay at the edges of the viewport, and a
+// critically-damped cursor parallax on desktop. Caption + index label +
+// printed-plate footer all key off the same `seen` gate.
+function FieldPlate({
+  src,
+  mobileSrc,
+  alt,
+  eyebrow,
+  caption,
+  plateNumeral,
+  plateLabel,
+  pictured,
+  showWatermark = false,
+  className = '',
+}) {
+  const [sectionRef, seen] = useInView(0.18);
+  const [progressRef, sp] = useScrollProgress();
+
+  const reduced =
+    typeof window !== 'undefined' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Vertical parallax centered on sp=0.5 so the photo sits still when it
+  // owns the middle of the screen and floats at the extremes. Disabled
+  // under reduced-motion.
+  const parallaxY = reduced ? 0 : (sp - 0.5) * 36;
+
+  // Soft saturation/luminance decay as the plate leaves the viewport —
+  // the photograph reads as a captured moment that recedes, not just
+  // scrolls off-screen.
+  const decay = reduced ? 1 : Math.max(0, 1 - Math.abs(sp - 0.5) * 1.55);
+  const sat = 0.55 + decay * 0.45;
+  const bright = 0.92 + decay * 0.08;
+
+  // Cursor parallax — pointer movement nudges the image inside its
+  // frame. Disabled on touch / reduced-motion.
+  const figureRef = useRef(null);
+  const imgWrapRef = useRef(null);
+  useEffect(() => {
+    if (reduced) return;
+    const scope = figureRef.current;
+    const target = imgWrapRef.current;
+    if (!scope || !target) return;
+    if (window.matchMedia('(pointer: coarse)').matches) return;
+
+    let tx = 0, ty = 0, cx = 0, cy = 0, raf = null, inside = false;
+    const RANGE = 14;
+    const onMove = (e) => {
+      const r = scope.getBoundingClientRect();
+      const nx = (e.clientX - r.left) / r.width - 0.5;
+      const ny = (e.clientY - r.top) / r.height - 0.5;
+      tx = nx * RANGE;
+      ty = ny * (RANGE * 0.55);
+      inside = true;
+      if (!raf) raf = requestAnimationFrame(tick);
+    };
+    const onLeave = () => {
+      tx = 0; ty = 0; inside = false;
+      if (!raf) raf = requestAnimationFrame(tick);
+    };
+    const tick = () => {
+      cx += (tx - cx) * 0.07;
+      cy += (ty - cy) * 0.07;
+      target.style.setProperty('--cx', `${cx.toFixed(2)}px`);
+      target.style.setProperty('--cy', `${cy.toFixed(2)}px`);
+      if (Math.abs(tx - cx) > 0.05 || Math.abs(ty - cy) > 0.05 || inside) {
+        raf = requestAnimationFrame(tick);
+      } else {
+        raf = null;
+      }
+    };
+    scope.addEventListener('pointermove', onMove, { passive: true });
+    scope.addEventListener('pointerleave', onLeave);
+    return () => {
+      scope.removeEventListener('pointermove', onMove);
+      scope.removeEventListener('pointerleave', onLeave);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [reduced]);
+
+  // Both refs need to land on the same wrapper so useInView gates the
+  // reveal and useScrollProgress reads the viewport position from the
+  // same element.
+  const setRefs = (el) => {
+    sectionRef.current = el;
+    progressRef.current = el;
+  };
+
+  const E = EASE_OUT;
+  // Animation gates derived from `seen`. The reduced-motion path lives
+  // inside the hooks above — by the time we render, `seen` is either
+  // true (animations finished) or driving the transition.
+  const apertureClip = seen
+    ? 'inset(0% 0% 0% 0%)'
+    : 'inset(50% 0% 50% 0%)';
+  const imgFilter = seen
+    ? `grayscale(0%) blur(0) saturate(${sat}) brightness(${bright})`
+    : 'grayscale(100%) blur(14px) saturate(0.4) brightness(0.85)';
+  const figureLift = seen ? 'translateY(0)' : 'translateY(28px)';
+  const figureShadow = seen
+    ? '0 1px 2px rgba(27,42,74,0.05), 0 6px 14px rgba(27,42,74,0.08), 0 28px 60px -20px rgba(27,42,74,0.30), 0 60px 120px -36px rgba(27,42,74,0.30)'
+    : '0 1px 2px rgba(27,42,74,0.04), 0 4px 10px rgba(27,42,74,0.04)';
+
+  // Per-side rule transforms. Each draws in along its long axis from a
+  // specific origin so the four sides chase each other clockwise.
+  const rule = (active, origin) => ({
+    transformOrigin: origin,
+    transform: active
+      ? 'scale(1)'
+      : (origin.includes('left') || origin.includes('right') ? 'scaleX(0)' : 'scaleY(0)'),
+    transition: `transform 700ms cubic-bezier(0.77,0,0.175,1)`,
+  });
+
+  return (
+    <div
+      ref={setRefs}
+      className={`relative ${seen ? 'fv-seen' : ''} ${className}`}
+    >
+      {/* Side watermark — vertical institutional tag, desktop only. Only
+          the first plate carries it; subsequent plates stay clean. */}
+      {showWatermark && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -left-4 top-6 hidden text-[9px] font-semibold uppercase text-navy-200 md:block fv-rotate-watermark"
+          style={{
+            opacity: seen ? 1 : 0,
+            transform: `rotate(180deg) translateY(${seen ? 0 : -12}px)`,
+            transition: `opacity 1000ms ${E} 1200ms, transform 1000ms ${E} 1200ms`,
+          }}
+        >
+          The Griffin Fund · Field Study
+        </div>
+      )}
+
+      <figure
+        ref={figureRef}
+        className="relative mx-auto"
+        style={{
+          maxWidth: '1080px',
+          transform: figureLift,
+          transition: `transform 1300ms ${E} 100ms`,
+        }}
+      >
+        {/* Four enclosing rules — each animates in along its long axis,
+            chasing the previous one clockwise from the top edge. */}
+        <div className="pointer-events-none absolute inset-0 z-20">
+          <div
+            className="absolute left-0 right-0 top-0 h-px bg-navy/85"
+            style={{ ...rule(seen, 'left center'), transitionDelay: '350ms' }}
+          />
+          <div
+            className="absolute right-0 top-0 bottom-0 w-px bg-navy/85"
+            style={{ ...rule(seen, 'center top'), transitionDelay: '620ms' }}
+          />
+          <div
+            className="absolute left-0 right-0 bottom-0 h-px bg-navy/85"
+            style={{ ...rule(seen, 'right center'), transitionDelay: '890ms' }}
+          />
+          <div
+            className="absolute left-0 top-0 bottom-0 w-px bg-navy/85"
+            style={{ ...rule(seen, 'center bottom'), transitionDelay: '1160ms' }}
+          />
+
+          {/* Gold L-shaped corner accents — fade + scale in once the
+              four enclosing rules have finished drawing. */}
+          <span className="fv-corner tl" aria-hidden="true" />
+          <span className="fv-corner tr" aria-hidden="true" />
+          <span className="fv-corner bl" aria-hidden="true" />
+          <span className="fv-corner br" aria-hidden="true" />
+        </div>
+
+        {/* Image stage. The wrapper clips a Ken-Burns-animated inner
+            element, with a vertical aperture that opens from center and
+            a desaturate → color crossfade in parallel. */}
+        <div
+          ref={imgWrapRef}
+          className="relative aspect-[4/3] w-full overflow-hidden bg-navy-50"
+          style={{
+            boxShadow: figureShadow,
+            transition: `box-shadow 1500ms ${E} 400ms`,
+            transform: `translate3d(var(--cx, 0px), calc(${parallaxY}px + var(--cy, 0px)), 0)`,
+            willChange: 'transform',
+          }}
+        >
+          <div
+            className="absolute inset-0"
+            style={{
+              clipPath: apertureClip,
+              WebkitClipPath: apertureClip,
+              transition: `clip-path 1800ms cubic-bezier(0.77,0,0.175,1) 500ms, -webkit-clip-path 1800ms cubic-bezier(0.77,0,0.175,1) 500ms`,
+            }}
+          >
+            <picture>
+              <source media="(max-width: 767px)" srcSet={mobileSrc} />
+              <img
+                src={src}
+                alt={alt}
+                className="fv-kenburns absolute inset-0 h-full w-full object-cover"
+                style={{
+                  filter: imgFilter,
+                  transition: `filter 2200ms ${E} 500ms`,
+                  willChange: 'filter, transform',
+                }}
+                loading="lazy"
+                decoding="async"
+              />
+            </picture>
+
+            {/* Atmosphere stack — vignette tightens the eye toward
+                center; grain adds a film-still quality. */}
+            <div className="fv-vignette" aria-hidden="true" />
+            <div className="fv-grain" aria-hidden="true" />
+
+            {/* Lower scrim — a soft navy-to-transparent gradient that
+                sits behind the caption so type lifts off the image
+                instead of fighting it. */}
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute bottom-0 left-0 right-0 h-2/5"
+              style={{
+                background:
+                  'linear-gradient(to top, rgba(13,22,38,0.62) 0%, rgba(13,22,38,0.20) 55%, transparent 100%)',
+              }}
+            />
+          </div>
+
+          {/* Index label — top-right, tiny tracked caps. */}
+          <div
+            className="pointer-events-none absolute right-4 top-4 z-10 text-right md:right-6 md:top-6"
+            style={{
+              opacity: seen ? 1 : 0,
+              transform: `translateY(${seen ? 0 : -8}px)`,
+              transition: `opacity 900ms ${E} 1500ms, transform 900ms ${E} 1500ms`,
+            }}
+          >
+            <div className="text-[9px] font-semibold uppercase tracking-[0.32em] text-white/80 md:text-[10px]">
+              Field Study
+            </div>
+            <div className="mt-1 font-serif text-base font-light text-gold-300 md:text-lg">
+              N<span className="italic">o</span> {plateNumeral}
+            </div>
+          </div>
+
+          {/* Caption — bottom-left, magazine-style. Date underline draws
+              in after the words land. */}
+          <div className="pointer-events-none absolute bottom-4 left-4 right-4 z-10 md:bottom-7 md:left-7 md:right-auto md:max-w-md">
+            <div
+              className="text-[10px] font-semibold uppercase tracking-[0.28em] text-gold-300 md:text-[11px] md:tracking-[0.32em]"
+              style={{
+                opacity: seen ? 1 : 0,
+                transform: `translateY(${seen ? 0 : 10}px)`,
+                transition: `opacity 800ms ${E} 1700ms, transform 800ms ${E} 1700ms`,
+              }}
+            >
+              <span className="fv-figcap-line">{eyebrow}</span>
+            </div>
+            <p className="mt-2 font-serif text-lg leading-snug text-white md:mt-3 md:text-2xl">
+              {seen ? (
+                <WordReveal text={caption} base={1900} step={38} duration={800} />
+              ) : (
+                <span style={{ opacity: 0 }}>{caption}</span>
+              )}
+            </p>
+          </div>
+        </div>
+      </figure>
+
+      {/* Footer line beneath the figure — pictured tag + plate number,
+          like a print plate. Animates in last. */}
+      <div
+        className="mx-auto mt-6 flex max-w-[1080px] items-end justify-between gap-6 md:mt-8"
+        style={{
+          opacity: seen ? 1 : 0,
+          transform: `translateY(${seen ? 0 : 10}px)`,
+          transition: `opacity 900ms ${E} 2400ms, transform 900ms ${E} 2400ms`,
+        }}
+      >
+        <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-navy-400 md:text-[11px] md:tracking-[0.28em]">
+          {pictured}
+        </div>
+        <div className="hidden text-[10px] font-semibold uppercase tracking-[0.32em] text-navy-200 md:block">
+          {plateLabel}
+        </div>
+      </div>
+    </div>
   );
 }
 
