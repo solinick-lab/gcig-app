@@ -99,6 +99,25 @@ If something feels weird with auth on Safari, check that order in
 
 ---
 
+## Brand assets
+
+- `client/public/griffin-logo.png` — combined mark (shield + GRIFFIN
+  FUND wordmark). Use in spacious contexts: login, accept-invite,
+  forgot-password, reset-password card headers. Sized at `h-16
+  w-auto` on a white rounded chip.
+- `client/public/grace-logo.png` — shield only. Use where height is
+  constrained: sidebar, landing-page top nav, landing footer mark,
+  the alternate-icon favicon. The wordmark would be unreadable at
+  those sizes.
+- `client/public/favicon.svg` — primary favicon. SVG so it stays
+  crisp at every tab size.
+
+If you ever swap the design of either, replace the file in place
+rather than renaming — references are scattered across auth pages,
+Sidebar, Landing, and `index.html`.
+
+---
+
 ## Notable services / files
 
 - `server/src/services/dayInReview.js` — DIR cache + LLM

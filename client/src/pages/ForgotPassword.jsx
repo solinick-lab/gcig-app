@@ -33,19 +33,16 @@ export default function ForgotPassword() {
       />
       <div className="relative w-full max-w-md">
         <div className="mb-8 flex flex-col items-center text-center">
-          <div className="rounded-xl bg-white px-6 py-4">
+          <div className="rounded-xl bg-white px-8 py-5">
             <img
-              src="/grace-logo.png"
-              alt="Grace Church School"
-              className="h-14 w-auto"
+              src="/griffin-logo.png"
+              alt="The Griffin Fund — Grace Church School"
+              className="h-16 w-auto"
               onError={(e) => { e.currentTarget.style.display = 'none'; }}
             />
           </div>
-          <div className="mt-4 font-serif text-2xl font-semibold text-white">
-            The Griffin Fund
-          </div>
-          <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.3em] text-gold">
-            Grace Church School
+          <div className="mt-3 text-[10px] font-semibold uppercase tracking-[0.3em] text-gold">
+            Grace Church School Investment Group
           </div>
         </div>
 
