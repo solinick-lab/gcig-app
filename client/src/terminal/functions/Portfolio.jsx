@@ -223,7 +223,7 @@ export default function Portfolio({ onOpen }) {
     const s = view.summary;
     const top = view.positions.slice().sort((a, b) => (b.weight || 0) - (a.weight || 0)).slice(0, 5);
     const context = [
-      `GCIG book, as of ${data.fetchedAt ? String(data.fetchedAt).slice(0, 10) : 'n/a'}:`,
+      `Griffin Fund book, as of ${data.fetchedAt ? String(data.fetchedAt).slice(0, 10) : 'n/a'}:`,
       `NAV ${fmt.money(s.nav)} · day P&L ${fmt.signed(s.dayPL)} (${fmt.pct(s.dayPct)}) vs SPY ${fmt.pct(s.benchDay)} · unrealized ${fmt.signed(s.uplDollar)} (${fmt.pct(s.uplPct)}) · cash ${fmt.money(s.cash)} (${fmt.wt(s.cashPct)}) · ${s.count} positions across ${view.concentration.numSectors} sectors`,
       `Concentration: largest ${view.concentration.largest?.ticker || '—'} ${fmt.wt(view.concentration.largest ? view.concentration.largest.mv / s.longMV : null)}, top 5 ${fmt.wt(view.concentration.top5)}, effective N ${view.concentration.effectiveN?.toFixed(1) || '—'}`,
       'Top positions by weight:',

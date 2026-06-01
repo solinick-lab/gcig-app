@@ -70,7 +70,7 @@ function gatherPassages(text, cap = 9000) {
 }
 
 const SYSTEM =
-  'You are a supply-chain analyst at GCIG, a student investment fund, reading excerpts from a company\'s 10-K annual report. ' +
+  'You are a supply-chain analyst at the Griffin Fund, a student investment fund, reading excerpts from a company\'s 10-K annual report. ' +
   'Extract the named business relationships. Reply with STRICT JSON only — no prose, no code fences.\n' +
   'Shape: {"summary": string, "concentration": string|null, ' +
   '"customers": [{"name": string, "pct": number|null, "note": string}], ' +

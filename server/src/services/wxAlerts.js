@@ -22,7 +22,7 @@ const ALERTS_URL =
 // agent can draw a 403. Overridable so the deploy can carry a contact
 // string per the NWS etiquette guidance.
 const NWS_UA =
-  process.env.NWS_UA || 'GCIG Terminal (https://thegriffinfund.org)';
+  process.env.NWS_UA || 'Griffin Fund Terminal (https://thegriffinfund.org)';
 
 const TTL_MS = 3 * 60 * 1000; // NWS refreshes often; this loosely tracks
                               // the radar layer's ~5-min cadence.

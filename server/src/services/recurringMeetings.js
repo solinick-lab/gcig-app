@@ -16,7 +16,7 @@ import prisma from '../db.js';
 
 const RECURRING_MEETINGS = [
   {
-    title: 'GCIG Weekly Meeting',
+    title: 'Griffin Fund Weekly Meeting',
     dayOfWeek: 3, // Wednesday (0 = Sun)
     startHour: 13, // 1 PM
     startMinute: 50,

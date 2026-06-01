@@ -222,7 +222,7 @@ cron.schedule(
 
 const port = process.env.PORT || 4000;
 app.listen(port, async () => {
-  console.log(`GCIG API listening on http://localhost:${port}`);
+  console.log(`Griffin Fund API listening on http://localhost:${port}`);
   try {
     await ensureRecurringMeetings();
   } catch (err) {

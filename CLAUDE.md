@@ -9,9 +9,11 @@ just one-off chatter don't belong here.
 
 ## What we're building
 
-The Griffin Fund (GCIG / Grace Church School Investment Group) — a
+The Griffin Fund (Grace Church School Investment Group) — a
 full-stack web app for a student-led investment club managing ~$131K
-AUM. Members pitch tickers, vote, manage a real portfolio, attend
+AUM. The internal short-name "gcig" only survives in a few historical
+slugs (Render service names, the repo directory, localStorage keys
+prefixed `gcig_`); the user-facing brand is "The Griffin Fund". Members pitch tickers, vote, manage a real portfolio, attend
 meetings. The site is the system of record for everything except the
 brokerage account itself (which lives at our custodian; we mirror
 positions in via a Google Sheet).

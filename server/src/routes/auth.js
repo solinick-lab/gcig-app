@@ -483,7 +483,7 @@ router.post('/google/link', verifyJwt, async (req, res) => {
   const current = await prisma.user.findUnique({ where: { id: req.user.id } });
   if (String(payload.email).toLowerCase() !== current.email.toLowerCase()) {
     return res.status(403).json({
-      error: 'Google account email must match your GCIG account email.',
+      error: 'Google account email must match your Griffin Fund account email.',
     });
   }
 

@@ -69,7 +69,7 @@ async function fetchFinnhubArticles(ticker, key) {
     url = `https://finnhub.io/api/v1/company-news?${params.toString()}`;
   }
 
-  const res = await fetch(url, { headers: { 'User-Agent': 'GCIG/1.0' } });
+  const res = await fetch(url, { headers: { 'User-Agent': 'GriffinFund/1.0' } });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     const err = new Error(`finnhub responded ${res.status}: ${body.slice(0, 200)}`);

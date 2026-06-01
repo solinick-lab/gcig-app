@@ -51,7 +51,7 @@ export default function TerminalShell({ onExit }) {
   // Build a workspace context blob to hand the AI chat panel so it can
   // reason about what the user is currently looking at.
   const workspaceContext = useMemo(() => {
-    const lines = ['GCIG Terminal workspace:'];
+    const lines = ['Griffin Fund Terminal workspace:'];
     if (windows.length === 0) lines.push('- (no windows open)');
     for (const w of windows) {
       const fn = getFunction(w.fn);
@@ -216,7 +216,7 @@ export default function TerminalShell({ onExit }) {
   return (
     <div className="terminal-root" data-theme="terminal">
       <div className="term-topbar">
-        <span className="term-topbar-brand">GCIG</span>
+        <span className="term-topbar-brand">GRIFFIN FUND</span>
         <span style={{ color: 'var(--term-fg-dim)', fontSize: 11, letterSpacing: '0.14em' }}>
           TERMINAL <span style={{ color: 'var(--term-fg-muted)' }}>v0</span>
         </span>

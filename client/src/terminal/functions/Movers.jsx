@@ -51,7 +51,7 @@ export default function Movers({ onOpen }) {
     let cancelled = false;
     setBriefLoading(true);
     const context = [
-      `GCIG portfolio, as of ${data.asOf || 'n/a'} — ${data.count} holdings, today's move:`,
+      `Griffin Fund portfolio, as of ${data.asOf || 'n/a'} — ${data.count} holdings, today's move:`,
       ...data.rows.map((m) => `${m.ticker} ${fmt.pct(m.changePct)}`),
     ].join('\n');
     api
@@ -206,7 +206,7 @@ export default function Movers({ onOpen }) {
       )}
 
       <div style={{ color: 'var(--term-fg-muted)', fontSize: 11 }}>
-        GCIG holdings · list from the positions sheet, prices live (~20s)
+        Griffin Fund holdings · list from the positions sheet, prices live (~20s)
         while this panel is open. Cash excluded · click any row to open
         its DES.
       </div>

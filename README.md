@@ -1,6 +1,6 @@
-# GCIG — Grace Church School Investment Group
+# The Griffin Fund — Grace Church School Investment Group
 
-Full-stack web application for the student-run GCIG investment club. Invite-only
+Full-stack web application for the student-run Griffin Fund. Invite-only
 auth, pitch & event calendars, pitch deck archive, live portfolio tracker (Yahoo
 Finance), research report library, and attendance tracking with CSV export.
 
@@ -193,5 +193,5 @@ This scaffold is production-capable with a few hardening steps:
 
 ## License
 
-Private / internal to GCIG.
+Private / internal to the Griffin Fund.
 # gcig-app
