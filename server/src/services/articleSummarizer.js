@@ -116,6 +116,13 @@ const VOTE_SYSTEM_PROMPT = `You are summarizing the outcome of a closed voting s
 
 Plain prose — no bullet points, no headers, no meta-commentary. If ballots are sparse (fewer than 3), return exactly: INSUFFICIENT`;
 
+const SELL_VOTE_SYSTEM_PROMPT = `You are summarizing the outcome of a closed vote on whether the club should EXIT an existing holding. The only choices were Sell (exit the position) or Hold (keep it). Write 2-3 short sentences (max 70 words total) in the voice of an analyst's sell-decision note:
+  - The final call and weighted tally (e.g. "Club voted Sell 4-2 to exit AAPL").
+  - Whether leadership (Presidents/CIO) and the general body aligned.
+  - Any recurring theme in the notes members left (valuation, thesis broke, better use of capital, risk, etc.).
+
+There is no dollar amount on a sell vote — do not mention an allocation. Plain prose — no bullet points, no headers, no meta-commentary. If ballots are sparse (fewer than 3), return exactly: INSUFFICIENT`;
+
 export async function summarizeVoteSession(session) {
   if (!session?.ballots?.length || session.ballots.length < 3) return null;
   const payload = {
@@ -139,7 +146,7 @@ export async function summarizeVoteSession(session) {
     buyStats: session.tally?.buyAmountStats,
   };
   const out = await callChat(
-    VOTE_SYSTEM_PROMPT,
+    session.kind === 'sell' ? SELL_VOTE_SYSTEM_PROMPT : VOTE_SYSTEM_PROMPT,
     `Session:\n${JSON.stringify(payload, null, 2)}`
   );
   if (!out || out.trim() === 'INSUFFICIENT') return null;
