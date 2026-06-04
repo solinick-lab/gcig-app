@@ -70,6 +70,47 @@ function normalizeEnvelopeStatus(raw) {
 // reserved — we don't expose them.)
 const MAX_ITEMS = 8;
 
+// Closed sell-vote sessions that passed (finalDecision "Sell") and aren't
+// already on a TradeRequest, annotated with the shares we currently hold so
+// the composer can default to selling the whole position. Pure so it's
+// unit-testable without a DB or the sheet.
+export function buildEligibleSells({ sessions, claimedIds, allUsers, heldByTicker }) {
+  const out = [];
+  for (const s of sessions) {
+    if (s.kind !== 'sell' || claimedIds.has(s.id)) continue;
+    const tally = computeTally(s.ballots, allUsers);
+    if (tally.finalDecision !== 'Sell') continue;
+    out.push({
+      id: s.id,
+      ticker: s.ticker,
+      title: s.title,
+      closedAt: s.closedAt,
+      createdAt: s.createdAt,
+      creator: s.creator,
+      heldShares: heldByTicker.get(String(s.ticker).toUpperCase()) ?? null,
+      ballotCount: s.ballots.length,
+    });
+  }
+  return out;
+}
+
+// Validate a sell-vote session referenced by a Sell trade line. Returns
+// { ticker, votingSessionId } or { error }.
+export function resolveSellVoteLine(session, allUsers) {
+  if (!session) return { error: 'Voting session not found' };
+  if (session.status !== 'closed') {
+    return { error: `Session ${session.id} (${session.ticker}) isn't closed yet` };
+  }
+  if (session.kind !== 'sell') {
+    return { error: `Session ${session.id} (${session.ticker}) isn't a sell vote` };
+  }
+  const tally = computeTally(session.ballots, allUsers);
+  if (tally.finalDecision !== 'Sell') {
+    return { error: `Session ${session.id} (${session.ticker}) did not result in Sell` };
+  }
+  return { ticker: session.ticker, votingSessionId: session.id };
+}
+
 // ── Routes ──────────────────────────────────────────────────────────
 
 // GET /api/trade-requests — list past + pending requests.
@@ -170,6 +211,43 @@ router.get('/eligible-buys', requireExecutive, async (_req, res, next) => {
   }
 });
 
+// GET /api/trade-requests/eligible-sells — closed sell votes that passed and
+// aren't yet on a TradeRequest, each annotated with the shares we hold so the
+// composer can pre-size "sell the whole position".
+router.get('/eligible-sells', requireExecutive, async (_req, res, next) => {
+  try {
+    const claimed = await prisma.tradeRequestItem.findMany({
+      where: { kind: 'Sell', votingSessionId: { not: null } },
+      select: { votingSessionId: true },
+    });
+    const claimedIds = new Set(claimed.map((c) => c.votingSessionId));
+
+    const sessions = await prisma.votingSession.findMany({
+      where: { status: 'closed', kind: 'sell' },
+      orderBy: { closedAt: 'desc' },
+      include: { ballots: true, creator: { select: { id: true, name: true } } },
+    });
+    const allUsers = await prisma.user.findMany({
+      select: { id: true, name: true, role: true, email: true, extraRoles: true },
+    });
+
+    // Best-effort held-share annotation; never block the picker on a flaky sheet.
+    const heldByTicker = new Map();
+    try {
+      const sheet = await getSheetPortfolio();
+      for (const h of sheet.holdings || []) {
+        if (!h.isCash) heldByTicker.set(String(h.ticker).toUpperCase(), h.shares ?? null);
+      }
+    } catch {
+      /* leave heldShares null */
+    }
+
+    res.json(buildEligibleSells({ sessions, claimedIds, allUsers, heldByTicker }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/trade-requests/:id — detail.
 router.get('/:id', requireExecutive, async (req, res, next) => {
   try {
@@ -247,6 +325,7 @@ router.post('/', requireExecutive, async (req, res, next) => {
       let ticker = (raw.ticker || '').toUpperCase().trim();
       let votingSessionId = null;
       let proposedAvg = null;
+      let proposedSellShares = null;
 
       if (kind === 'Buy' && raw.votingSessionId) {
         const id = Number(raw.votingSessionId);
@@ -276,6 +355,35 @@ router.post('/', requireExecutive, async (req, res, next) => {
         ticker = session.ticker;
         votingSessionId = session.id;
         proposedAvg = tally.buyAmountStats.avg;
+      }
+
+      // Sell lines may be driven by a passed sell vote. Validate the session
+      // and default to selling the whole position from the sheet (the exec
+      // can still override `shares`).
+      if (kind === 'Sell' && raw.votingSessionId) {
+        const id = Number(raw.votingSessionId);
+        const session = await prisma.votingSession.findUnique({
+          where: { id },
+          include: { ballots: true },
+        });
+        const allUsers = await prisma.user.findMany({
+          select: { id: true, name: true, role: true, email: true, extraRoles: true },
+        });
+        const resolvedLine = resolveSellVoteLine(session, allUsers);
+        if (resolvedLine.error) {
+          return res.status(400).json({ error: resolvedLine.error });
+        }
+        ticker = resolvedLine.ticker;
+        votingSessionId = resolvedLine.votingSessionId;
+        try {
+          const sheet = await getSheetPortfolio();
+          const holding = sheet.holdings.find(
+            (h) => String(h.ticker || '').toUpperCase() === ticker
+          );
+          if (holding?.shares > 0) proposedSellShares = Math.round(holding.shares);
+        } catch {
+          /* fall through; if no explicit shares the sizing check below 400s */
+        }
       }
 
       if (!ticker) {
@@ -313,6 +421,9 @@ router.post('/', requireExecutive, async (req, res, next) => {
       } else if (proposedAvg != null) {
         // Buy from a session: round to nearest whole share at the live quote.
         shares = Math.max(1, Math.round(proposedAvg / price));
+      } else if (proposedSellShares != null) {
+        // Sell from a passed vote: exit the whole held position by default.
+        shares = proposedSellShares;
       } else {
         return res.status(400).json({
           error: `Item for ${ticker} needs shares, coverAmount, or a votingSessionId`,
