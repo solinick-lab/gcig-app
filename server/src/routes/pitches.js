@@ -321,7 +321,9 @@ router.get('/outcomes/mine', async (req, res) => {
     );
     if (myTickers.length > 0) {
       const sessions = await prisma.votingSession.findMany({
-        where: { ticker: { in: myTickers }, status: 'closed' },
+        // Only buy votes color a pitch's outcome — a later "should we exit
+        // this holding?" sell vote on the same ticker must not flip it.
+        where: { ticker: { in: myTickers }, status: 'closed', kind: 'buy' },
         orderBy: { closedAt: 'desc' },
         select: {
           ticker: true,
