@@ -16,7 +16,7 @@ router.use(verifyJwt);
 const GENERAL_BODY_WEIGHT = 3;
 const LEADERSHIP_ROLES = new Set(['President', 'CIO']);
 
-export function computeTally(ballots, allUsers) {
+export function computeTally(ballots, allUsers, session = {}) {
   const userMap = new Map(allUsers.map((u) => [u.id, u]));
 
   const leadershipBallots = ballots.filter((b) =>
@@ -61,7 +61,7 @@ export function computeTally(ballots, allUsers) {
   const buyAmounts = ballots
     .filter((b) => b.action === 'Buy' && typeof b.investmentAmount === 'number')
     .map((b) => b.investmentAmount);
-  const buyAmountStats =
+  let buyAmountStats =
     buyAmounts.length > 0
       ? {
           count: buyAmounts.length,
@@ -70,6 +70,27 @@ export function computeTally(ballots, allUsers) {
           max: Math.max(...buyAmounts),
         }
       : null;
+
+  // Fixed-amount session: the allocation isn't an aggregate of ballots,
+  // it's the number the creator pinned. Ballots carry no amount (a Buy is
+  // just an "I support it" ratification), so we synthesize the stats from
+  // fixedAmount with the Buy headcount. Same shape as the average case so
+  // every downstream consumer — the DocuSign share math, the Trade
+  // Requests sizing, the client card — reads it without special-casing.
+  // The `fixed` flag lets the UI relabel "average across N" as "fixed".
+  if (session.amountMode === 'fixed' && typeof session.fixedAmount === 'number') {
+    const buyCount = ballots.filter((b) => b.action === 'Buy').length;
+    buyAmountStats =
+      buyCount > 0
+        ? {
+            count: buyCount,
+            avg: session.fixedAmount,
+            min: session.fixedAmount,
+            max: session.fixedAmount,
+            fixed: true,
+          }
+        : null;
+  }
 
   return {
     memberCounts,
@@ -160,7 +181,7 @@ router.get('/:id', async (req, res) => {
     select: { id: true, name: true, role: true },
   });
 
-  const tally = computeTally(session.ballots, allUsers);
+  const tally = computeTally(session.ballots, allUsers, session);
   const myBallot = session.ballots.find((b) => b.userId === req.user.id) || null;
 
   // Lazily generate the closed-session recap the first time anyone views a
@@ -194,6 +215,24 @@ router.post('/', requireExecutive, async (req, res) => {
   if (deadlineDate <= new Date()) {
     return res.status(400).json({ error: 'deadline must be in the future' });
   }
+
+  // Buy sessions choose how the trade is sized. "fixed" pins a dollar
+  // figure the creator names (members only ratify it); anything else is
+  // the default "average" of the Buy ballots. Sell sessions never carry
+  // an amount, so the mode is forced to average and the figure dropped.
+  let amountMode = 'average';
+  let fixedAmount = null;
+  if (kind === 'buy' && String(req.body?.amountMode).toLowerCase() === 'fixed') {
+    const n = Number(req.body?.fixedAmount);
+    if (!Number.isFinite(n) || n < BUY_MIN || n > BUY_MAX) {
+      return res
+        .status(400)
+        .json({ error: `Fixed amount must be between $${BUY_MIN} and $${BUY_MAX}` });
+    }
+    amountMode = 'fixed';
+    fixedAmount = Math.round(n);
+  }
+
   const session = await prisma.votingSession.create({
     data: {
       ticker: ticker.toUpperCase(),
@@ -201,6 +240,8 @@ router.post('/', requireExecutive, async (req, res) => {
       // A sell vote is about a holding, not a pitch — never attach one.
       pitchId: kind === 'buy' && pitchId ? Number(pitchId) : null,
       kind,
+      amountMode,
+      fixedAmount,
       deadline: deadlineDate,
       createdBy: req.user.id,
     },
@@ -223,22 +264,39 @@ export function resolveSessionKind(raw) {
   return k === 'buy' || k === 'sell' ? k : null;
 }
 
-// Validate + normalize a ballot for a session of the given kind. Returns
-// { action, investmentAmount } on success or { error } on rejection.
-// Buy sessions: Buy/Hold/Sell, Buy carries a $1,500–$10,000 amount.
-// Sell sessions: Sell or Hold only, never an amount (we exit the whole
-// position; leadership sizes the order downstream).
-export function prepareBallot(kind, { action, investmentAmount } = {}) {
-  const allowed = kind === 'sell' ? ['Sell', 'Hold'] : ['Buy', 'Hold', 'Sell'];
-  if (!action || !allowed.includes(action)) {
-    return {
-      error:
-        kind === 'sell'
-          ? 'action must be Sell or Hold'
-          : 'action must be Buy, Hold, or Sell',
-    };
+// Validate + normalize a ballot for a session. Accepts the session (or a
+// bare kind string, for the unit tests). Returns { action,
+// investmentAmount } on success or { error } on rejection.
+//   Buy / average : Buy/Hold/Sell, Buy carries a $1,500–$10,000 amount.
+//   Buy / fixed   : Buy or No only — the dollar figure is pinned on the
+//                   session, so a ballot never carries one. "No" maps to
+//                   Hold so the shared tally machinery is untouched.
+//   Sell          : Sell or Hold only, never an amount (we exit the whole
+//                   position; leadership sizes the order downstream).
+export function prepareBallot(session, { action, investmentAmount } = {}) {
+  const kind = typeof session === 'string' ? session : session?.kind ?? 'buy';
+  const amountMode = typeof session === 'object' ? session?.amountMode : 'average';
+
+  if (kind === 'sell') {
+    if (action !== 'Sell' && action !== 'Hold') {
+      return { error: 'action must be Sell or Hold' };
+    }
+    return { action, investmentAmount: null };
   }
-  if (kind === 'buy' && action === 'Buy') {
+
+  // Fixed-amount buy: a yes/no ratification of the pinned figure. The
+  // client surfaces "No" but persists it as Hold so weighting is shared.
+  if (amountMode === 'fixed') {
+    if (action !== 'Buy' && action !== 'Hold') {
+      return { error: 'action must be Buy or No' };
+    }
+    return { action, investmentAmount: null };
+  }
+
+  if (!['Buy', 'Hold', 'Sell'].includes(action)) {
+    return { error: 'action must be Buy, Hold, or Sell' };
+  }
+  if (action === 'Buy') {
     const n = Number(investmentAmount);
     if (!Number.isFinite(n)) {
       return { error: 'Buy ballots require an investment amount' };
@@ -263,7 +321,7 @@ router.post('/:id/ballot', async (req, res) => {
   // The allowed actions depend on the session kind: a sell vote is Sell or
   // Hold and never carries a dollar amount; a buy vote keeps Buy/Hold/Sell
   // with the proposed-allocation band on Buy.
-  const prepared = prepareBallot(session.kind, req.body || {});
+  const prepared = prepareBallot(session, req.body || {});
   if (prepared.error) return res.status(400).json({ error: prepared.error });
   const { action, investmentAmount: amount } = prepared;
   const note = req.body?.note;
