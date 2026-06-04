@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildEligibleSells, resolveSellVoteLine } from './tradeRequests.js';
+import { buildEligibleSells, resolveSellVoteLine, validateResolvedTrade } from './tradeRequests.js';
 
 const users = [
   { id: 1, role: 'JuniorAnalyst' }, { id: 2, role: 'JuniorAnalyst' },
@@ -53,4 +53,37 @@ test('resolveSellVoteLine validates the linked session', () => {
   assert.match(resolveSellVoteLine({ ...sellSession(10, 'AAPL', 'Sell'), status: 'open' }, users).error, /closed/i);
   assert.match(resolveSellVoteLine({ ...sellSession(10, 'AAPL', 'Sell'), kind: 'buy' }, users).error, /sell vote/i);
   assert.match(resolveSellVoteLine(sellSession(11, 'MSFT', 'Hold'), users).error, /did not result in Sell/i);
+});
+
+test('validateResolvedTrade rejects the same voting session claimed twice', () => {
+  const resolved = [
+    { kind: 'Sell', ticker: 'AAPL', shares: 60, votingSessionId: 10 },
+    { kind: 'Sell', ticker: 'AAPL', shares: 60, votingSessionId: 10 },
+  ];
+  const out = validateResolvedTrade(resolved, new Map([['AAPL', 120]]));
+  assert.match(out.error, /twice/i);
+});
+
+test('validateResolvedTrade rejects selling more of a ticker than we hold (cumulative)', () => {
+  // Two different sell votes on AAPL, each sized to the whole 120-share position.
+  const resolved = [
+    { kind: 'Sell', ticker: 'AAPL', shares: 120, votingSessionId: 10 },
+    { kind: 'Sell', ticker: 'AAPL', shares: 120, votingSessionId: 11 },
+  ];
+  const out = validateResolvedTrade(resolved, new Map([['AAPL', 120]]));
+  assert.match(out.error, /only 120 .*held|240/i);
+});
+
+test('validateResolvedTrade allows sells within the held position', () => {
+  const resolved = [
+    { kind: 'Sell', ticker: 'AAPL', shares: 50, votingSessionId: 10 },
+    { kind: 'Sell', ticker: 'AAPL', shares: 40, coverDefault: 0 }, // manual line, no session
+    { kind: 'Buy', ticker: 'MSFT', shares: 10, votingSessionId: 20 },
+  ];
+  assert.equal(validateResolvedTrade(resolved, new Map([['AAPL', 120]])), null);
+});
+
+test('validateResolvedTrade skips the over-sell check when held shares are unknown', () => {
+  const resolved = [{ kind: 'Sell', ticker: 'SPY', shares: 999 }];
+  assert.equal(validateResolvedTrade(resolved, new Map()), null);
 });

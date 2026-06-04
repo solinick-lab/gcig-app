@@ -111,6 +111,36 @@ export function resolveSellVoteLine(session, allUsers) {
   return { ticker: session.ticker, votingSessionId: session.id };
 }
 
+// Final safety net on a resolved envelope: no voting session may be claimed
+// twice, and the shares we'd sell of any ticker (summed across every Sell
+// line — manual cover lines and vote-driven lines alike) must not exceed
+// what the sheet says we hold. `heldByTicker` maps TICKER → shares held
+// (null/absent entries skip the over-sell check for that ticker). Returns
+// { error } or null. Pure so it unit-tests without a DB or the sheet.
+export function validateResolvedTrade(resolved, heldByTicker) {
+  const claimed = new Set();
+  for (const it of resolved) {
+    if (it.votingSessionId == null) continue;
+    if (claimed.has(it.votingSessionId)) {
+      return { error: `Voting session ${it.votingSessionId} is on this envelope twice` };
+    }
+    claimed.add(it.votingSessionId);
+  }
+  const sellByTicker = new Map();
+  for (const it of resolved) {
+    if (it.kind !== 'Sell') continue;
+    const t = String(it.ticker).toUpperCase();
+    sellByTicker.set(t, (sellByTicker.get(t) || 0) + it.shares);
+  }
+  for (const [t, total] of sellByTicker) {
+    const held = heldByTicker.get(t);
+    if (held != null && total > held) {
+      return { error: `Can't sell ${total} ${t} — only ${held} held` };
+    }
+  }
+  return null;
+}
+
 // ── Routes ──────────────────────────────────────────────────────────
 
 // GET /api/trade-requests — list past + pending requests.
@@ -307,6 +337,22 @@ router.post('/', requireExecutive, async (req, res, next) => {
       });
     }
 
+    // If we're selling anything, read the held position once up front. It
+    // both sizes vote-driven sell lines (sell the whole position) and backs
+    // the final over-sell guard. Best-effort: an unreachable sheet leaves the
+    // map empty, and a vote sell with no size then 400s below.
+    const heldByTicker = new Map();
+    if (rawItems.some((i) => i?.kind === 'Sell')) {
+      try {
+        const sheet = await getSheetPortfolio();
+        for (const h of sheet.holdings || []) {
+          if (!h.isCash) heldByTicker.set(String(h.ticker).toUpperCase(), h.shares ?? null);
+        }
+      } catch {
+        /* leave the map empty */
+      }
+    }
+
     // Resolve each line into a canonical { kind, ticker, shares, price,
     // totalCost, votingSessionId? } record. Quotes are pulled here, not
     // accepted from the client — the client is just for picking sessions
@@ -375,15 +421,9 @@ router.post('/', requireExecutive, async (req, res, next) => {
         }
         ticker = resolvedLine.ticker;
         votingSessionId = resolvedLine.votingSessionId;
-        try {
-          const sheet = await getSheetPortfolio();
-          const holding = sheet.holdings.find(
-            (h) => String(h.ticker || '').toUpperCase() === ticker
-          );
-          if (holding?.shares > 0) proposedSellShares = Math.round(holding.shares);
-        } catch {
-          /* fall through; if no explicit shares the sizing check below 400s */
-        }
+        // Default to selling the whole held position (exec can override `shares`).
+        const held = heldByTicker.get(ticker);
+        if (held > 0) proposedSellShares = Math.round(held);
       }
 
       if (!ticker) {
@@ -440,6 +480,12 @@ router.post('/', requireExecutive, async (req, res, next) => {
         votingSessionId,
       });
     }
+
+    // No session claimed twice; no ticker sold beyond what we hold (summed
+    // across every Sell line). The authoritative check — the client guard is
+    // only advisory.
+    const tradeCheck = validateResolvedTrade(resolved, heldByTicker);
+    if (tradeCheck) return res.status(400).json({ error: tradeCheck.error });
 
     // Build the email body. Bundles the line summary so signers can sanity-
     // check at a glance without opening the PDF.

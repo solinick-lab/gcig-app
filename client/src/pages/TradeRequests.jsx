@@ -512,11 +512,31 @@ function Composer({ open, onClose, onCreated }) {
     sellPosition.ticker === (sellTicker || '').toUpperCase()
       ? sellPosition.shares
       : null;
-  const oversell =
-    sellEnabled &&
-    lines.sellLine?.shares != null &&
-    heldShares != null &&
-    lines.sellLine.shares > heldShares;
+  // Over-sell guard across ALL sell lines for a ticker — the manual cover
+  // line plus every vote-driven line — against the shares we know we hold.
+  // The server enforces this authoritatively; this just disables Send and
+  // surfaces the warning early.
+  const sellSharesByTicker = {};
+  for (const v of lines.voteSells) {
+    if (v.shares != null) {
+      sellSharesByTicker[v.ticker] = (sellSharesByTicker[v.ticker] || 0) + v.shares;
+    }
+  }
+  if (sellEnabled && lines.sellLine?.shares != null) {
+    const t = lines.sellLine.ticker;
+    sellSharesByTicker[t] = (sellSharesByTicker[t] || 0) + lines.sellLine.shares;
+  }
+  const heldByTickerClient = {};
+  for (const v of lines.voteSells) {
+    if (v.heldShares != null) heldByTickerClient[v.ticker] = v.heldShares;
+  }
+  if (heldShares != null) {
+    heldByTickerClient[(sellTicker || '').toUpperCase()] = heldShares;
+  }
+  const oversoldTickers = Object.entries(sellSharesByTicker)
+    .filter(([t, total]) => heldByTickerClient[t] != null && total > heldByTickerClient[t])
+    .map(([t]) => t);
+  const oversell = oversoldTickers.length > 0;
 
   // A vote-driven sell line can't be sent if the sheet doesn't tell us how
   // many shares we hold (heldShares null), so require a positive size.
@@ -1016,6 +1036,14 @@ function Composer({ open, onClose, onCreated }) {
                 </span>
               </span>
             </div>
+          </div>
+        )}
+
+        {oversell && (
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+            ⚠ This envelope would sell more {oversoldTickers.join(', ')} than we
+            own (combined across sell lines). Deselect a sell vote or lower the
+            cover amount.
           </div>
         )}
 
