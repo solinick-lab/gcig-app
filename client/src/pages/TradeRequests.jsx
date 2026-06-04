@@ -287,6 +287,10 @@ const COVER_BUFFER = 1000;
 function Composer({ open, onClose, onCreated }) {
   const [eligible, setEligible] = useState([]);
   const [selectedIds, setSelectedIds] = useState(new Set());
+  // Passed sell votes (closed kind:sell, finalDecision Sell) the exec can
+  // bundle as Sell lines, each sized to the whole held position.
+  const [eligibleSells, setEligibleSells] = useState([]);
+  const [selectedSellIds, setSelectedSellIds] = useState(new Set());
   // Per-session live quote, keyed by ticker so two sessions of the same
   // ticker share a fetch.
   const [quotes, setQuotes] = useState({});
@@ -311,6 +315,7 @@ function Composer({ open, onClose, onCreated }) {
     if (!open) return;
     setError('');
     setSelectedIds(new Set());
+    setSelectedSellIds(new Set());
     setShareOverrides({});
     setSellEnabled(false);
     setSellTicker(DEFAULT_SELL_TICKER);
@@ -324,6 +329,10 @@ function Composer({ open, onClose, onCreated }) {
       .catch((err) =>
         setError(err.response?.data?.error || 'Failed to load eligible sessions')
       );
+    api
+      .get('/trade-requests/eligible-sells')
+      .then((res) => setEligibleSells(res.data))
+      .catch(() => setEligibleSells([]));
   }, [open]);
 
   // Fetch quotes for every selected session's ticker + the sell ticker.
@@ -334,6 +343,10 @@ function Composer({ open, onClose, onCreated }) {
       if (s) tickers.add(s.ticker);
     }
     if (sellEnabled && sellTicker) tickers.add(sellTicker.toUpperCase());
+    for (const id of selectedSellIds) {
+      const s = eligibleSells.find((e) => e.id === id);
+      if (s) tickers.add(String(s.ticker).toUpperCase());
+    }
 
     tickers.forEach((t) => {
       if (quotes[t]?.status === 'ok' || quotes[t]?.status === 'loading') return;
@@ -355,7 +368,7 @@ function Composer({ open, onClose, onCreated }) {
     // not on the quotes map — otherwise the effect would re-run after every
     // successful fetch and re-fire for every still-loading entry.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedIds, eligible, sellEnabled, sellTicker]);
+  }, [selectedIds, eligible, sellEnabled, sellTicker, selectedSellIds, eligibleSells]);
 
   // Read the current Sell-ticker position from the portfolio sheet so the
   // exec can see what's held + we can warn before the envelope goes out
@@ -451,7 +464,27 @@ function Composer({ open, onClose, onCreated }) {
       };
     }
 
-    return { buys, sellLine };
+    // Vote-driven Sell lines: one per selected passed sell vote, sized to
+    // the whole position the sheet says we hold.
+    const voteSells = [];
+    for (const id of selectedSellIds) {
+      const s = eligibleSells.find((e) => e.id === id);
+      if (!s) continue;
+      const t = String(s.ticker).toUpperCase();
+      const quote = quotes[t];
+      const shares = s.heldShares != null ? Math.round(s.heldShares) : null;
+      voteSells.push({
+        kind: 'Sell',
+        votingSessionId: s.id,
+        ticker: t,
+        quote,
+        shares,
+        heldShares: s.heldShares ?? null,
+        totalCost: quote?.status === 'ok' && shares ? shares * quote.price : null,
+      });
+    }
+
+    return { buys, sellLine, voteSells };
   }, [
     selectedIds,
     eligible,
@@ -462,10 +495,13 @@ function Composer({ open, onClose, onCreated }) {
     sellMode,
     sellShares,
     sellCoverAmount,
+    selectedSellIds,
+    eligibleSells,
   ]);
 
   const buyTotal = lines.buys.reduce((s, b) => s + (b.totalCost || 0), 0);
-  const sellTotal = lines.sellLine?.totalCost || 0;
+  const voteSellTotal = lines.voteSells.reduce((s, v) => s + (v.totalCost || 0), 0);
+  const sellTotal = (lines.sellLine?.totalCost || 0) + voteSellTotal;
   const netCash = sellTotal - buyTotal;
 
   // Over-sell guard. If we'd be selling more shares than the sheet says we
@@ -482,11 +518,18 @@ function Composer({ open, onClose, onCreated }) {
     heldShares != null &&
     lines.sellLine.shares > heldShares;
 
+  // A vote-driven sell line can't be sent if the sheet doesn't tell us how
+  // many shares we hold (heldShares null), so require a positive size.
+  const voteSellsReady = lines.voteSells.every(
+    (v) => v.shares != null && v.shares > 0 && v.totalCost != null
+  );
+
   const allLinesReady =
-    lines.buys.length > 0 &&
+    (lines.buys.length > 0 || lines.voteSells.length > 0 || sellEnabled) &&
     lines.buys.every((b) => b.shares != null && b.totalCost != null) &&
     (!sellEnabled ||
       (lines.sellLine?.shares != null && lines.sellLine?.totalCost != null)) &&
+    voteSellsReady &&
     !oversell;
 
   function toggleSession(id) {
@@ -522,6 +565,10 @@ function Composer({ open, onClose, onCreated }) {
             Number(sellCoverAmount) || buyTotal + COVER_BUFFER;
         }
         items.push(sellItem);
+      }
+      for (const v of lines.voteSells) {
+        // Server re-validates the session and sizes to the held position.
+        items.push({ kind: 'Sell', votingSessionId: v.votingSessionId });
       }
       await api.post('/trade-requests', { items, note: note || null });
       onCreated();
@@ -633,6 +680,56 @@ function Composer({ open, onClose, onCreated }) {
             </ul>
           )}
         </div>
+
+        {/* ── Passed sell votes ── */}
+        {eligibleSells.length > 0 && (
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-navy-400">
+              Passed sell votes
+            </div>
+            <div className="mt-2 space-y-2">
+              {eligibleSells.map((s) => {
+                const checked = selectedSellIds.has(s.id);
+                return (
+                  <label
+                    key={s.id}
+                    className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm ${
+                      checked ? 'border-red-300 bg-red-50/50' : 'border-navy-100 bg-white'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          setSelectedSellIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(s.id)) next.delete(s.id);
+                            else next.add(s.id);
+                            return next;
+                          })
+                        }
+                        className="h-4 w-4 rounded border-navy-200 text-red-600 focus:ring-red-500"
+                      />
+                      <TrendingDown className="h-4 w-4 text-red-700" />
+                      <span className="font-bold text-navy">{s.ticker}</span>
+                      <span className="text-xs text-navy-400">
+                        {s.heldShares != null
+                          ? `sell all ${s.heldShares} sh`
+                          : 'no position on sheet'}
+                      </span>
+                    </span>
+                    {s.heldShares == null && (
+                      <span className="text-[10px] font-semibold text-red-700">
+                        unavailable
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* ── Sell-to-cover ── */}
         <div className="rounded-lg border border-navy-100 bg-white p-3">
@@ -817,7 +914,7 @@ function Composer({ open, onClose, onCreated }) {
         </div>
 
         {/* ── Preview ── */}
-        {(lines.buys.length > 0 || lines.sellLine) && (
+        {(lines.buys.length > 0 || lines.sellLine || lines.voteSells.length > 0) && (
           <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-3">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-emerald-800">
               Preview
@@ -867,6 +964,30 @@ function Composer({ open, onClose, onCreated }) {
                   </span>
                 </li>
               )}
+              {lines.voteSells.map((v) => (
+                <li
+                  key={`vs-${v.votingSessionId}`}
+                  className="flex items-center justify-between gap-3 py-1.5 text-sm"
+                >
+                  <div className="flex items-center gap-2">
+                    <TrendingDown className="h-4 w-4 text-red-700" />
+                    <span className="font-semibold text-navy">
+                      Sell {v.shares ?? '—'} {v.ticker}
+                    </span>
+                    {v.quote?.status === 'ok' && (
+                      <span className="text-xs text-navy-400">
+                        @ ${v.quote.price.toFixed(2)}
+                      </span>
+                    )}
+                    <span className="rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+                      voted
+                    </span>
+                  </div>
+                  <span className="font-semibold tabular-nums text-navy">
+                    {v.totalCost != null ? `$${v.totalCost.toFixed(2)}` : '—'}
+                  </span>
+                </li>
+              ))}
             </ul>
             <div className="mt-2 flex flex-wrap gap-4 border-t border-emerald-200 pt-2 text-xs">
               <span className="text-navy-400">
