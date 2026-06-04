@@ -101,7 +101,7 @@ router.post(
       const allUsers = await prisma.user.findMany({
         select: { id: true, name: true, role: true, email: true, extraRoles: true },
       });
-      const tally = computeTally(session.ballots, allUsers);
+      const tally = computeTally(session.ballots, allUsers, session);
       if (tally.finalDecision !== 'Buy') {
         return res.status(400).json({
           error: `Cannot send a trade confirmation — final decision was ${tally.finalDecision}, not Buy.`,
@@ -156,9 +156,13 @@ router.post(
           `Club voted Buy ${session.ticker}.`,
           `Sized at ${shares} share${shares === 1 ? '' : 's'} ` +
             `× $${price.toFixed(2)} = $${totalCost.toFixed(2)}.`,
-          `Average proposed allocation across ${tally.buyAmountStats.count} ` +
-            `Buy ballot${tally.buyAmountStats.count === 1 ? '' : 's'} was ` +
-            `$${Math.round(proposed).toLocaleString()}.`,
+          tally.buyAmountStats.fixed
+            ? `Fixed allocation of $${Math.round(proposed).toLocaleString()}, ` +
+                `ratified by ${tally.buyAmountStats.count} ` +
+                `Buy vote${tally.buyAmountStats.count === 1 ? '' : 's'}.`
+            : `Average proposed allocation across ${tally.buyAmountStats.count} ` +
+                `Buy ballot${tally.buyAmountStats.count === 1 ? '' : 's'} was ` +
+                `$${Math.round(proposed).toLocaleString()}.`,
         ].join('\n'),
       });
 

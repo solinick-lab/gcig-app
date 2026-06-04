@@ -74,7 +74,9 @@ export default function VoteNotification() {
             <strong>{session.creator?.name}</strong>.{' '}
             {session.kind === 'sell'
               ? 'Cast your Sell or Hold rating before the deadline.'
-              : 'Cast your Buy, Hold, or Sell vote before the deadline.'}
+              : session.amountMode === 'fixed'
+                ? 'Vote Buy to approve the proposed amount, or No, before the deadline.'
+                : 'Cast your Buy, Hold, or Sell vote before the deadline.'}
           </p>
           <div className="mt-3 text-xs text-navy-400">
             Closes {formatDistanceToNow(new Date(session.deadline), { addSuffix: true })}

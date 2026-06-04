@@ -35,6 +35,16 @@ const SELL_ACTION_DESC = {
 };
 const SELL_ACTIONS = ['Sell', 'Hold'];
 
+// Fixed-amount buy votes are a yes/no ratification of the pinned dollar
+// figure. "No" is persisted as Hold so the shared tally machinery — and
+// the Buy/Hold/Sell badges — keep working untouched.
+const FIXED_ACTIONS = ['Buy', 'Hold'];
+const FIXED_ACTION_LABEL = { Buy: 'Buy', Hold: 'No' };
+const FIXED_ACTION_DESC = {
+  Buy: 'Support the amount',
+  Hold: "Don't buy",
+};
+
 function ActionBadge({ action, large }) {
   const meta = ACTION_META[action] || ACTION_META.Hold;
   const Icon = meta.icon;
@@ -51,7 +61,18 @@ function ActionBadge({ action, large }) {
 }
 
 function emptyForm() {
-  return { kind: 'buy', ticker: '', title: '', pitchId: '', deadline: '' };
+  return {
+    kind: 'buy',
+    ticker: '',
+    title: '',
+    pitchId: '',
+    deadline: '',
+    // Buy sessions only. "average" = each Buy voter proposes a figure and
+    // we trade the mean; "fixed" = the creator pins fixedAmount and members
+    // ratify it.
+    amountMode: 'average',
+    fixedAmount: '',
+  };
 }
 
 export default function Votes() {
@@ -104,12 +125,15 @@ export default function Votes() {
     e.preventDefault();
     setSubmitting(true);
     try {
+      const fixed = form.kind === 'buy' && form.amountMode === 'fixed';
       await api.post('/votes', {
         kind: form.kind,
         ticker: form.ticker,
         title: form.title || null,
         pitchId: form.kind === 'buy' && form.pitchId ? Number(form.pitchId) : null,
         deadline: etInputValueToUtcIso(form.deadline),
+        amountMode: fixed ? 'fixed' : 'average',
+        fixedAmount: fixed ? Number(form.fixedAmount) : null,
       });
       setModalOpen(false);
       setForm(emptyForm());
@@ -294,6 +318,61 @@ export default function Votes() {
               </select>
             </div>
           )}
+          {/* Allocation sizing (buy only). Average lets each Buy voter name
+              a figure; Fixed pins one number that members simply ratify. */}
+          {form.kind === 'buy' && (
+            <div>
+              <label className="block text-sm font-medium text-navy">Allocation</label>
+              <div className="mt-1 grid grid-cols-2 gap-2">
+                {[
+                  { m: 'average', label: 'Average of votes', hint: 'Each voter proposes an amount' },
+                  { m: 'fixed', label: 'Fixed amount', hint: 'You set it, members approve' },
+                ].map((opt) => (
+                  <button
+                    key={opt.m}
+                    type="button"
+                    onClick={() => setForm({ ...form, amountMode: opt.m })}
+                    className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
+                      form.amountMode === opt.m
+                        ? 'border-gold bg-gold-100/40 ring-1 ring-gold'
+                        : 'border-navy-100 bg-white hover:bg-navy-50'
+                    }`}
+                  >
+                    <div className="font-semibold text-navy">{opt.label}</div>
+                    <div className="text-xs text-navy-400">{opt.hint}</div>
+                  </button>
+                ))}
+              </div>
+              {form.amountMode === 'fixed' && (
+                <div className="mt-2">
+                  <label className="block text-sm font-medium text-navy">
+                    Fixed amount <span className="text-red-600">*</span>
+                  </label>
+                  <div className="mt-1 flex items-center">
+                    <span className="rounded-l-lg border border-r-0 border-navy-100 bg-navy-50 px-3 py-2 text-sm font-semibold text-navy-400">
+                      $
+                    </span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={BUY_MIN}
+                      max={BUY_MAX}
+                      step={100}
+                      required
+                      value={form.fixedAmount}
+                      onChange={(e) => setForm({ ...form, fixedAmount: e.target.value })}
+                      placeholder={`${BUY_MIN.toLocaleString()} – ${BUY_MAX.toLocaleString()}`}
+                      className="w-full rounded-r-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
+                    />
+                  </div>
+                  <p className="mt-1 text-xs text-navy-400">
+                    Members vote Buy to approve this amount, or No. Whole
+                    dollars, ${BUY_MIN.toLocaleString()}–${BUY_MAX.toLocaleString()}.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-navy">Voting Deadline</label>
             <input
@@ -380,6 +459,10 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
   const [docusignError, setDocusignError] = useState('');
   const isOpen = session.status === 'open' && !isPast(new Date(session.deadline));
   const tally = session.tally;
+  // A fixed-amount buy session: members ratify the pinned figure rather
+  // than proposing their own, so the ballot drops the amount box and the
+  // choices collapse to Buy / No.
+  const isFixed = session.kind === 'buy' && session.amountMode === 'fixed';
 
   async function sendDocusign() {
     setDocusignError('');
@@ -412,8 +495,9 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
     e.preventDefault();
     setBallotError('');
     // Client-side guard mirrors the server. The server is still the source
-    // of truth and will reject anything out of range.
-    if (ballotAction === 'Buy') {
+    // of truth and will reject anything out of range. Fixed sessions carry
+    // no per-voter amount, so there's nothing to validate there.
+    if (ballotAction === 'Buy' && !isFixed) {
       const n = Number(ballotAmount);
       if (!Number.isFinite(n) || n < BUY_MIN || n > BUY_MAX) {
         setBallotError(`Enter a Buy amount between $${BUY_MIN.toLocaleString()} and $${BUY_MAX.toLocaleString()}`);
@@ -425,7 +509,7 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
       await api.post(`/votes/${session.id}/ballot`, {
         action: ballotAction,
         note: ballotNote || null,
-        investmentAmount: ballotAction === 'Buy' ? Number(ballotAmount) : null,
+        investmentAmount: ballotAction === 'Buy' && !isFixed ? Number(ballotAmount) : null,
       });
       onRefresh();
     } catch (err) {
@@ -513,8 +597,28 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
         {isOpen && (
           <Card title={session.myBallot ? 'Change Your Vote' : 'Cast Your Vote'}>
             <form onSubmit={castBallot} className="space-y-4">
-              <div className={`grid gap-2 ${session.kind === 'sell' ? 'grid-cols-2' : 'grid-cols-3'}`}>
-                {(session.kind === 'sell' ? SELL_ACTIONS : Object.keys(ACTION_META)).map((a) => {
+              {/* Fixed sessions show the pinned figure up front — the vote is
+                  a yes/no on this exact dollar amount. */}
+              {isFixed && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 px-3 py-2 text-sm text-navy">
+                  Proposed allocation:{' '}
+                  <span className="font-bold text-emerald-800">
+                    ${Number(session.fixedAmount).toLocaleString()}
+                  </span>
+                  . Vote Buy to approve, or No.
+                </div>
+              )}
+              <div
+                className={`grid gap-2 ${
+                  session.kind === 'sell' || isFixed ? 'grid-cols-2' : 'grid-cols-3'
+                }`}
+              >
+                {(session.kind === 'sell'
+                  ? SELL_ACTIONS
+                  : isFixed
+                    ? FIXED_ACTIONS
+                    : Object.keys(ACTION_META)
+                ).map((a) => {
                   const meta = ACTION_META[a];
                   const Icon = meta.icon;
                   const selected = ballotAction === a;
@@ -533,10 +637,15 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
                       }`}
                     >
                       <Icon className="h-5 w-5" />
-                      {a}
+                      {isFixed ? FIXED_ACTION_LABEL[a] : a}
                       {session.kind === 'sell' && (
                         <span className="text-[10px] font-normal text-navy-400">
                           {SELL_ACTION_DESC[a]}
+                        </span>
+                      )}
+                      {isFixed && (
+                        <span className="text-[10px] font-normal text-navy-400">
+                          {FIXED_ACTION_DESC[a]}
                         </span>
                       )}
                     </button>
@@ -544,9 +653,10 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
                 })}
               </div>
 
-              {/* Amount input only appears when Buy is selected. Required field,
-                  constrained to the server's accepted band. */}
-              {ballotAction === 'Buy' && (
+              {/* Amount input only appears when Buy is selected in an
+                  average-mode session. Required field, constrained to the
+                  server's accepted band. */}
+              {ballotAction === 'Buy' && !isFixed && (
                 <div>
                   <label className="block text-sm font-medium text-navy">
                     Proposed allocation <span className="text-red-600">*</span>
@@ -1022,13 +1132,16 @@ function TallyDisplay({ tally, isOpen, ticker }) {
               ${Math.round(buyAmountStats.avg).toLocaleString()}
             </div>
             <div className="text-xs text-navy-400">
-              average across {buyAmountStats.count} Buy ballot
+              {buyAmountStats.fixed ? 'fixed — ratified by ' : 'average across '}
+              {buyAmountStats.count} Buy {buyAmountStats.fixed ? 'vote' : 'ballot'}
               {buyAmountStats.count === 1 ? '' : 's'}
             </div>
           </div>
-          <div className="mt-1 text-xs text-navy-400">
-            Range: ${buyAmountStats.min.toLocaleString()} – ${buyAmountStats.max.toLocaleString()}
-          </div>
+          {!buyAmountStats.fixed && (
+            <div className="mt-1 text-xs text-navy-400">
+              Range: ${buyAmountStats.min.toLocaleString()} – ${buyAmountStats.max.toLocaleString()}
+            </div>
+          )}
 
           {/* Share sizing — rounds to the nearest whole share at the
               live quote and shows the resulting dollar cost so any

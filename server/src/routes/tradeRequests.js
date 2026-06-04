@@ -221,7 +221,7 @@ router.get('/eligible-buys', requireExecutive, async (_req, res, next) => {
     const eligible = [];
     for (const s of closed) {
       if (claimedIds.has(s.id)) continue;
-      const tally = computeTally(s.ballots, allUsers);
+      const tally = computeTally(s.ballots, allUsers, s);
       if (tally.finalDecision !== 'Buy' || !tally.buyAmountStats) continue;
       eligible.push({
         id: s.id,
@@ -392,7 +392,7 @@ router.post('/', requireExecutive, async (req, res, next) => {
         const allUsers = await prisma.user.findMany({
           select: { id: true, name: true, role: true, email: true, extraRoles: true },
         });
-        const tally = computeTally(session.ballots, allUsers);
+        const tally = computeTally(session.ballots, allUsers, session);
         if (tally.finalDecision !== 'Buy' || !tally.buyAmountStats) {
           return res.status(400).json({
             error: `Session ${id} (${session.ticker}) did not result in Buy`,

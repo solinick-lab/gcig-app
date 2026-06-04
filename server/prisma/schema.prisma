@@ -263,6 +263,13 @@ model VotingSession {
   // "buy"  → a pitch vote (Buy/Hold/Sell, proposed allocation).
   // "sell" → a vote to exit a holding we own (Sell/Hold, no amount).
   kind       String    @default("buy")
+  // How a Buy session sizes the trade. "average" (default) lets each
+  // Buy voter propose a dollar figure and we trade the mean. "fixed"
+  // pins the amount up front — the creator names the number and members
+  // only ratify it (Buy = yes, No = Hold). Ignored for sell sessions.
+  amountMode  String   @default("average")
+  // The pinned dollar figure when amountMode = "fixed". Null otherwise.
+  fixedAmount Float?
   deadline   DateTime
   createdAt  DateTime  @default(now())
   createdBy  Int

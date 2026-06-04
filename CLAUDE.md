@@ -128,6 +128,14 @@ Sidebar, Landing, and `index.html`.
   date-confident, news as date-cautious.
 - `server/src/services/sheetPortfolio.js` — Google Sheets read of
   the live portfolio. Fall through gracefully if unreachable.
+  `getPortfolioMovers` ranks the **live portfolio sheet** (not the
+  PriceBar cache) for the terminal's MOVR panel: daily % is recovered
+  from each position's dollar day-change over its prior position value,
+  cash excluded. The first cut ranked the PriceBar cache and only ever
+  surfaced the 2-3 tickers someone had charted — superseded so MOVR
+  reflects the whole book.
+- `server/src/routes/terminal.js` — terminal data panels. `/movers`
+  serves the MOVR ranking from `getPortfolioMovers`.
 - `server/src/services/secFilings.js` — SEC EDGAR. company_tickers
   → CIK, then submissions feed. 24h ticker-map cache, 6h per-ticker
   filings cache. UA header is required by SEC. `getLatestFilingByForm`
@@ -324,9 +332,26 @@ position") or **Hold** ("Maintain"). Weighting is identical — `computeTally`
 is shared and unchanged, so a sell vote is general-body-majority (3) +
 leadership (1 each), ties → Hold. A passed sell vote (`finalDecision==="Sell"`)
 flows into the Trade Requests composer as a linked Sell line. The
-choice-validation lives in `prepareBallot(kind, …)` / `resolveSessionKind`
+choice-validation lives in `prepareBallot(session, …)` / `resolveSessionKind`
 in `routes/votes.js`; the closed-session recap branches to a sell-specific
 analyst prompt in `articleSummarizer.js`.
+
+A **buy** session also picks how it sizes the trade —
+`VotingSession.amountMode` is `"average"` (default) or `"fixed"`. In
+**average** mode each Buy voter proposes a $1,500–$10,000 figure and we
+trade the mean (the original behavior). In **fixed** mode the creator
+pins one `fixedAmount` (same band) at session creation and members only
+ratify it: the ballot collapses to **Buy** ("support the amount") or
+**No** — and "No" is persisted as **Hold** so `computeTally` is untouched.
+The pinned figure drives the trade by way of `computeTally`, which in
+fixed mode synthesizes `buyAmountStats` from `fixedAmount` (avg = min =
+max = the pin, `fixed: true`) instead of averaging ballots. That keeps
+every downstream consumer — the DocuSign share math, the Trade Requests
+sizing, the client's allocation card — reading the same `buyAmountStats`
+shape with no special-casing. `computeTally(ballots, users, session)` now
+takes the session so it can see the mode; callers in `docusign.js` and
+`tradeRequests.js` pass it. Sell sessions are always average/null (they
+carry no amount). Migration `20260604000000_add_voting_session_amount_mode`.
 
 ## Pitch outcome inference (the AIT bug fix)
 
