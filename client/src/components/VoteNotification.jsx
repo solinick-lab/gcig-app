@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
-import { TrendingUp, X } from 'lucide-react';
+import { TrendingUp, TrendingDown, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client.js';
 import Button from './Button.jsx';
@@ -44,7 +44,11 @@ export default function VoteNotification() {
                 Vote Now
               </div>
               <div className="mt-2 flex items-center gap-3">
-                <TrendingUp className="h-8 w-8" />
+                {session.kind === 'sell' ? (
+                  <TrendingDown className="h-8 w-8" />
+                ) : (
+                  <TrendingUp className="h-8 w-8" />
+                )}
                 <div>
                   <div className="text-3xl font-bold">{session.ticker}</div>
                   {session.title && (
@@ -65,8 +69,12 @@ export default function VoteNotification() {
 
         <div className="p-6">
           <p className="text-sm text-navy">
-            A new voting session has been started by <strong>{session.creator?.name}</strong>.
-            Cast your Buy, Hold, or Sell vote before the deadline.
+            A new {session.kind === 'sell' ? 'sell' : 'voting'} session on{' '}
+            <strong>{session.ticker}</strong> was started by{' '}
+            <strong>{session.creator?.name}</strong>.{' '}
+            {session.kind === 'sell'
+              ? 'Cast your Sell or Hold rating before the deadline.'
+              : 'Cast your Buy, Hold, or Sell vote before the deadline.'}
           </p>
           <div className="mt-3 text-xs text-navy-400">
             Closes {formatDistanceToNow(new Date(session.deadline), { addSuffix: true })}
