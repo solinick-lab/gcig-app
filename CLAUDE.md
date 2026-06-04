@@ -182,7 +182,12 @@ Sidebar, Landing, and `index.html`.
   `/trade-requests` (executive-only) picks N closed Buy sessions and
   optionally adds a Sell line (default SPY, sized by shares or cover
   amount) → one envelope. Sessions claimed by a `TradeRequestItem` are
-  filtered out of the picker.
+  filtered out of the picker. The composer also lists **passed sell
+  votes** (`GET /eligible-sells`) — each addable as a Sell line linked to
+  its `votingSessionId` and pre-sized to the whole held position from the
+  sheet. `validateResolvedTrade` is the authoritative server guard: no
+  voting session may be claimed twice, and the summed Sell shares per
+  ticker (across every line) can't exceed what the sheet says we hold.
 - `server/src/routes/presidentReview.js` + `client/src/pages/PresidentReview.jsx` —
   end-of-year president performance review. Members rate each
   President 1-5 on a short list of statements (Strongly Disagree →
@@ -309,9 +314,26 @@ HMAC enabled, events: envelope sent/delivered/completed/declined/voided.
 
 ---
 
+## Voting session kinds (buy vs sell)
+
+`VotingSession.kind` is `"buy"` (default) or `"sell"`. A **buy** vote is the
+original pitch vote — Buy/Hold/Sell with a $1,500–$10,000 proposed
+allocation. A **sell** vote is opened against a holding we own (ticker picked
+from the sheet, no pitch, no amount) and offers only **Sell** ("Exit the
+position") or **Hold** ("Maintain"). Weighting is identical — `computeTally`
+is shared and unchanged, so a sell vote is general-body-majority (3) +
+leadership (1 each), ties → Hold. A passed sell vote (`finalDecision==="Sell"`)
+flows into the Trade Requests composer as a linked Sell line. The
+choice-validation lives in `prepareBallot(kind, …)` / `resolveSessionKind`
+in `routes/votes.js`; the closed-session recap branches to a sell-specific
+analyst prompt in `articleSummarizer.js`.
+
 ## Pitch outcome inference (the AIT bug fix)
 
-`/users/:id/profile` and `/pitches/outcomes/mine` both layer this:
+`/users/:id/profile` and `/pitches/outcomes/mine` both layer this. **Both
+scope the closed-session lookup to `kind:"buy"`** — a later "should we exit
+this holding?" sell vote on the same ticker must not flip an old buy pitch to
+NoBuy.
 
 1. `Pitch.votedOutcome` — explicit override, always wins.
 2. Most recent **closed** `VotingSession` for the ticker:

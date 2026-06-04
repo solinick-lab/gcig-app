@@ -260,6 +260,9 @@ model VotingSession {
   pitchId    Int?
   pitch      Pitch?    @relation(fields: [pitchId], references: [id], onDelete: SetNull)
   status     String    @default("open")
+  // "buy"  → a pitch vote (Buy/Hold/Sell, proposed allocation).
+  // "sell" → a vote to exit a holding we own (Sell/Hold, no amount).
+  kind       String    @default("buy")
   deadline   DateTime
   createdAt  DateTime  @default(now())
   createdBy  Int

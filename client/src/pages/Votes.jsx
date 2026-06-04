@@ -28,6 +28,13 @@ const ACTION_META = {
   Sell: { icon: TrendingDown, badge: 'bg-red-100 text-red-800 border-red-200' },
 };
 
+// Analyst-desk descriptors for the two sell-vote choices.
+const SELL_ACTION_DESC = {
+  Sell: 'Exit the position',
+  Hold: 'Maintain',
+};
+const SELL_ACTIONS = ['Sell', 'Hold'];
+
 function ActionBadge({ action, large }) {
   const meta = ACTION_META[action] || ACTION_META.Hold;
   const Icon = meta.icon;
@@ -44,13 +51,14 @@ function ActionBadge({ action, large }) {
 }
 
 function emptyForm() {
-  return { ticker: '', title: '', pitchId: '', deadline: '' };
+  return { kind: 'buy', ticker: '', title: '', pitchId: '', deadline: '' };
 }
 
 export default function Votes() {
   const { isAdmin } = useAuth();
   const [sessions, setSessions] = useState([]);
   const [pitches, setPitches] = useState([]);
+  const [holdings, setHoldings] = useState([]);
   const [detail, setDetail] = useState(null); // full session detail
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState(emptyForm());
@@ -66,10 +74,26 @@ export default function Votes() {
     setPitches(data);
   }
 
+  async function loadHoldings() {
+    try {
+      const { data } = await api.get('/holdings/quotes');
+      setHoldings((data?.holdings || []).filter((h) => !h.isCash));
+    } catch {
+      setHoldings([]);
+    }
+  }
+
   useEffect(() => {
     loadSessions();
     loadPitches();
   }, []);
+
+  // Holdings feed the Sell-vote position picker, which only execs ever see.
+  // Gating on isAdmin also keeps /holdings/quotes (and its daily-snapshot
+  // write) from firing for general members who open the Votes page.
+  useEffect(() => {
+    if (isAdmin) loadHoldings();
+  }, [isAdmin]);
 
   async function openDetail(id) {
     const { data } = await api.get(`/votes/${id}`);
@@ -81,9 +105,10 @@ export default function Votes() {
     setSubmitting(true);
     try {
       await api.post('/votes', {
+        kind: form.kind,
         ticker: form.ticker,
         title: form.title || null,
-        pitchId: form.pitchId ? Number(form.pitchId) : null,
+        pitchId: form.kind === 'buy' && form.pitchId ? Number(form.pitchId) : null,
         deadline: etInputValueToUtcIso(form.deadline),
       });
       setModalOpen(false);
@@ -189,42 +214,86 @@ export default function Votes() {
         )}
       </div>
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Start Voting Session" size="md">
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={form.kind === 'sell' ? 'Start Sell Vote' : 'Start Voting Session'} size="md">
         <form onSubmit={handleCreateSession} className="space-y-4">
+          {/* What kind of vote: rate a new idea, or decide whether to exit a
+              holding we already own. */}
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { k: 'buy', label: 'Buy pitch', hint: 'Rate a new idea' },
+              { k: 'sell', label: 'Sell position', hint: 'Exit a holding' },
+            ].map((opt) => (
+              <button
+                key={opt.k}
+                type="button"
+                onClick={() => setForm({ ...emptyForm(), kind: opt.k })}
+                className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
+                  form.kind === opt.k
+                    ? 'border-gold bg-gold-100/40 ring-1 ring-gold'
+                    : 'border-navy-100 bg-white hover:bg-navy-50'
+                }`}
+              >
+                <div className="font-semibold text-navy">{opt.label}</div>
+                <div className="text-xs text-navy-400">{opt.hint}</div>
+              </button>
+            ))}
+          </div>
           <div>
-            <label className="block text-sm font-medium text-navy">Ticker</label>
-            <input
-              required
-              value={form.ticker}
-              onChange={(e) => setForm({ ...form, ticker: e.target.value.toUpperCase() })}
-              placeholder="AAPL"
-              className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
-            />
+            <label className="block text-sm font-medium text-navy">
+              {form.kind === 'sell' ? 'Position to sell' : 'Ticker'}
+            </label>
+            {form.kind === 'sell' ? (
+              <select
+                required
+                value={form.ticker}
+                onChange={(e) => setForm({ ...form, ticker: e.target.value.toUpperCase() })}
+                className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
+              >
+                <option value="">Select a holding…</option>
+                {holdings.map((h) => (
+                  <option key={h.ticker} value={String(h.ticker).toUpperCase()}>
+                    {String(h.ticker).toUpperCase()}
+                    {h.shares != null ? ` — ${h.shares} sh` : ''}
+                    {h.marketValue != null ? ` ($${Math.round(h.marketValue).toLocaleString()})` : ''}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                required
+                value={form.ticker}
+                onChange={(e) => setForm({ ...form, ticker: e.target.value.toUpperCase() })}
+                placeholder="AAPL"
+                className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
+              />
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-navy">Title / Question (optional)</label>
             <input
               value={form.title}
               onChange={(e) => setForm({ ...form, title: e.target.value })}
-              placeholder="Q2 decision on AAPL"
+              placeholder={form.kind === 'sell' ? 'Time to exit AAPL?' : 'Q2 decision on AAPL'}
               className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-navy">Attach Pitch (optional)</label>
-            <select
-              value={form.pitchId}
-              onChange={(e) => setForm({ ...form, pitchId: e.target.value })}
-              className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm"
-            >
-              <option value="">None</option>
-              {pitches.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.ticker} — {p.pitcherName} ({format(new Date(p.date), 'MMM d, yyyy')})
-                </option>
-              ))}
-            </select>
-          </div>
+          {form.kind === 'buy' && (
+            <div>
+              <label className="block text-sm font-medium text-navy">Attach Pitch (optional)</label>
+              <select
+                value={form.pitchId}
+                onChange={(e) => setForm({ ...form, pitchId: e.target.value })}
+                className="mt-1 w-full rounded-lg border border-navy-100 px-3 py-2 text-sm"
+              >
+                <option value="">None</option>
+                {pitches.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.ticker} — {p.pitcherName} ({format(new Date(p.date), 'MMM d, yyyy')})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-navy">Voting Deadline</label>
             <input
@@ -444,8 +513,8 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
         {isOpen && (
           <Card title={session.myBallot ? 'Change Your Vote' : 'Cast Your Vote'}>
             <form onSubmit={castBallot} className="space-y-4">
-              <div className="grid grid-cols-3 gap-2">
-                {Object.keys(ACTION_META).map((a) => {
+              <div className={`grid gap-2 ${session.kind === 'sell' ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                {(session.kind === 'sell' ? SELL_ACTIONS : Object.keys(ACTION_META)).map((a) => {
                   const meta = ACTION_META[a];
                   const Icon = meta.icon;
                   const selected = ballotAction === a;
@@ -465,6 +534,11 @@ function SessionDetail({ session, onBack, onRefresh, onClose, onDelete }) {
                     >
                       <Icon className="h-5 w-5" />
                       {a}
+                      {session.kind === 'sell' && (
+                        <span className="text-[10px] font-normal text-navy-400">
+                          {SELL_ACTION_DESC[a]}
+                        </span>
+                      )}
                     </button>
                   );
                 })}

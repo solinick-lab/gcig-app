@@ -184,10 +184,12 @@ router.get('/:id', async (req, res) => {
 
 // Create a new voting session (President only).
 router.post('/', requireExecutive, async (req, res) => {
-  const { ticker, title, pitchId, deadline } = req.body || {};
+  const { ticker, title, pitchId, deadline, kind: rawKind } = req.body || {};
   if (!ticker || !deadline) {
     return res.status(400).json({ error: 'ticker and deadline required' });
   }
+  const kind = resolveSessionKind(rawKind);
+  if (!kind) return res.status(400).json({ error: 'kind must be "buy" or "sell"' });
   const deadlineDate = new Date(deadline);
   if (deadlineDate <= new Date()) {
     return res.status(400).json({ error: 'deadline must be in the future' });
@@ -196,7 +198,9 @@ router.post('/', requireExecutive, async (req, res) => {
     data: {
       ticker: ticker.toUpperCase(),
       title: title || null,
-      pitchId: pitchId ? Number(pitchId) : null,
+      // A sell vote is about a holding, not a pitch — never attach one.
+      pitchId: kind === 'buy' && pitchId ? Number(pitchId) : null,
+      kind,
       deadline: deadlineDate,
       createdBy: req.user.id,
     },
@@ -212,36 +216,57 @@ router.post('/', requireExecutive, async (req, res) => {
 const BUY_MIN = 1500;
 const BUY_MAX = 10000;
 
+// Resolve the requested session kind. Defaults to "buy"; anything that
+// isn't a known kind returns null so the route can 400.
+export function resolveSessionKind(raw) {
+  const k = String(raw ?? 'buy').toLowerCase();
+  return k === 'buy' || k === 'sell' ? k : null;
+}
+
+// Validate + normalize a ballot for a session of the given kind. Returns
+// { action, investmentAmount } on success or { error } on rejection.
+// Buy sessions: Buy/Hold/Sell, Buy carries a $1,500–$10,000 amount.
+// Sell sessions: Sell or Hold only, never an amount (we exit the whole
+// position; leadership sizes the order downstream).
+export function prepareBallot(kind, { action, investmentAmount } = {}) {
+  const allowed = kind === 'sell' ? ['Sell', 'Hold'] : ['Buy', 'Hold', 'Sell'];
+  if (!action || !allowed.includes(action)) {
+    return {
+      error:
+        kind === 'sell'
+          ? 'action must be Sell or Hold'
+          : 'action must be Buy, Hold, or Sell',
+    };
+  }
+  if (kind === 'buy' && action === 'Buy') {
+    const n = Number(investmentAmount);
+    if (!Number.isFinite(n)) {
+      return { error: 'Buy ballots require an investment amount' };
+    }
+    if (n < BUY_MIN || n > BUY_MAX) {
+      return { error: `Investment amount must be between $${BUY_MIN} and $${BUY_MAX}` };
+    }
+    return { action, investmentAmount: Math.round(n) };
+  }
+  return { action, investmentAmount: null };
+}
+
 // Cast or update your ballot on an open session.
 router.post('/:id/ballot', async (req, res) => {
   const sessionId = Number(req.params.id);
-  const { action, note, investmentAmount } = req.body || {};
-  if (!action || !['Buy', 'Hold', 'Sell'].includes(action)) {
-    return res.status(400).json({ error: 'action must be Buy, Hold, or Sell' });
-  }
-
-  // Validate investmentAmount. Required on Buy, must fall inside the band.
-  // Hold/Sell ballots store null even if the client sends a stale value.
-  let amount = null;
-  if (action === 'Buy') {
-    const n = Number(investmentAmount);
-    if (!Number.isFinite(n)) {
-      return res.status(400).json({ error: 'Buy ballots require an investment amount' });
-    }
-    if (n < BUY_MIN || n > BUY_MAX) {
-      return res.status(400).json({
-        error: `Investment amount must be between $${BUY_MIN} and $${BUY_MAX}`,
-      });
-    }
-    // Round to the nearest dollar — fractional cents on a ballot would be noise.
-    amount = Math.round(n);
-  }
-
   const session = await prisma.votingSession.findUnique({ where: { id: sessionId } });
   if (!session) return res.status(404).json({ error: 'Session not found' });
   if (session.status !== 'open' || new Date() > session.deadline) {
     return res.status(400).json({ error: 'Voting is closed for this session' });
   }
+
+  // The allowed actions depend on the session kind: a sell vote is Sell or
+  // Hold and never carries a dollar amount; a buy vote keeps Buy/Hold/Sell
+  // with the proposed-allocation band on Buy.
+  const prepared = prepareBallot(session.kind, req.body || {});
+  if (prepared.error) return res.status(400).json({ error: prepared.error });
+  const { action, investmentAmount: amount } = prepared;
+  const note = req.body?.note;
 
   const ballot = await prisma.ballot.upsert({
     where: { sessionId_userId: { sessionId, userId: req.user.id } },
