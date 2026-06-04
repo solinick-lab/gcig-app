@@ -86,8 +86,14 @@ export default function Votes() {
   useEffect(() => {
     loadSessions();
     loadPitches();
-    loadHoldings();
   }, []);
+
+  // Holdings feed the Sell-vote position picker, which only execs ever see.
+  // Gating on isAdmin also keeps /holdings/quotes (and its daily-snapshot
+  // write) from firing for general members who open the Votes page.
+  useEffect(() => {
+    if (isAdmin) loadHoldings();
+  }, [isAdmin]);
 
   async function openDetail(id) {
     const { data } = await api.get(`/votes/${id}`);
