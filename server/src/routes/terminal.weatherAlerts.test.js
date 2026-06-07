@@ -83,9 +83,9 @@ test('wx-alerts inherits the exact same global auth/limiter chain as /governance
     .filter((l) => !l.route && typeof l.handle === 'function')
     .map((l) => l.handle.name);
   const vIdx = globalMw.indexOf('verifyJwt');
-  const eIdx = globalMw.indexOf('requireExecutive');
+  const eIdx = globalMw.indexOf('requireExecutiveOrAdvisory');
   assert.ok(vIdx >= 0, 'verifyJwt must be a global middleware on the terminal router');
-  assert.ok(eIdx > vIdx, 'requireExecutive must follow verifyJwt globally');
+  assert.ok(eIdx > vIdx, 'requireExecutiveOrAdvisory must follow verifyJwt globally');
 
   const findRoute = (p) => layers.find((l) => l.route && l.route.path === p);
   const sibling = findRoute('/governance/:ticker');

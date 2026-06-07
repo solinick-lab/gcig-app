@@ -90,12 +90,12 @@ test('macro-sensitivity inherits the same global auth chain as /governance/:tick
     .filter((l) => !l.route && typeof l.handle === 'function')
     .map((l) => l.handle.name);
   const vIdx = globalMw.indexOf('verifyJwt');
-  const eIdx = globalMw.indexOf('requireExecutive');
+  const eIdx = globalMw.indexOf('requireExecutiveOrAdvisory');
   assert.ok(vIdx >= 0, 'verifyJwt must be a global middleware on the terminal router');
-  assert.ok(eIdx > vIdx, 'requireExecutive must follow verifyJwt globally');
+  assert.ok(eIdx > vIdx, 'requireExecutiveOrAdvisory must follow verifyJwt globally');
   assert.ok(
     layers.filter((l) => !l.route).length >= 3,
-    'expected verifyJwt + requireExecutive + aiLimiter as global middlewares'
+    'expected verifyJwt + requireExecutiveOrAdvisory + aiLimiter as global middlewares'
   );
 
   const findRoute = (p) =>

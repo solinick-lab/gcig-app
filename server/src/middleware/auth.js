@@ -162,6 +162,24 @@ export function requireExecutive(req, res, next) {
   next();
 }
 
+// Executive tier OR Advisory Board / Faculty Advisor. Used for read-only
+// research tools (e.g. the Terminal) that the advisory board should be
+// able to use even though they sit outside the operational chain.
+const EXECUTIVE_OR_ADVISORY_ROLES = new Set([
+  'President',
+  'CIO',
+  'AdvisoryBoardMember',
+  'FacultyAdvisory',
+]);
+export function requireExecutiveOrAdvisory(req, res, next) {
+  if (!req.user || !EXECUTIVE_OR_ADVISORY_ROLES.has(req.user.role)) {
+    return res
+      .status(403)
+      .json({ error: 'Executive (President/CIO) or Advisory Board role required' });
+  }
+  next();
+}
+
 // Operational permission hierarchy (higher number = more power).
 // Advisory Board Members and Faculty Advisors sit OUTSIDE the operational chain
 // — they are observers with no edit rights. Chief of Communication is a

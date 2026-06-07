@@ -268,7 +268,7 @@ test('GET /insider-clusters: caps the universe at 50 tickers', async () => {
 // identical technique terminal.filings.test.js / execbios use: prove
 // the new /insider-clusters route sits on the same router stack,
 // after the same three module-scope middlewares (verifyJwt →
-// requireExecutive → aiLimiter), with no extra/different per-route
+// requireExecutiveOrAdvisory → aiLimiter), with no extra/different per-route
 // middleware than the sibling. Both routes then provably traverse an
 // identical auth chain.
 test('insider-clusters inherits the exact same global auth/limiter chain as /governance/:ticker', () => {
@@ -278,12 +278,12 @@ test('insider-clusters inherits the exact same global auth/limiter chain as /gov
     .filter((l) => !l.route && typeof l.handle === 'function')
     .map((l) => l.handle.name);
   const vIdx = globalMw.indexOf('verifyJwt');
-  const eIdx = globalMw.indexOf('requireExecutive');
+  const eIdx = globalMw.indexOf('requireExecutiveOrAdvisory');
   assert.ok(vIdx >= 0, 'verifyJwt must be a global middleware on the terminal router');
-  assert.ok(eIdx > vIdx, 'requireExecutive must follow verifyJwt globally');
+  assert.ok(eIdx > vIdx, 'requireExecutiveOrAdvisory must follow verifyJwt globally');
   assert.ok(
     layers.filter((l) => !l.route).length >= 3,
-    'expected verifyJwt + requireExecutive + aiLimiter as global middlewares'
+    'expected verifyJwt + requireExecutiveOrAdvisory + aiLimiter as global middlewares'
   );
 
   const findRoute = (p) =>

@@ -51,7 +51,7 @@ const NAV_SECTIONS = [
       { to: '/industries', label: 'Industries', icon: Building2 },
       { to: '/cpi', label: 'CPI Forecast', icon: Activity },
       { to: '/tankers', label: 'Tanker Tracker', icon: Ship },
-      { to: '/terminal', label: 'Terminal', icon: TerminalIcon, executiveOnly: true },
+      { to: '/terminal', label: 'Terminal', icon: TerminalIcon, executiveOrAdvisory: true },
     ],
   },
   {
@@ -123,6 +123,7 @@ export default function Sidebar({ onNavigate }) {
             (i) =>
               (!i.adminOnly || isAdmin) &&
               (!i.executiveOnly || isExecutive) &&
+              (!i.executiveOrAdvisory || isExecutive || isAdvisory) &&
               (!i.pmOrAbove || isPmOrAbove) &&
               (!i.superAdminOnly || isSuperAdmin) &&
               (!i.hideForAdvisory || !isAdvisory)

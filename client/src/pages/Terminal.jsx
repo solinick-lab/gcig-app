@@ -4,12 +4,13 @@ import { useAuth } from '../context/AuthContext.jsx';
 import TerminalShell from '../terminal/TerminalShell.jsx';
 import '../terminal/theme.css';
 
-// Terminal page. Gated to Executive (President/CIO) initially; will open up
-// to PM+ once we have load-test confidence. Renders full-bleed by hiding
-// the standard app chrome via the `data-theme="terminal"` wrapper.
+// Terminal page. Gated to Executive (President/CIO) and Advisory Board /
+// Faculty Advisor; will open up to PM+ once we have load-test confidence.
+// Renders full-bleed by hiding the standard app chrome via the
+// `data-theme="terminal"` wrapper.
 
 export default function Terminal() {
-  const { user, isExecutive } = useAuth();
+  const { user, isExecutive, isAdvisory } = useAuth();
   const navigate = useNavigate();
 
   // Hide page scroll while terminal is mounted (we own the whole viewport).
@@ -22,7 +23,7 @@ export default function Terminal() {
   }, []);
 
   if (!user) return <Navigate to="/login" replace />;
-  if (!isExecutive) return <Navigate to="/dashboard" replace />;
+  if (!isExecutive && !isAdvisory) return <Navigate to="/dashboard" replace />;
 
   return <TerminalShell onExit={() => navigate('/dashboard')} />;
 }

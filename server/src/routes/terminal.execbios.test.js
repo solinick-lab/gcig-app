@@ -122,14 +122,14 @@ test('GET /governance/:ticker/exec-bios: never 5xx even if the service rejects',
 
 // Auth/limiter parity with the sibling /governance/:ticker route.
 // The terminal router applies auth + the AI limiter once, at module
-// scope (router.use(verifyJwt); router.use(requireExecutive);
+// scope (router.use(verifyJwt); router.use(requireExecutiveOrAdvisory);
 // router.use(aiLimiter)), and /governance/:ticker carries NO per-route
 // middleware — it simply inherits that chain. The faithful, harness-
 // free way to assert "same auth/limiter as the sibling" is to prove
 // the new route sits on the same router stack, after those same three
 // global middlewares, with no extra/different per-route middleware
 // than the sibling. Both routes then provably traverse an identical
-// verifyJwt → requireExecutive → aiLimiter chain.
+// verifyJwt → requireExecutiveOrAdvisory → aiLimiter chain.
 test('exec-bios inherits the exact same global auth/limiter chain as /governance/:ticker', () => {
   const layers = router.stack;
 
@@ -138,14 +138,14 @@ test('exec-bios inherits the exact same global auth/limiter chain as /governance
     .filter((l) => !l.route && typeof l.handle === 'function')
     .map((l) => l.handle.name);
   const vIdx = globalMw.indexOf('verifyJwt');
-  const eIdx = globalMw.indexOf('requireExecutive');
+  const eIdx = globalMw.indexOf('requireExecutiveOrAdvisory');
   assert.ok(vIdx >= 0, 'verifyJwt must be a global middleware on the terminal router');
-  assert.ok(eIdx > vIdx, 'requireExecutive must follow verifyJwt globally');
+  assert.ok(eIdx > vIdx, 'requireExecutiveOrAdvisory must follow verifyJwt globally');
   // The rate limiter is an anonymous express-rate-limit middleware
   // registered immediately after the auth pair.
   assert.ok(
     layers.filter((l) => !l.route).length >= 3,
-    'expected verifyJwt + requireExecutive + aiLimiter as global middlewares'
+    'expected verifyJwt + requireExecutiveOrAdvisory + aiLimiter as global middlewares'
   );
 
   const findRoute = (p) =>
