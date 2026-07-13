@@ -11,6 +11,7 @@ import { getExecutiveBios } from '../services/executiveBios.js';
 import { parseLeadership, parseBoard, parseComp, buildNetwork } from '../services/governanceParsers.js';
 import { getPeers, getPeerSnapshot, getEarnings, getConsensus } from '../services/marketData.js';
 import { getNewsForTicker } from '../services/news.js';
+import { getBreakingWire } from '../services/breakingWire.js';
 import { getWorldIndices, REGION_ORDER } from '../services/worldIndices.js';
 import { getInsiderTransactions } from '../services/insiderTx.js';
 import { getLiveQuotes } from '../services/liveQuotes.js';
@@ -784,6 +785,19 @@ router.get('/peers/:ticker', async (req, res) => {
 // TOP — market-wide general news. Uses Finnhub's general category feed
 // via the same news service (which routes broad-market tickers like SPY
 // through the general endpoint). 10-min cache via the service layer.
+// Breaking-news wire — broad business/world + AP feed from Google News RSS
+// (see services/breakingWire.js). Raw, de-duped; the client ranks/curates
+// (AP prioritized). Never 5xx: a feed hiccup degrades to an empty list.
+router.get('/breaking-wire', async (_req, res) => {
+  try {
+    const data = await getBreakingWire();
+    res.json(data);
+  } catch (err) {
+    console.error('terminal/breaking-wire failed:', err.message);
+    res.json({ articles: [], fetchedAt: new Date().toISOString() });
+  }
+});
+
 router.get('/top-news', async (_req, res) => {
   try {
     const data = await getNewsForTicker('SPY', '');
