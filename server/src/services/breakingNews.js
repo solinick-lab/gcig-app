@@ -10,8 +10,8 @@
 //   1. The LLM must rate a story genuinely critical AND score it >= a high
 //      severity bar. Most days nothing clears it, and "nothing" is the
 //      correct, expected answer.
-//   2. A rolling 7-day budget caps NEW alerts at two — a story only jumps
-//      the spent budget if it's rated a maximal, once-a-year-crisis 10.
+//   2. A rolling 7-day budget caps NEW alerts at three — a story only
+//      jumps the spent budget if it's rated a maximal, once-a-year 10.
 //   3. Deduplication: an ongoing story (same headline seen in the last 7
 //      days) never re-fires, so a week-long war doesn't alert every morning.
 //
@@ -30,9 +30,9 @@ import { llmChat } from './llm.js';
 const CANDIDATE_COUNT = 15; // how many recent headlines the model ranks
 const RETRY_THROTTLE_MS = 30 * 60 * 1000; // after a failed attempt, wait 30m
 
-const SEVERITY_THRESHOLD = 8; // 1–10; only >= this qualifies as "breaking"
+const SEVERITY_THRESHOLD = 9; // 1–10; only >= this qualifies as "breaking"
 const OVERRIDE_SEVERITY = 10; // a maximal crisis fires even past the budget
-const WEEKLY_BUDGET = 2; // at most this many NEW alerts per rolling 7 days
+const WEEKLY_BUDGET = 3; // at most this many NEW alerts per rolling 7 days
 const HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const ALERT_TTL_MS = 4 * 24 * 60 * 60 * 1000; // how long a chosen alert shows
 
@@ -103,8 +103,8 @@ async function classify(candidates) {
         'horse-race coverage, opinion, or "markets drift" days. ' +
         'Calibrate to volume: this alert should fire only ONCE OR TWICE IN A WEEK at most, and most days ' +
         'NOTHING clears it. When in doubt, return nothing — silence is the correct default. ' +
-        'Also rate severity 1–10, where 8+ means "a portfolio manager must know this now" and 10 means a ' +
-        'generational, once-a-year systemic crisis. Only rate 8+ for stories that truly warrant an alert.\n\n' +
+        'Also rate severity 1–10, where 9+ means "a portfolio manager must know this now" and 10 means a ' +
+        'generational, once-a-year systemic crisis. Only rate 9+ for stories that truly warrant an alert.\n\n' +
         'Reply with strict JSON only, no prose, no code fences. Shape: ' +
         '{"critical": boolean, "index": number|null, "severity": number, "why": string}. ' +
         'If nothing qualifies: {"critical": false, "index": null, "severity": 0, "why": ""}. ' +
