@@ -64,10 +64,10 @@ function sourceRank(source) {
 
 // AP is prioritized and should dominate the strip — but not to the point of
 // crowding every other major out entirely. Cap AP to a strong majority of
-// the headlines so it clearly leads (top positions, most slots) while
-// Reuters, Bloomberg and the other majors still get a couple of look-ins.
-// "Mostly AP", not "only AP".
-const AP_CAP = 8;
+// the headlines (9 of 12) so it clearly leads (top positions, most slots)
+// while Reuters, Bloomberg and the other majors still keep a few slots.
+// "Mostly AP", not "only AP" — an all-AP strip reads like a stuck feed.
+const AP_CAP = 9;
 
 // AP sits alone at the top of SOURCE_RANK. We cap AP by that rank rather
 // than by matching the literal string "AP": the production wire hands us
