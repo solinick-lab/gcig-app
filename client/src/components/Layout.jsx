@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar.jsx';
+import TerminalLauncher from './TerminalLauncher.jsx';
 import MobileTabBar from './MobileTabBar.jsx';
 import VoteNotification from './VoteNotification.jsx';
 import PitchNotification from './PitchNotification.jsx';
@@ -47,6 +48,11 @@ export default function Layout() {
             backgroundSize: '48px 48px',
           }}
         />
+
+        {/* Terminal launcher — sticks to the top of the scroll area on every
+            page so the research desk is always one click away. Renders null
+            for members without terminal access. */}
+        <TerminalLauncher />
 
         {/* Extra bottom padding on mobile so the tab bar doesn't cover the
             last row of content. Desktop gets the normal py-8. */}

@@ -62,12 +62,12 @@ function sourceRank(source) {
   return -1; // not a whitelisted outlet — dropped
 }
 
-// AP is prioritized but must not monopolize the strip — the AP wire alone
-// carries enough items to fill every slot. Cap AP to a plurality of the
-// headlines so it clearly leads (top positions, most slots) while Reuters,
-// Bloomberg and the other majors still get a look-in. "Prioritize AP", not
-// "only AP".
-const AP_CAP = 5;
+// AP is prioritized and should dominate the strip — but not to the point of
+// crowding every other major out entirely. Cap AP to a strong majority of
+// the headlines so it clearly leads (top positions, most slots) while
+// Reuters, Bloomberg and the other majors still get a couple of look-ins.
+// "Mostly AP", not "only AP".
+const AP_CAP = 8;
 
 // AP sits alone at the top of SOURCE_RANK. We cap AP by that rank rather
 // than by matching the literal string "AP": the production wire hands us
