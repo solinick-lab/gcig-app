@@ -69,6 +69,14 @@ function sourceRank(source) {
 // "only AP".
 const AP_CAP = 5;
 
+// AP sits alone at the top of SOURCE_RANK. We cap AP by that rank rather
+// than by matching the literal string "AP": the production wire hands us
+// the raw outlet name ("Associated Press", "AP News"), so the old
+// `/^AP$/` test never fired on the server path and AP silently filled
+// every slot — the exact monopoly this cap exists to prevent. It only
+// looked fine locally because the demo proxy normalizes the name to "AP".
+const AP_RANK = 100;
+
 // Order a set of {title,url,source,publishedAt} by source priority (AP first)
 // then newest-first, drop blocked sources, and cap the AP share.
 function curate(articles) {
@@ -84,8 +92,8 @@ function curate(articles) {
 
   const out = [];
   let apCount = 0;
-  for (const { a } of ranked) {
-    if (/^AP$/i.test(a.source)) {
+  for (const { a, rank } of ranked) {
+    if (rank === AP_RANK) {
       if (apCount >= AP_CAP) continue; // AP quota spent — let others through
       apCount += 1;
     }
@@ -154,7 +162,12 @@ async function loadWire() {
   //    is the real path once /api/terminal/breaking-wire is deployed.
   try {
     const { data } = await api.get('/terminal/breaking-wire');
-    const arts = (data?.articles || []).filter((a) => a && a.title && a.url);
+    // The server returns the raw Google News outlet name ("Associated
+    // Press", "Reuters News"); fold it to the same short form the demo
+    // proxy uses so display and the AP-rank cap stay consistent.
+    const arts = (data?.articles || [])
+      .filter((a) => a && a.title && a.url)
+      .map((a) => ({ ...a, source: normalizeSource(a.source) }));
     if (arts.length) return curate(arts);
   } catch {
     /* older server without the endpoint — fall through to the demo proxy */

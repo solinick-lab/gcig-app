@@ -646,6 +646,34 @@
   color: var(--term-fg);
 }
 
+/* Whole-row link. The entire news row is an anchor so the click target
+   is the full width, not just the headline text. Reset the anchor's own
+   decoration/colour and give the row a quiet hover + keyboard-focus wash
+   so it reads as one clickable line. */
+[data-theme='terminal'] a.term-news-row {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+[data-theme='terminal'] a.term-news-row:hover {
+  background: rgba(255, 176, 0, 0.07);
+}
+
+[data-theme='terminal'] a.term-news-row:hover .title {
+  color: var(--term-fg);
+}
+
+[data-theme='terminal'] a.term-news-row:focus-visible {
+  outline: 1px solid var(--term-accent, #ffb000);
+  outline-offset: -1px;
+}
+
+[data-theme='terminal'] .term-news-ext {
+  color: var(--term-fg-dim);
+  font-size: 10px;
+}
+
 /* MOVR — side-by-side gainers / losers ranking tables */
 [data-theme='terminal'] .term-movers {
   display: flex;

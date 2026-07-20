@@ -20,6 +20,7 @@ import {
   TrendingDown,
   Building2,
   Newspaper,
+  Terminal as TerminalIcon,
   X,
 } from 'lucide-react';
 import api from '../api/client.js';
@@ -64,7 +65,7 @@ function fmtPct(n, digits = 2) {
 }
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, isExecutive, isAdvisory } = useAuth();
   const [dashboard, setDashboard] = useState(null);
   const [quotes, setQuotes] = useState(null);
   const [history, setHistory] = useState([]);
@@ -145,6 +146,8 @@ export default function Dashboard() {
         cashInterestEarned={Number(cashYield?.estimatedInterestEarned) || 0}
       />
 
+      {(isExecutive || isAdvisory) && <TerminalCta />}
+
       {macro?.configured && macro.indicators?.length > 0 && (
         <MacroStrip macro={macro} />
       )}
@@ -179,15 +182,15 @@ export default function Dashboard() {
   );
 }
 
-// Breaking-news banner. Shows at most one genuinely market-moving global
-// headline per day (the server enforces the "one/day" bar; see
-// services/breakingNews.js). Self-contained: it fetches on mount, renders
-// nothing when there's no qualifying headline (the common case), and can be
-// dismissed for the rest of the day. Dismissal is keyed by the story's day
-// so a fresh headline tomorrow reappears even if today's was dismissed.
+// Breaking-news banner. Shows only the rare, genuinely system-shaking
+// story — the server holds this to roughly one or two a week and most
+// weeks fewer (see services/breakingNews.js). Self-contained: it fetches
+// on mount, renders nothing when nothing clears the bar (the common
+// case), and can be dismissed. Dismissal is keyed to the specific story
+// (its URL) rather than the day: an alert now persists for a few days, so
+// dismissing it keeps that story down until a genuinely new one replaces it.
 function BreakingBanner() {
   const [headline, setHeadline] = useState(null);
-  const [day, setDay] = useState(null);
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
@@ -197,10 +200,8 @@ function BreakingBanner() {
       .then((r) => {
         if (cancelled) return;
         const h = r.data?.headline || null;
-        const d = r.data?.day || null;
         setHeadline(h);
-        setDay(d);
-        if (h && d && localStorage.getItem('gcig_breaking_dismissed') === d) {
+        if (h?.url && localStorage.getItem('gcig_breaking_dismissed') === h.url) {
           setDismissed(true);
         }
       })
@@ -216,9 +217,9 @@ function BreakingBanner() {
 
   function dismiss() {
     setDismissed(true);
-    if (day) {
+    if (headline?.url) {
       try {
-        localStorage.setItem('gcig_breaking_dismissed', day);
+        localStorage.setItem('gcig_breaking_dismissed', headline.url);
       } catch {
         /* private mode — dismissal just won't persist */
       }
@@ -255,6 +256,49 @@ function BreakingBanner() {
         <X className="h-4 w-4" />
       </button>
     </div>
+  );
+}
+
+// ─── Terminal call-to-action ────────────────────────────────────────────
+// The research desk is the fund's deepest tool but lives one nav click
+// away. This dark, amber-on-black strip borrows the terminal's own look so
+// it stands out against the editorial dashboard and pulls eligible members
+// in. Gated to the same roles the /terminal route allows (exec + advisory).
+
+function TerminalCta() {
+  return (
+    <Link
+      to="/terminal"
+      className="group relative flex items-center gap-4 overflow-hidden rounded-2xl border border-gold/25 bg-navy-800 px-5 py-4 shadow-card transition hover:border-gold hover:shadow-lg md:px-6"
+    >
+      {/* Faint scanlines — a nod to the CRT terminal aesthetic. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.07]"
+        style={{
+          backgroundImage:
+            'repeating-linear-gradient(0deg, #C9A84C 0, #C9A84C 1px, transparent 1px, transparent 3px)',
+        }}
+      />
+      <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-gold/40 bg-navy text-gold">
+        <TerminalIcon className="h-5 w-5" />
+      </div>
+      <div className="relative min-w-0 flex-1">
+        <div className="flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.25em] text-gold">
+          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+          Griffin Terminal
+        </div>
+        <div className="mt-1 font-serif text-lg font-semibold text-white md:text-xl">
+          The research desk — quotes, filings, news &amp; the whole book
+        </div>
+        <div className="mt-0.5 truncate font-mono text-[11px] text-navy-100">
+          DES · GP · CN · TOP · MOVR · FIL · PM — type a command or ask in plain English
+        </div>
+      </div>
+      <span className="relative hidden shrink-0 items-center gap-1 rounded-lg border border-gold/40 px-3 py-2 font-mono text-xs font-semibold uppercase tracking-widest text-gold transition group-hover:bg-gold group-hover:text-navy sm:inline-flex">
+        Launch <ArrowUpRight className="h-4 w-4" />
+      </span>
+    </Link>
   );
 }
 

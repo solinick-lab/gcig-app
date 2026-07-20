@@ -127,17 +127,29 @@ export default function TopNews() {
         ) : (
           ordered.map((it, i) => {
             const isNew = newIds.has(it.url);
-            return (
-              <div className={`term-news-row${isNew ? ' term-news-flash' : ''}`} key={it.url || i}>
+            const rowClass = `term-news-row${isNew ? ' term-news-flash' : ''}`;
+            // The whole row is the link when a story has a URL — a wider,
+            // more forgiving click target than the headline text alone.
+            return it.url ? (
+              <a
+                className={rowClass}
+                href={it.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                key={it.url || i}
+              >
                 <span className="time">{formatTime(it.publishedAt)}</span>
                 <span className="source">{it.source || ''}</span>
                 <span className="title">
-                  {it.url ? (
-                    <a href={it.url} target="_blank" rel="noopener noreferrer">{it.title}</a>
-                  ) : (
-                    it.title
-                  )}
+                  {it.title}
+                  <span className="term-news-ext" aria-hidden="true"> ↗</span>
                 </span>
+              </a>
+            ) : (
+              <div className={rowClass} key={i}>
+                <span className="time">{formatTime(it.publishedAt)}</span>
+                <span className="source">{it.source || ''}</span>
+                <span className="title">{it.title}</span>
               </div>
             );
           })

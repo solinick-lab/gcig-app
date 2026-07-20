@@ -104,6 +104,12 @@ export default function TerminalShell({ onExit }) {
       if (ticker) recordTicker(ticker);
       const id = nextWindowId();
       zSeq.current += 1;
+      // A function can ask for a roomier window than the default (news
+      // timelines, the portfolio book); FloatingWindow still clamps it to
+      // the canvas, so an oversized default degrades gracefully on a small
+      // screen.
+      const w = fn.w || DEFAULT_W;
+      const h = fn.h || DEFAULT_H;
       setWindows((ws) => {
         const step = (ws.length % SPAWN_WRAP) * SPAWN_STEP;
         return [
@@ -114,8 +120,8 @@ export default function TerminalShell({ onExit }) {
             ticker: ticker || null,
             x: SPAWN_BASE + step,
             y: SPAWN_BASE + step,
-            w: DEFAULT_W,
-            h: DEFAULT_H,
+            w,
+            h,
             z: zSeq.current,
           },
         ];

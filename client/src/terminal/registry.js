@@ -58,6 +58,10 @@ export const FUNCTIONS = [
     help: 'Latest news headlines for the focused ticker.',
     requires: 'ticker',
     component: News,
+    // News reads as a timeline — give it more room than the default
+    // window so a dozen headlines are legible without scrolling.
+    w: 720,
+    h: 560,
   },
   {
     id: 'BI',
@@ -85,7 +89,7 @@ export const FUNCTIONS = [
   { id: 'NOTE', label: 'Notes', help: 'Your private research notes for this ticker (saved to your profile).', requires: 'ticker', component: Notes },
   { id: 'MGMT', label: 'Management & Board', help: 'CEO, board, comp & interlocking boards from the latest DEF 14A.', requires: 'ticker', component: Governance },
   { id: 'WEI', label: 'World Indices', help: 'Global index snapshot.', requires: null, component: WorldIndices },
-  { id: 'TOP', label: 'Top News', help: 'Market-wide top headlines.', requires: null, component: TopNews },
+  { id: 'TOP', label: 'Top News', help: 'Market-wide top headlines.', requires: null, component: TopNews, w: 780, h: 620 },
   { id: 'MOVR', label: 'Movers', help: 'Day\'s biggest gainers and losers.', requires: null, component: Movers },
   { id: 'PM', label: 'Portfolio Manager', help: 'The whole book: positions, weights, live value & P&L, sector allocation.', requires: null, component: Portfolio },
   { id: 'SPLC', label: 'Supply Chain', help: 'Customers, suppliers & key inputs from the latest 10-K, with stated revenue concentration.', requires: 'ticker', component: SupplyChain },
