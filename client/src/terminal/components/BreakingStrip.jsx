@@ -62,23 +62,24 @@ function sourceRank(source) {
   return -1; // not a whitelisted outlet — dropped
 }
 
-// AP is prioritized and should dominate the strip — but not to the point of
-// crowding every other major out entirely. Cap AP to a strong majority of
-// the headlines (9 of 12) so it clearly leads (top positions, most slots)
-// while Reuters, Bloomberg and the other majors still keep a few slots.
-// "Mostly AP", not "only AP" — an all-AP strip reads like a stuck feed.
-const AP_CAP = 9;
+// No single news service may take more than this share of the strip. One
+// prolific wire — AP's own feed runs hundreds of items deep — would
+// otherwise crowd every other outlet out. At 45% of the slots (floored to
+// whole headlines) the highest-ranked source still clearly leads without
+// the strip collapsing onto one name, which reads like a stuck feed.
+//
+// The cap keys on the source name AFTER normalizeSource, so "Associated
+// Press" / "AP News" count as one outlet; that normalization runs on both
+// the server and demo paths before curate sees the articles. (An earlier
+// version capped only AP by matching the literal string "AP", which never
+// fired in production — the wire sends the full outlet name there — so AP
+// silently filled every slot. A share cap on every service avoids that
+// whole class of bug.)
+const PER_SOURCE_SHARE = 0.45;
 
-// AP sits alone at the top of SOURCE_RANK. We cap AP by that rank rather
-// than by matching the literal string "AP": the production wire hands us
-// the raw outlet name ("Associated Press", "AP News"), so the old
-// `/^AP$/` test never fired on the server path and AP silently filled
-// every slot — the exact monopoly this cap exists to prevent. It only
-// looked fine locally because the demo proxy normalizes the name to "AP".
-const AP_RANK = 100;
-
-// Order a set of {title,url,source,publishedAt} by source priority (AP first)
-// then newest-first, drop blocked sources, and cap the AP share.
+// Order a set of {title,url,source,publishedAt} by source priority (AP
+// first) then newest-first, drop blocked sources, and hold any one outlet
+// to its per-service share so the strip stays a mix.
 function curate(articles) {
   const ranked = articles
     .filter((a) => a && a.title && a.url)
@@ -90,13 +91,14 @@ function curate(articles) {
         : new Date(y.a.publishedAt || 0) - new Date(x.a.publishedAt || 0)
     );
 
+  const perSourceCap = Math.max(1, Math.floor(MAX_HEADLINES * PER_SOURCE_SHARE));
   const out = [];
-  let apCount = 0;
-  for (const { a, rank } of ranked) {
-    if (rank === AP_RANK) {
-      if (apCount >= AP_CAP) continue; // AP quota spent — let others through
-      apCount += 1;
-    }
+  const counts = new Map();
+  for (const { a } of ranked) {
+    const key = String(a.source || '').toLowerCase().trim();
+    const used = counts.get(key) || 0;
+    if (key && used >= perSourceCap) continue; // this outlet's share is spent
+    counts.set(key, used + 1);
     out.push(a);
     if (out.length >= MAX_HEADLINES) break;
   }
