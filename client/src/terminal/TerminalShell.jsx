@@ -107,9 +107,11 @@ export default function TerminalShell({ onExit }) {
       // A function can ask for a roomier window than the default (news
       // timelines, the portfolio book); FloatingWindow still clamps it to
       // the canvas, so an oversized default degrades gracefully on a small
-      // screen.
-      const w = fn.w || DEFAULT_W;
-      const h = fn.h || DEFAULT_H;
+      // screen. spawnWindow is called with the function *id* string, so
+      // resolve the definition before reading its size.
+      const def = getFunction(fn);
+      const w = def?.w || DEFAULT_W;
+      const h = def?.h || DEFAULT_H;
       setWindows((ws) => {
         const step = (ws.length % SPAWN_WRAP) * SPAWN_STEP;
         return [
